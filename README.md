@@ -12,7 +12,13 @@ expect test whose result is written back into the source as a comment.
 git submodule update --init
 ```
 
-Node.js is the only dependency. The LambAda compiler is itself a tree (`submodules/lambada/compiler/compile_to_dag.dag`).
+Node.js and a C++ compiler are the only dependencies. The LambAda compiler is itself a tree (`submodules/lambada/compiler/compile_to_dag.dag`).
+
+The C++ one is there because reducing trees is what a build spends its time on,
+and [`runner`](https://github.com/lambada-llc/tree-calculus/blob/main/implementation/cpp/dag-machine/runner.md)
+does that faster and in bounded memory. `build.sh` asks for it with
+`TREE_CALCULUS_RUNNER=1`; the runtime compiles it from source on first use. Drop
+that line and the same build runs on Node alone, to the same results.
 
 ## Build
 
@@ -57,6 +63,9 @@ which knows about [DAGs](https://github.com/lambada-llc/tree-calculus/tree/main/
    the result back into the source file it came from. A test symbol is named
    after that source line (`:test.Bool.Bool.12`), so no separate bookkeeping is
    needed to find it again.
+
+Steps 1 and 3 are the ones that reduce trees, and both hand that to the C++
+runner — see [Setup](#setup).
 
 ## Adding definitions
 

@@ -9,6 +9,10 @@ cd "$(dirname "$0")"
 
 # Use the pinned submodule rather than a published runtime.
 export LAMBADA_TREE_CALCULUS="$PWD/submodules/tree-calculus"
+
+# Reduce in C++ rather than in Node. The runtime compiles the runner from source
+# on first use; nothing else about the build changes.
+export TREE_CALCULUS_RUNNER=1
 lambada="node submodules/lambada/bin/lambada.js"
 dag="node submodules/tree-calculus/bin/dag.js"
 
