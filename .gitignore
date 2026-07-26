@@ -1,4 +1,8 @@
+# Hidden paths are ignored by default — everything generated here is hidden
+# (src/.bool.dag, src/.dag-bundle-canonical, .cache/lambada). Hand-written
+# hidden paths are re-included explicitly below.
 .*
 *.exe
 !.gitignore
 !.gitmodules
+!.github/

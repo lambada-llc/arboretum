@@ -1,0 +1,57 @@
+name: check
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Verify only: this workflow never writes to the repository. Combined with
+# `pull_request` (never `pull_request_target`), a fork's PR code runs with a
+# read-only, secret-less token — the worst it can do is waste runner minutes.
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          # Nothing here pushes, so don't leave a token in .git/config for the
+          # build scripts (which a PR may rewrite) to find.
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The chunk cache is content-addressed (compiler hash + chunk source), so
+      # a restored entry can only miss, never serve the wrong output for changed
+      # input. PR runs write to their own cache scope, not the base branch's.
+      - uses: actions/cache@v4
+        with:
+          path: .cache/lambada
+          key: lambada-chunks-${{ hashFiles('src/**/*.lamb', '.gitmodules') }}
+          restore-keys: lambada-chunks-
+
+      - run: ./build.sh
+
+      # The expect-test contract: regenerating the outputs must change nothing.
+      # A dirty src/ means either a bug (fix it) or an intentional change
+      # (review and commit the updated results) — run ./build.sh locally to see
+      # the same diff. --porcelain rather than `git diff`, so newly generated,
+      # still-untracked outputs count as a failure too.
+      - name: Check test outputs are unchanged
+        run: |
+          if [ -n "$(git status --porcelain -- src)" ]; then
+            echo "FAIL: test outputs changed:"
+            git --no-pager status --short -- src
+            exit 1
+          fi
+          echo "OK: test outputs unchanged"

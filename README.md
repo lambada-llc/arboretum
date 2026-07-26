@@ -18,8 +18,10 @@ Node.js is the only dependency. The LambAda compiler is itself a tree (`submodul
 
 ```bash
 ./build.sh   # compile src/**/*.lamb and refresh the `# = …` result comments
-./check.sh   # build, then fail if anything under src/ changed
 ```
+
+Then look at `git status`: a clean tree means every test still produces what is
+committed. CI runs the same build and fails on a dirty tree.
 
 ## Layout
 
@@ -28,29 +30,33 @@ src/                     LambAda sources; symbols are namespaced by directory
   core.lamb                → id, compose, fix, …          (root, unqualified)
   bool/bool.lamb           → Bool.not, Bool.and, …        (Bool.* namespace)
   expect_test.lamb         → example tests
-build/rules/             build steps (plain Node scripts)
-build/.cache/.           compiler output cache (gitignored)
+.cache/lambada/          compiler output cache (gitignored)
 ```
 
 There is no "import" statement or similar: Dependencies between modules are resolved automatically by the build system, cycles forbidden.
 
 ## Pipeline
 
-`build.sh` runs five phases:
+This repository has no build logic of its own. [`build.sh`](./build.sh) is three
+invocations of tools that live in the submodules — the
+[LambAda build tool](https://github.com/lambada-llc/lambada/tree/main/bin), which
+knows about `.lamb` sources and expect tests, and the
+[tree calculus runtime](https://github.com/lambada-llc/tree-calculus/tree/main/bin),
+which knows about [DAGs](https://github.com/lambada-llc/tree-calculus/tree/main/conventions#dag-modules):
 
-1. **Compile** — `build/rules/compile-all.js` splits each `.lamb` into top-level
-   chunks, applies the LambAda compiler to each (caching by content hash), then
-   qualifies the resulting symbols by file location: `not` in `src/bool/bool.lamb`
-   is exported as `Bool.not`. Bare top-level expressions become `:test.*` symbols.
-2. **Sort** — `dag-topo-sort.js` orders the per-file DAGs so dependencies come
-   first, and rejects duplicate symbols and dependency cycles.
-3. **Bundle** — concatenate them into `src/.dag-bundle`.
-4. **Canonicalize** — `dag-bundle-canonicalize.js` hash-conses the bundle into
-   globally unique numeric IDs.
-5. **Test** — `dag-test.js` evaluates each `:test.*` symbol and writes the
-   result back into the source file it came from. A test symbol is named after
-   that source line (`:test.Bool.Bool.12`), so no separate bookkeeping is needed
-   to find it again.
+1. **Compile** — `lambada compile` splits each `.lamb` into top-level chunks,
+   applies the LambAda compiler to each (caching by content hash), and namespaces
+   the resulting symbols by file location, so `not` in `src/bool/bool.lamb` is
+   exported as `Bool.not`. Bare top-level expressions become `:test.*` symbols.
+   The result is one `.dag` module next to each source.
+2. **Link** — `dag link` orders those modules so dependencies come first and
+   concatenates them, rejecting duplicate exports and dependency cycles;
+   `dag canonicalize` then hash-conses the whole thing into globally unique
+   numeric ids.
+3. **Test** — `lambada expect-test` evaluates each `:test.*` symbol and writes
+   the result back into the source file it came from. A test symbol is named
+   after that source line (`:test.Bool.Bool.12`), so no separate bookkeeping is
+   needed to find it again.
 
 ## Adding definitions
 
@@ -78,14 +84,16 @@ not true
 Only `# = ` lines and their `#   ` continuations are machine-owned; your own
 comments are left alone. Multi-line results wrap onto the continuation lines.
 
-An expression that evaluates to a file — `△ (△ <name> <media type>) <bytes>` —
-is written into a sibling `expect-test-out/` directory instead, and the comment
-identifies it by name and content hash:
+An expression that evaluates to a
+[file](https://github.com/lambada-llc/tree-calculus/tree/main/conventions#files)
+— `△ (△ <name> <media type>) <bytes>` — is written into a sibling
+`expect-test-out/` directory instead, and the comment identifies it by name and
+content hash:
 
 ```lamb
 # src/expect_test.lamb
 △ (△ "hello.txt" "text/plain") "Hello, LambAda!"
-# = hello.txt with hash 169f0107cf1f
+# = hello.txt sha256:169f0107cf1f…
 ```
 
 The test signal is the git diff, not the exit code of `./build.sh`, which
