@@ -1,0 +1,6 @@
+[submodule "submodules/lambada"]
+	path = submodules/lambada
+	url = https://github.com/lambada-llc/lambada.git
+[submodule "submodules/tree-calculus"]
+	path = submodules/tree-calculus
+	url = https://github.com/lambada-llc/tree-calculus.git
