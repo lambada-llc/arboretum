@@ -1,0 +1,18 @@
+_to_string = Bool.to_string
+
+id true
+# = true
+
+const true false
+# = true
+
+compose Bool.not Bool.not true
+# = true
+
+let false Bool.not
+# = true
+
+# An expression of the shape △ (△ <name> <media type>) <bytes> is written to
+# expect-test-out/ as a real file; the comment below it records the name and a content hash.
+△ (△ "hello.txt" "text/plain") "Hello, LambAda!"
+# = hello.txt sha256:169f0107cf1f04ef1f514fe755abf1d909456d69ce8d507adeea8a20eb65dbb7

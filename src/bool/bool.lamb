@@ -1,0 +1,55 @@
+false = △
+true = △ △
+match_tf = \ot \of triage of (\_ ot) _
+match_ft = \of \ot triage of (\_ ot) _
+match = match_ft
+if = \condition \then \else △ (△ else (△ △ then)) △ condition
+to_string = match_tf "true" "false"
+to_source = to_string
+_to_string = to_source
+
+not = match true false
+not false
+# = true
+not true
+# = false
+
+and = match (\_ false) id
+and false false
+# = false
+and false true
+# = false
+and true false
+# = false
+and true true
+# = true
+
+or  = match id (\_ true)
+or false false
+# = false
+or false true
+# = true
+or true false
+# = true
+or true true
+# = true
+
+equal = match not id
+equal false false
+# = true
+equal false true
+# = false
+equal true false
+# = false
+equal true true
+# = true
+
+xor = match id not
+xor false false
+# = false
+xor false true
+# = true
+xor true false
+# = true
+xor true true
+# = false
