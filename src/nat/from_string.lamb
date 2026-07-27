@@ -1,0 +1,47 @@
+# Fast decimal-string -> nat.
+#
+# The Horner step (acc*10 + digit) is fully precomputed for accumulators up to
+# 6 bits (0..63 — covering every step of 1- and 2-digit numbers, by far the
+# common case): [_horner] maps such an accumulator to a table over the digit
+# *value* (0..9, from the [_decimal_digit] lookup) holding the finished result,
+# so the hot path is three table lookups and no arithmetic at all. Indexing the
+# inner tables by digit value instead of raw char keeps them at 16 entries.
+# [_is_small] (same 6-bit shape, so it agrees with [_horner]'s coverage) picks
+# the step function *before* the accumulator is applied; accumulators that fall
+# off the table take [_step_generic]'s multiply/add chain instead. A fallback
+# closure embedded directly as [_horner]'s table fallback would be replicated
+# throughout the table tree (~70x the size); the boolean pre-dispatch keeps the
+# fallback out of the table.
+#
+# [_step_generic] re-binds the accumulator via an immediately-applied inner
+# lambda (same trick as the pre-table fold body) so [acc] lands in a single
+# argument slot instead of being distributed through the compiled chain; this
+# measurably cheapens every fold iteration — including table-hit ones, whose
+# compiled step carries [_step_generic] along — cutting e.g. "255" from 2239
+# to 291 reductions.
+#
+# Non-digit characters below 64 contribute their [Nat.sub_x_48] value, chars
+# >= 64 contribute 0 — same as before; callers only pass digit characters.
+#
+# This is the [__fastest] variant (the smaller default [from_string] lives in
+# nat.lamb). It lives in its own file rather than nat.lamb because it depends on
+# [Memo], and [Memo] in turn depends on core [Nat] (e.g. [Nat.pred] in
+# [gen_list]). Keeping it separate makes the file-level dependency graph acyclic
+# (nat -> memo -> from_string) instead of forming a Nat <-> Memo cycle.
+_decimal_digit = Memo.precompute_alt Memo.gen_ascii_low 0 Nat.sub_x_48
+_is_small = Memo.precompute_alt Memo.gen_ascii_low false (\_ true)
+_horner = Memo.precompute_alt Memo.gen_ascii_low 0
+  (\acc Memo.precompute_alt (Memo.gen_list Memo.gen_bool 4) 0 (\d Nat.add (Nat.mul_const 10 acc) d))
+_step_small = \acc \c _horner acc (_decimal_digit c)
+_step_generic = \acc \c (\a Nat.add (Nat.mul_const 10 a) (_decimal_digit c)) acc
+from_string__fastest = List.foldl (\acc Bool.match _step_generic _step_small (_is_small acc) acc) 0
+
+_to_string = Nat.to_source
+from_string__fastest "0"
+# = 0
+from_string__fastest "42"
+# = 42
+from_string__fastest "255"
+# = 255
+from_string__fastest "65535"
+# = 65535

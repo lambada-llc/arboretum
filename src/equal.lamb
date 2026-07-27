@@ -1,0 +1,104 @@
+equal__common = fix $ \self triage
+    (triage true (\_ false) (\_ \_ false))
+    (\ax triage false (self ax) (\_ \_ false))
+    (\ax \ay triage false (\_ false) (\bx \by Bool.and (self ax bx) (self ay by)))
+equal__smallest = equal__common
+_equal_body = \self \a triage
+    (\self triage true (\_ false) (\_ \_ false))
+    (\ax \self triage false (self self ax) (\_ \_ false))
+    (\ax \ay \self triage false (\_ false) (\bx \by Bool.and (self self ax bx) (self self ay by)))
+    a self
+equal__fastest = self_apply _equal_body
+equal = wait self_apply _equal_body
+# A variant of `equal` tuned for parallel reduction.
+# `equal__common`'s fork case is `Bool.and (self ax bx) (self ay by)`: `and`
+# forces its left operand to a value before it even looks at the right, so the
+# eager reduction model walks the two subtree comparisons one after the other —
+# the critical path is the whole tree (O(nodes)).
+# This variant instead emits a native fork application `△ (△ X) Y b` in the fork
+# case. Tree calculus reduces `△ (△ x) y z → (x z) (y z)`, and the parallel cost
+# model runs those two branches concurrently. Feeding the second tree `b` in as
+# the shared `z` (rather than closing over its halves) is what makes the recursive
+# work happen *inside* each branch, so both subtree comparisons — and, recursively,
+# the whole tree — collapse in parallel: the critical path becomes O(depth).
+# The conjunction is threaded through the branches so the two results still combine
+# as `(and boolL) boolR`; `b` is gated as a fork first (else the comparison is false).
+equal__parallel = fix $ \self triage
+    (triage true (\_ false) (\_ \_ false))
+    (\ax triage false (self ax) (\_ \_ false))
+    (\ax \ay \b triage false (\_ false)
+        (\_ \_ △ (△ (\bb Bool.and (self ax (Pair.fst bb)))) (\bb self ay (Pair.snd bb)) b)
+        b)
+# A variant of `equal` tuned for a compile-time-constant first argument.
+# `equal_const c` reduces to a minimal recognizer for c: a nested triage that
+# walks its argument along c's shape and returns false at the first divergence.
+# The fork case threads the tail check through `Bool.match` as a deferred branch
+# — `(self cr)` is applied to `xr` only once the head check passes — so, unlike
+# `equal`'s strict `Bool.and (cmp left) (cmp right)` (which the eager reduction
+# model forces on both sides), it short-circuits. For a constant c the recursion
+# unrolls at build time, leaving just the bare recognizer.
+equal_const = fix $ \self \c triage
+    (\x triage true (\_ false) (\_ \_ false) x)
+    (\cs \x triage false (self cs) (\_ \_ false) x)
+    (\cl \cr \x triage false (\_ false) (\xl \xr Bool.match (\_ false) (self cr) (self cl xl) xr) x)
+    c
+
+_to_string = Bool.to_source
+equal__smallest △ △
+# = true
+equal__smallest (△ △) (△ △)
+# = true
+equal__smallest △ (△ △)
+# = false
+equal__smallest (△ △ △) (△ △ △)
+# = true
+equal__smallest (△ △ △) (△ △)
+# = false
+equal__fastest △ △
+# = true
+equal__fastest (△ △) (△ △)
+# = true
+equal__fastest △ (△ △)
+# = false
+equal__fastest (△ △ △) (△ △ △)
+# = true
+equal__fastest (△ △ △) (△ △)
+# = false
+equal △ △
+# = true
+equal (△ △) (△ △)
+# = true
+equal △ (△ △)
+# = false
+equal (△ △ △) (△ △ △)
+# = true
+equal (△ △ △) (△ △)
+# = false
+equal__parallel △ △
+# = true
+equal__parallel (△ △) (△ △)
+# = true
+equal__parallel △ (△ △)
+# = false
+equal__parallel (△ △ △) (△ △ △)
+# = true
+equal__parallel (△ △ △) (△ △)
+# = false
+equal__parallel (△ (△ △) (△ △ △)) (△ (△ △) (△ △ △))
+# = true
+equal__parallel (△ (△ △) (△ △ △)) (△ (△ △) (△ △))
+# = false
+equal_const △ △
+# = true
+equal_const (△ △) (△ △)
+# = true
+equal_const △ (△ △)
+# = false
+equal_const (△ △ △) (△ △ △)
+# = true
+equal_const (△ △ △) (△ △)
+# = false
+equal_const (△ (△ △) (△ △ △)) (△ (△ △) (△ △ △))
+# = true
+equal_const (△ (△ △) (△ △ △)) (△ (△ △) (△ △))
+# = false

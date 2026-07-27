@@ -1,0 +1,49 @@
+# Bit-level shifts over the little-endian bit-list Nat encoding.
+# shr k drops the k low bits
+# (k-fold Nat.div2); shl k prepends k zero low bits — the raw doubling that,
+# unlike Nat.double, does not re-canonicalize zero (callers mask/canonicalize as
+# needed); pow2 n builds 2^n by repeated doubling.
+shr  = \k Fn.pow k Nat.div2
+shl  = \k Fn.pow k (\m △ false m)
+pow2 = \n Fn.pow n Nat.double 1
+
+# Bitwise ops over the same encoding: zip the operands and apply the boolean
+# [op] bit-by-bit, zero-padding the shorter (List.zip fills the short side with
+# △ = false), then canonicalize off the resulting high zero bits.
+_bitwise = \op \a \b Nat.canonicalize $ List.map (Pair.match op) $ List.zip a b
+xor      = _bitwise Bool.xor
+bit_and  = _bitwise Bool.and
+bit_or   = _bitwise Bool.or
+
+# Render n in base 2^bits, most-significant digit first, by slicing its bit-list
+# into bits-wide groups instead of dividing by the base. When the base is a power
+# of two each digit is a plain bit-slice (List.take/shr), so this avoids the
+# general divmod-per-digit loop that Nat.to_string_base needs — much cheaper for
+# hex and binary. [digit] maps a group's value to a character; zero renders "0".
+_digits_pow2 = \bits \digit fix $ \self List.match id
+    (\hd \tl \acc self (shr bits (△ hd tl)) (△ (digit (List.take bits (△ hd tl))) acc))
+to_string_pow2 = \bits \digit \n Bool.match (_digits_pow2 bits digit n []) "0" (Nat.is_zero n)
+
+_to_string = Nat.to_source
+shr 0 42
+# = 42
+shr 1 42
+# = 21
+shr 3 42
+# = 5
+shr 30 2147483648
+# = 2
+shl 0 5
+# = 5
+shl 1 5
+# = 10
+shl 3 1
+# = 8
+pow2 0
+# = 1
+pow2 1
+# = 2
+pow2 8
+# = 256
+pow2 10
+# = 1024

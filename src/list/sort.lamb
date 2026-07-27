@@ -1,0 +1,16 @@
+_halve = List.foldr (\e Pair.match $ \a \b Pair.create (△ e b) a) (Pair.create [] [])
+_merge = \lte fix $ \self List.match id (\ahd \atl List.match (△ ahd atl) (\bhd \btl Bool.match
+  (\ahd \atl \bhd \btl △ bhd $ self (△ ahd atl) btl)
+  (\ahd \atl \bhd \btl △ ahd $ self atl (△ bhd btl))
+  (lte ahd bhd) ahd atl bhd btl))
+sort = \lte let (_merge lte) $ \merge fix $ \self List.match [] $ \hd1 List.match [hd1] $ \hd2 \tl Pair.match (\tl1 \tl2 merge (self $ △ hd1 tl1) (self $ △ hd2 tl2)) $ _halve tl
+
+_to_string = List.to_source Nat.to_source
+sort Nat.is_lte [3; 1; 2]
+# = [1; 2; 3]
+sort Nat.is_lte []
+# = []
+sort Nat.is_lte [1]
+# = [1]
+sort Nat.is_lte [5; 3; 8; 1; 2; 7; 4; 6]
+# = [1; 2; 3; 4; 5; 6; 7; 8]

@@ -1,0 +1,4 @@
+# Exponentiation by squaring over an arbitrary monoid.
+# Kept separate from the iterating `pow` (which needs Nat) so that Nat
+# itself can reuse this without a dependency cycle.
+pow_fast = \n \mul \one \base List.foldr (\bit \acc Bool.match id (mul base) bit $ mul acc acc) one n

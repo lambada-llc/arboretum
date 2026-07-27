@@ -1,0 +1,51 @@
+none = △
+some = \x △ x
+match = \on \os triage on os _
+
+# Combine two option results: if both are [some], return [some] of the pair; otherwise [none].
+both = \a \b match none (\bv match none (\av △ $ △ av bv) a) b
+
+map = \f match none (\x some (f x))
+bind = \f match none f
+get_or = \default match default id
+alt = \a \b match b some a
+repeatedly = \f fix $ \self \x match x self $ f x
+sequence = List.foldr (\o \ol bind (\o map (\ol △ o ol) ol) o) (some [])
+to_source = \f match "none" (\x List.concat "(some " $ List.concat (f x) ")")
+
+_to_string = to_source Nat.to_source
+map Nat.succ (some 5)
+# = (some 6)
+map Nat.succ none
+# = none
+bind (\x some (Nat.add x 10)) (some 3)
+# = (some 13)
+bind (\_ none) (some 3)
+# = none
+alt (some 1) (some 2)
+# = (some 1)
+alt none (some 2)
+# = (some 2)
+alt none none
+# = none
+
+_to_string = Nat.to_source
+get_or 99 (some 5)
+# = 5
+get_or 99 none
+# = 99
+repeatedly (\x Bool.match (some (Nat.succ x)) none (Nat.is_lte 5 x)) 0
+# = 5
+repeatedly (\x Bool.match (some (Nat.succ x)) none (Nat.is_lte 5 x)) 3
+# = 5
+repeatedly (\_ none) 42
+# = 42
+
+_nat_list_to_str = List.foldr (\x \acc List.concat (Nat.to_string x) $ List.match acc (\_ \_ List.concat ", " acc) acc) ""
+_to_string = to_source (\l List.concat "[" $ List.concat (_nat_list_to_str l) "]")
+sequence [some 1; some 2; some 3]
+# = (some [1, 2, 3])
+sequence [some 1; none; some 3]
+# = none
+sequence []
+# = (some [])

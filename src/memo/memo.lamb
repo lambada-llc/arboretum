@@ -1,0 +1,126 @@
+# Tree precomputation (memoization over tree shapes).
+#
+# A "generator" describes the shape of possible tree inputs. Generators are
+# encoded directly as their own precompute function: given a fallback value
+# [alt] and a function [f], a generator returns a triage tree mapping
+# matching inputs to f's results and other inputs to [alt].
+#
+# This direct encoding lets the recursive walk over a generator's structure
+# happen via plain function application — no [fix] / self-application
+# machinery per step. The common shapes below are built from dedicated
+# constructors whose walk bodies contain no shape dispatch at all — the
+# shape is baked into the body. For deeply-structured generators like
+# [gen_byte] (8 nested forks, hundreds of precompute invocations per table),
+# this keeps the per-node cost of bundle reduction minimal.
+
+# Dedicated per-shape constructors. Each accepts △ as input; [mk_gen_stem]
+# additionally accepts stems of [sg]-shaped trees, [mk_gen_fork] forks of an
+# [g1]-shaped left and [g2]-shaped right tree.
+gen_leaf = \alt \f triage (f △) (\_ alt) (\_ \_ alt)
+mk_gen_stem = \sg \alt \f triage (f △) (sg alt $ \u f $ △ u) (\_ \_ alt)
+mk_gen_fork = \g1 \g2 \alt \f triage (f △) (\_ alt) (g1 (\_ alt) $ \u g2 alt $ \v f $ △ u v)
+
+# General constructor from per-shape options.
+# [leaf] : option of △  (is △ a valid input?)
+# [stem] : option of generator  (which sub-shape extends △ to a stem?)
+# [fork] : option of (generator, generator)  (which sub-shapes form a fork?)
+mk_generator = \leaf \stem \fork \alt \f triage
+    (Option.match alt f leaf)
+    (Option.match (\_ alt) (\sg sg alt (\u f $ △ u)) stem)
+    (Option.match (\_ \_ alt) (Pair.match $ \g1 \g2 g1 (\_ alt) (\u g2 alt (\v f $ △ u v))) fork)
+
+gen_bool = mk_gen_stem gen_leaf
+gen_any1 = \g mk_generator (Option.some △) (Option.some g) (Option.some $ △ g g)
+gen_list = \gelem fix $ \self \max_len List.match
+  gen_leaf
+  (\hd \tl mk_gen_fork gelem $ self $ Nat.pred $ △ hd tl)
+  max_len
+gen_byte = gen_list gen_bool 8
+# 7-bit ASCII shape. For predicates that are constant beyond code point 127
+# (i.e. agree with the precompute fallback there, as ASCII classifiers do),
+# this builds the same table as [gen_byte] at roughly half the cost: bytes
+# >= 128 fall through to the fallback instead of being enumerated.
+gen_ascii = gen_list gen_bool 7
+# 6-bit ASCII shape. For predicates that are constant beyond code point 63
+# (e.g. [is_digit], [is_whitespace], [is_newline], whose true sets all live
+# below 64), this halves [gen_ascii]'s cost again: bytes >= 64 fall through
+# to the fallback instead of being enumerated, yielding the same table.
+gen_ascii_low = gen_list gen_bool 6
+# Like [mk_gen_fork] but rejects △ (a number ending here) into [alt], pinning
+# the input to an exact bit-length instead of "at most".
+mk_gen_fork_strict = \g1 \g2 \alt \f triage alt (\_ alt) (g1 (\_ alt) $ \u g2 alt $ \v f $ △ u v)
+# Matches only the set bit (boolean true = △△).
+_gen_set = \alt \f triage alt (gen_leaf alt $ \u f $ △ u) (\_ \_ alt)
+# Upper-half ASCII shape: exactly-7-bit code points 64..127 (high bit set). The
+# mirror image of [gen_ascii_low]: for predicates that are constant (== fallback)
+# below 64 — e.g. [is_uppercase], [is_lowercase], [is_alpha], whose true sets
+# live in 65..122 — this builds the same table as [gen_ascii] while enumerating
+# only the 64 upper code points. Below 64 the strict forks fall through to the
+# fallback; the final [_gen_set] pins the high bit so the lower half is skipped.
+gen_ascii_high = mk_gen_fork_strict gen_bool $ mk_gen_fork_strict gen_bool $ mk_gen_fork_strict gen_bool $ mk_gen_fork_strict gen_bool $ mk_gen_fork_strict gen_bool $ mk_gen_fork_strict gen_bool $ mk_gen_fork_strict _gen_set gen_leaf
+
+# Precompute a function over all inputs matching a generator shape.
+# For inputs outside the shape, returns the fallback value [alt].
+# A generator IS the precompute function — application is the identity.
+precompute_alt = \g g
+
+# Precompute a multi-argument function with fallback.
+# Curried arguments are precomputed left-to-right over the given generators.
+precompute_alt_multi = \alt List.foldr (\g \acc \f g alt $ \x acc $ f x) (\f f)
+
+# Like precompute_alt but without a fallback (behavior undefined outside shape).
+precompute = \g g _
+
+# Like precompute_alt_multi but without a fallback.
+precompute_multi = List.foldr (\g \acc \f g _ $ \x acc $ f x) (\f f)
+
+# Tests: precompute Bool.not
+_not = precompute gen_bool Bool.not
+_to_string = Bool.to_source
+_not false
+# = true
+_not true
+# = false
+
+# Tests: precompute_multi Bool.and (two boolean args)
+_and = precompute_multi [gen_bool; gen_bool] Bool.and
+_and false false
+# = false
+_and false true
+# = false
+_and true false
+# = false
+_and true true
+# = true
+
+# Tests: precompute_alt with fallback
+_not_alt = precompute_alt gen_bool false Bool.not
+_not_alt false
+# = true
+_not_alt true
+# = false
+
+# Tests: dedicated shape constructors agree with the general mk_generator
+equal (gen_bool false Bool.not) (mk_generator (Option.some △) (Option.some gen_leaf) Option.none false Bool.not)
+# = true
+equal (mk_gen_fork gen_bool gen_leaf false id) (mk_generator (Option.some △) Option.none (Option.some $ △ gen_bool gen_leaf) false id)
+# = true
+
+# Tests: eval cost reduction from precomputation
+_to_string = id
+Bench.run [Bool.and; true; true]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 1 0  0  1  0 |   0   2
+#    1 |  1  1 1 1  0  0  0 |   2   2
+Bench.run [_and; true; true]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 0 0  1  1  0 |   0   2
+#    0 |  0  0 0 0  1  1  0 |   0   2
+Bench.run [Bool.and; true; false]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 1 0  0  1  0 |   0   2
+#    1 |  1  1 1 1  0  0  0 |   2   2
+Bench.run [_and; true; false]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 0 0  1  1  0 |   0   2
+#    0 |  0  0 0 0  1  0  0 |   0   1

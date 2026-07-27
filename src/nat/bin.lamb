@@ -1,0 +1,56 @@
+to_bin = Nat.to_string_pow2 1 (Nat.add '0')
+from_bin = List.foldl (\acc \c Nat.add (Nat.double acc) (Nat.sub_x_48 c)) 0
+# Render a bit list (LSB-first bools) as '0'/'1' chars prepended onto [tl]
+# (difference-list style).
+bits_to_dstring = \n \tl List.foldr (\h \a \tl △ (Bool.match '0' '1' h) $ a tl) id n tl
+to_bits_dstring = \n List.match (△ '0') (\hd \tl bits_to_dstring $ △ hd tl) n
+
+_to_string = String.to_source
+to_bin 0
+# = "0"
+to_bin 1
+# = "1"
+to_bin 2
+# = "10"
+to_bin 5
+# = "101"
+to_bin 42
+# = "101010"
+to_bin 255
+# = "11111111"
+
+_to_string = String.to_source
+to_bits_dstring 0 ""
+# = "0"
+to_bits_dstring 1 ""
+# = "1"
+to_bits_dstring 5 ""
+# = "101"
+to_bits_dstring 42 ""
+# = "010101"
+to_bits_dstring 255 ""
+# = "11111111"
+to_bits_dstring 0 " rest"
+# = "0 rest"
+to_bits_dstring 42 " rest"
+# = "010101 rest"
+
+_to_string = Nat.to_source
+from_bin "0"
+# = 0
+from_bin "1"
+# = 1
+from_bin "10"
+# = 2
+from_bin "101"
+# = 5
+from_bin "101010"
+# = 42
+from_bin "11111111"
+# = 255
+from_bin (to_bin 42)
+# = 42
+from_bin (to_bin 255)
+# = 255
+from_bin (to_bin 1337)
+# = 1337

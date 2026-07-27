@@ -1,0 +1,41 @@
+size__smallest = \x (fix $ \self \x compose Nat.succ__smallest $ triage id self (\x \y compose (self x) (self y)) x) x 0
+_size_body = \self \x compose Nat.succ__fastest $ triage (\self id) (\l \self self self l) (\l \r \self compose (self self l) (self self r)) x self
+size__fastest = \x (self_apply _size_body) x 0
+size = \x (wait self_apply _size_body) x 0
+
+_to_string = Nat.to_source
+size fix
+# = 64
+
+size__smallest △
+# = 1
+size__smallest (△ △)
+# = 2
+size__smallest (△ △ △)
+# = 3
+size__smallest (△ (△ △) (△ △))
+# = 5
+size__smallest size__smallest
+# = 224
+
+size__fastest △
+# = 1
+size__fastest (△ △)
+# = 2
+size__fastest (△ △ △)
+# = 3
+size__fastest (△ (△ △) (△ △))
+# = 5
+size__fastest size__fastest
+# = 463
+
+size △
+# = 1
+size (△ △)
+# = 2
+size (△ △ △)
+# = 3
+size (△ (△ △) (△ △))
+# = 5
+size size
+# = 262

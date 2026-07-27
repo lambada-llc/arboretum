@@ -1,0 +1,40 @@
+# Both match branches take the char/nat as an argument, so only the selected
+# range's conversion is computed.
+_from_char = \c Bool.match
+    (\c Bool.match (\c Nat.add 10 (Nat.sub_x_65 c)) (\c Nat.add 10 (Nat.sub_x_97 c)) (Nat.is_lte 'a' c) c)
+    Nat.sub_x_48
+    (Nat.is_lte c '9') c
+_to_char = \n Bool.match (\n Nat.add 'A' $ Nat.sub n 10) (Nat.add '0') (Nat.is_lte n 9) n
+from_hex = Nat.from_string_base 16 _from_char
+to_hex = Nat.to_string_pow2 4 _to_char
+byte_to_hex = \byte [ _to_char (Nat.shr 4 byte); _to_char (List.take 4 byte) ]
+
+_to_string = Nat.to_source
+from_hex "0"
+# = 0
+from_hex "FF"
+# = 255
+from_hex "ff"
+# = 255
+from_hex "10"
+# = 16
+from_hex "DEADBEEF"
+# = 3735928559
+
+_to_string = String.to_source
+to_hex 0
+# = "0"
+to_hex 255
+# = "FF"
+to_hex 16
+# = "10"
+to_hex 3735928559
+# = "DEADBEEF"
+byte_to_hex 0
+# = "00"
+byte_to_hex 15
+# = "0F"
+byte_to_hex 255
+# = "FF"
+byte_to_hex 171
+# = "AB"

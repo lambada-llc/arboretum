@@ -1,0 +1,11 @@
+replace_char = \old \new List.map (\c Bool.match c new (equal old c))
+
+_to_string = String.to_source
+replace_char 'a' 'x' "banana"
+# = "bxnxnx"
+replace_char '.' '-' "1.2.3"
+# = "1-2-3"
+replace_char 'z' '!' "hello"
+# = "hello"
+replace_char '&' '"' "a=&1&"
+# = "a="1""

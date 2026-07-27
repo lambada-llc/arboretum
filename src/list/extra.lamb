@@ -1,0 +1,266 @@
+head_or = \default List.match default (\hd \_ hd)
+is_empty = List.match true (\_ \_ false)
+is_not_empty = List.match false (\_ \_ true)
+length__smallest = fix $ \self List.match 0 (\_ \tl Nat.succ__smallest (self tl))
+length__fastest = self_apply $ \self \l List.match (\_ 0) (\_ \tl \self Nat.succ__fastest (self self tl)) l self
+length = fix $ \self List.match 0 (\_ \tl Nat.succ__fastest (self tl))
+any = \f List.foldr (\e \a Bool.or (f e) a) false
+all = \f List.foldr (\e \a Bool.and (f e) a) true
+head = List.match Option.none (\h \_ Option.some h)
+tail = List.match Option.none (\_ \t Option.some t)
+nth = fix $ \self \n List.match Option.none (\h \t Bool.match (self (Nat.pred n) t) (Option.some h) (Nat.is_zero n))
+take = fix $ \self triage (\_ []) _ (\nhd \ntl List.match [] (\hd \tl △ hd $ self (Nat.pred $ △ nhd ntl) tl))
+drop = fix $ \self triage (\l l) _ (\nhd \ntl List.match [] (\hd \tl self (Nat.pred $ △ nhd ntl) tl))
+nth_or = \default fix $ \self \i List.match default (\h \t Nat.match h (\pred self pred t) i)
+set_nth = \i \v \l List.concat (take i l) (△ v (drop (Nat.succ i) l))
+intersperse = \sep List.match [] (\h \t △ h (List.foldr (\e \a △ sep (△ e a)) [] t))
+join = \sep \l List.concat_list (intersperse sep l)
+_range_body = \self \n \acc List.match
+    (\_ \acc acc)
+    (\hd \tl \self \acc let (Nat.pred__fastest (△ hd tl)) $ \n1 self self n1 (△ n1 acc))
+    n self acc
+range__smallest = \n (fix $ \self \n \acc List.match acc (\hd \tl let (Nat.pred__smallest (△ hd tl)) $ \n1 self n1 (△ n1 acc)) n) n []
+range__fastest = \n (self_apply _range_body) n []
+range = \n (wait self_apply _range_body) n []
+
+enclose = \open \sep \close \f \l List.concat_list [open; join sep (List.map f l); close]
+to_source = enclose "[" "; " "]"
+
+_to_string = Nat.to_source
+head_or 0 []
+# = 0
+head_or 0 [5; 6; 7]
+# = 5
+head_or 99 []
+# = 99
+head_or 99 [42]
+# = 42
+
+_to_string = Bool.to_source
+is_empty []
+# = true
+is_empty [1; 2]
+# = false
+is_not_empty []
+# = false
+is_not_empty [1; 2]
+# = true
+any (equal 3) [1; 2; 3]
+# = true
+any (equal 5) [1; 2; 3]
+# = false
+all (equal 3) [3; 3; 3]
+# = true
+all (equal 3) [3; 1; 3]
+# = false
+
+_to_string = Option.to_source Nat.to_source
+head [5; 6; 7]
+# = (some 5)
+nth 1 [10; 20; 30]
+# = (some 20)
+nth 3 [10; 20; 30]
+# = none
+
+_to_string = Nat.to_source
+nth_or 0 1 [10; 20; 30]
+# = 20
+nth_or 99 5 [10; 20; 30]
+# = 99
+
+_to_string = Option.to_source (to_source Nat.to_source)
+tail [5; 6; 7]
+# = (some [6; 7])
+
+_to_string = to_source Nat.to_source
+take 2 [4; 5; 6]
+# = [4; 5]
+drop 1 [4; 5; 6]
+# = [5; 6]
+set_nth 1 99 [4; 5; 6]
+# = [4; 99; 6]
+set_nth 0 7 [4; 5; 6]
+# = [7; 5; 6]
+intersperse 9 [1; 2; 3]
+# = [1; 9; 2; 9; 3]
+range 10
+# = [0; 1; 2; 3; 4; 5; 6; 7; 8; 9]
+
+filter_map = \f List.foldr (\e \a triage id (\e △ e) _ (f e) a) []
+concat_map = \f List.foldr (\e \a List.concat (f e) a) []
+partition = \f List.foldr (\e \acc Pair.match (\pass \fail Bool.match (△ pass (△ e fail)) (△ (△ e pass) fail) (f e)) acc) (△ [] [])
+chunk = \n fix $ \self \l List.match [] (\_ \_ △ (take n l) (self $ drop n l)) l
+
+# Both Bool.match branches are deferred behind \tt (bound to the tail) and
+# forced by the trailing [t]: under eager reduction, passing [self t] directly
+# as an argument would reduce the recursive call even when [f h] is false,
+# making span scan the whole list regardless of where the predicate first
+# fails (O(n) per call). Binding the tail in each branch keeps [self tt] under
+# a lambda until the true branch is actually selected, so span short-circuits.
+span = \f fix $ \self List.match
+  (Pair.create [] [])
+  (\h \t Bool.match
+    (\tt Pair.create [] (△ h tt))
+    (\tt Pair.match (\taken \rest Pair.create (△ h taken) rest) (self tt))
+    (f h)
+    t)
+take_while = \f \l Pair.fst (span f l)
+drop_while = \f \l Pair.snd (span f l)
+
+mapi = \f \l (fix $ \self List.match (\_ []) (\hd \tl \i △ (f hd i) $ self tl (Nat.succ i))) l 0
+split_on = \sep List.foldr (\hd Bool.match (Pair.match $ \cur \acc △ (△ hd cur) acc) (Pair.match $ \cur \acc △ [] (△ cur acc)) $ equal sep hd) (△ [] [])
+lookup = \key List.foldr (\pair \acc Pair.match (\k \v Bool.match acc (Option.some v) (equal key k)) pair) Option.none
+lookup_or = \default \key \pairs Option.get_or default $ lookup key pairs
+zip_with = \f fix $ \self \l1 \l2 List.match [] (\h1 \t1 List.match [] (\h2 \t2 △ (f h1 h2) (self t1 t2)) l2) l1
+unzip = List.foldr (\e Pair.match $ \a \b Pair.match (\ea \eb △ (△ ea a) (△ eb b)) e) (△ [] [])
+is_prefix = fix $ \self List.match (\_ true) (\ph \pt List.match false (\sh \st Bool.match false (self pt st) (equal ph sh)))
+
+_to_string = Nat.to_source
+length__smallest []
+# = 0
+length__smallest [1; 2; 3]
+# = 3
+length__smallest [1; 2; 3; 4; 5; 6; 7; 8]
+# = 8
+length__fastest []
+# = 0
+length__fastest [1; 2; 3]
+# = 3
+length__fastest [1; 2; 3; 4; 5; 6; 7; 8]
+# = 8
+length (range 4)
+# = 4
+
+_to_string = String.to_source
+join ", " ["hello"; "world"; "!"]
+# = "hello, world, !"
+join ", " []
+# = ""
+join ", " ["solo"]
+# = "solo"
+join " + " ["a"; "b"; "c"]
+# = "a + b + c"
+
+_to_string = to_source Nat.to_source
+mapi (const id) ["a"; "b"; "c"]
+# = [0; 1; 2]
+filter_map (\x Bool.match Option.none (Option.some x) (Nat.is_lte 3 x)) [1; 5; 2; 4; 3]
+# = [5; 4; 3]
+filter_map (\_ Option.none) [1; 2; 3]
+# = []
+filter_map Option.some [4; 5]
+# = [4; 5]
+concat_map (\x [x; x]) [1; 2; 3]
+# = [1; 1; 2; 2; 3; 3]
+concat_map (\_ []) [1; 2; 3]
+# = []
+
+_to_string = Pair.to_source (to_source Nat.to_source) (to_source Nat.to_source)
+partition (Nat.is_lte 3) [1; 5; 2; 4; 3]
+# = (△ [5; 4; 3] [1; 2])
+partition (\_ false) [1; 2; 3]
+# = (△ [] [1; 2; 3])
+
+_to_string = to_source (to_source Nat.to_source)
+chunk 2 [1; 2; 3; 4; 5]
+# = [[1; 2]; [3; 4]; [5]]
+chunk 3 [1; 2; 3; 4; 5; 6]
+# = [[1; 2; 3]; [4; 5; 6]]
+chunk 2 []
+# = []
+
+_to_string = String.to_source
+join "|" (split_on ',' "a,b,c")
+# = "a|b|c"
+join "|" (split_on ',' "abc")
+# = "abc"
+join ";" (split_on ',' "x,y,z")
+# = "x;y;z"
+join "." (split_on '/' "a/b/c/d")
+# = "a.b.c.d"
+
+_to_string = Nat.to_source
+length (split_on ',' ",")
+# = 2
+length (split_on ',' "")
+# = 1
+
+_to_string = Pair.to_source (to_source Nat.to_source) (to_source Nat.to_source)
+span (\x Nat.is_lte x 3) [1; 2; 3; 4; 5]
+# = (△ [1; 2; 3] [4; 5])
+span (\x Nat.is_lte x 3) [5; 1; 2]
+# = (△ [] [5; 1; 2])
+span (\_ true) [1; 2; 3]
+# = (△ [1; 2; 3] [])
+span (\_ false) [1; 2; 3]
+# = (△ [] [1; 2; 3])
+span (Nat.is_lte 2) [3; 5; 1; 4]
+# = (△ [3; 5] [1; 4])
+
+_to_string = to_source Nat.to_source
+take_while (\x Nat.is_lte x 3) [1; 2; 3; 4; 5]
+# = [1; 2; 3]
+take_while (\_ true) [1; 2; 3]
+# = [1; 2; 3]
+take_while (\_ false) [1; 2; 3]
+# = []
+drop_while (\x Nat.is_lte x 3) [1; 2; 3; 4; 5]
+# = [4; 5]
+drop_while (\_ true) [1; 2; 3]
+# = []
+drop_while (\_ false) [1; 2; 3]
+# = [1; 2; 3]
+
+_to_string = Option.to_source Nat.to_source
+lookup "a" [△ "a" 1; △ "b" 2; △ "c" 3]
+# = (some 1)
+lookup "c" [△ "a" 1; △ "b" 2; △ "c" 3]
+# = (some 3)
+lookup "d" [△ "a" 1; △ "b" 2; △ "c" 3]
+# = none
+lookup "b" [△ "b" 10; △ "b" 20]
+# = (some 10)
+
+_to_string = Nat.to_source
+lookup_or 0 "a" [△ "a" 1; △ "b" 2; △ "c" 3]
+# = 1
+lookup_or 0 "d" [△ "a" 1; △ "b" 2; △ "c" 3]
+# = 0
+lookup_or 99 "x" []
+# = 99
+
+_to_string = to_source Nat.to_source
+zip_with Nat.add [1; 2; 3] [10; 20; 30]
+# = [11; 22; 33]
+zip_with Nat.add [1; 2] [10; 20; 30]
+# = [11; 22]
+zip_with Nat.add [1; 2; 3] [10; 20]
+# = [11; 22]
+zip_with Nat.add [] [10; 20]
+# = []
+zip_with Nat.add [1; 2] []
+# = []
+
+_to_string = Pair.to_source (to_source Nat.to_source) (to_source Nat.to_source)
+unzip [△ 1 10; △ 2 20; △ 3 30]
+# = (△ [1; 2; 3] [10; 20; 30])
+unzip [△ 1 10]
+# = (△ [1] [10])
+unzip []
+# = (△ [] [])
+
+_to_string = Bool.to_source
+is_prefix [] [1; 2; 3]
+# = true
+is_prefix [1; 2] [1; 2; 3]
+# = true
+is_prefix [1; 2; 3] [1; 2; 3]
+# = true
+is_prefix [1; 2; 3; 4] [1; 2; 3]
+# = false
+is_prefix [2; 3] [1; 2; 3]
+# = false
+is_prefix [1] []
+# = false
+is_prefix [] []
+# = true

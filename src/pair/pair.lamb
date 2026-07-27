@@ -1,0 +1,9 @@
+create = △
+match = \op triage _ _ op
+let = \p \op match op p
+fst = match (\a \_ a)
+snd = match (\_ \b b)
+swap = match (\a \b create b a)
+map_fst = \f match (\a \b create (f a) b)
+map_snd = \f match (\a \b create a (f b))
+map_both = \f match (\a \b create (f a) (f b))

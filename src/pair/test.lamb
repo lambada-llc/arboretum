@@ -1,0 +1,17 @@
+_to_string = Pair.to_source Nat.to_source Nat.to_source
+Pair.swap (Pair.create 1 2)
+# = (△ 2 1)
+Pair.map_fst Nat.succ (Pair.create 10 20)
+# = (△ 11 20)
+Pair.map_snd Nat.succ (Pair.create 10 20)
+# = (△ 10 21)
+Pair.map_both Nat.succ (Pair.create 10 20)
+# = (△ 11 21)
+
+_to_string = Pair.to_source String.to_source Nat.to_source
+Pair.map_fst (\s List.concat s "!") (Pair.create "hi" 42)
+# = (△ "hi!" 42)
+
+_to_string = Pair.to_source Bool.to_source Bool.to_source
+Pair.swap (Pair.create true false)
+# = (△ false true)

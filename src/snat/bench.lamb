@@ -1,0 +1,27 @@
+_to_string = Nat.to_source
+size Snat.size__smallest
+# = 125
+size Snat.size__fastest
+# = 261
+size Snat.size
+# = 161
+
+_to_string = id
+Bench.run [Snat.size__smallest; △]
+# = oh | 0a 0b  1  2 3a 3b 3c | alc red
+#    2 |  8 14 16 19  1  0  0 |  22  36
+Bench.run [Snat.size__fastest;  △]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    2 |  2  2 6 5  1  0  0 |   4  12
+Bench.run [Snat.size;           △]
+# = oh | 0a 0b  1  2 3a 3b 3c | alc red
+#    4 |  4  9 13 13  1  0  0 |  13  27
+Bench.run [Snat.size__smallest; Snat.size__smallest]
+# =  oh |  0a   0b    1    2 3a 3b 3c |  alc  red
+#   165 | 993 1821 2064 2439 40 46 39 | 2814 4628
+Bench.run [Snat.size__fastest;  Snat.size__smallest]
+# =  oh |  0a   0b    1    2 3a 3b 3c |  alc  red
+#   328 | 569 1267 1590 1713 40 46 39 | 1836 3428
+Bench.run [Snat.size;           Snat.size__smallest]
+# =  oh |  0a   0b    1    2 3a 3b 3c |  alc  red
+#   330 | 571 1274 1597 1721 40 46 39 | 1845 3443

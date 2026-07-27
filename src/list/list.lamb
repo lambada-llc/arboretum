@@ -1,0 +1,44 @@
+cons = △
+match = \oe \oc triage oe _ oc
+# fold has no distinct __fastest: the fix-based form is already optimal. Two
+# rewrites were measured and lose (see git history): (1) self_apply open
+# recursion duplicates the captured combining fn each step (bigger + slower);
+# (2) a shared-dispatcher tree (dispatch on list, accumulator threaded after)
+# only beats fix for expensive combiners (binary addition), but regresses the
+# cheap boolean/cons combiners that dominate the library. Don't retry.
+# The same holds for filter and reverse: bespoke self_apply recursions
+# (predicate/accumulator threaded through the dispatch) measured bigger AND
+# slower than the fold-based forms below (filter red 212→538, reverse 329→376
+# on the 5/8-element benches). Don't retry those either.
+foldr__common = \f \x fix $ \self match x (\hd \tl f hd (self tl))
+foldr__smallest = foldr__common
+foldr__fastest = foldr__common
+foldr = foldr__fastest
+foldl__common = \f fix $ \self \x match x (\hd \tl self (f x hd) tl)
+foldl__smallest = foldl__common
+foldl__fastest = foldl__common
+foldl = foldl__fastest
+map__common = \f fix $ \self match [] (\hd \tl △ (f hd) (self tl))
+map__smallest = map__common
+map__fastest = map__common
+map = map__fastest
+filter = \f foldr (\e \a triage id (\_ △ e) △ (f e) a) []
+_zip_map = \f (\r r r) $ \self \l match (\_ []) (\hd \tl \self △ (f hd) (self self tl)) l self
+zip = fix $ \self \l1 \l2
+    (match
+        (\l2 _zip_map (\item2 △ △ item2))
+        (\h1 \t1 match (_zip_map (\item1 △ item1 △)) (\h2 \t2 △ (△ h1 h2)))
+        l1 l2)
+    (match
+        (\l2 l2)
+        (\h1 \t1 match (△ h1 t1) (\h2 \t2 self t1 t2))
+        l1 l2)
+reverse = foldl (\a \b △ b a) []
+concat__common = \a \b (fix $ \self match b (\hd \tl △ hd (self tl))) a
+concat__smallest = concat__common
+concat__fastest = concat__common
+concat = concat__fastest
+concat_list = foldr concat ""
+_twice = \ll \tail ll (ll tail)
+_repeat = fix $ \self \n \e match id (\hd \tl compose (Bool.match id (Pair.create e) hd) (_twice (self tl e))) n
+repeat = \n \e _repeat n e []

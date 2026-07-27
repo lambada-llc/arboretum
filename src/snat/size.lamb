@@ -1,0 +1,79 @@
+# size :: tree -> snat (count of nodes)
+_s = \a \b \c a c $ b c
+_triage = \self triage id self $ \u
+      _s
+        (\v compose (self v))
+        (\v self u)
+_functional_smallest = \self \x compose Snat.succ $ _triage self x
+size__smallest = \x (fix _functional_smallest) x Snat.zero
+
+# size__smallest is search-verified minimal at 125 nodes: seed wrapper (5) + fix knot
+# (44: the 17-node unfolder _h below, paid twice) + body (76). Exhaustive enumeration
+# (~150M candidates: all knot unfolders to 16 nodes, wrapper/dispatch shells to 14,
+# fork-case replacements to enum-15 with combinator atoms, every normal-form subtree
+# against all trees up to 11 nodes) plus ~60 reformulations through the compiler
+# (best alternative: 129) found nothing smaller, but surfaced five independent
+# same-size substitution sites — 31 sibling 125-node normal forms. One per site:
+#  _j for id as the leaf case                              (size__smallest2)
+#  _hj for _h in either knot slot                          (size__smallest3/4)
+#  _b2 for compose at either fork-case composition site    (size__smallest5/6)
+_j = △ (△ △ △) △
+_b2 = △ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △))
+_h = △ (△ (△ △ (△ (△ (△ (△ (△ (△ (△ △)) △)) (△ △)))))) (△ △)
+_hj = △ (△ (△ △ (△ (△ (△ (△ (△ (△ △ △) △)) (△ △)))))) (△ △)
+_f2 = \self \x compose Snat.succ $ triage _j self (\u _s (\v compose (self v)) (\v self u)) x
+size__smallest2 = \x (fix _f2) x Snat.zero
+size__smallest3 = △ (△ (△ (△ _hj) (△ △ (△ (△ (△ △ _functional_smallest)) (△ (△ _h)))))) (△ △ △)
+size__smallest4 = △ (△ (△ (△ _h) (△ △ (△ (△ (△ △ _functional_smallest)) (△ (△ _hj)))))) (△ △ △)
+_f5 = \self \x compose Snat.succ $ triage id self (\u _s (\v _b2 (self v)) (\v self u)) x
+size__smallest5 = \x (fix _f5) x Snat.zero
+_q6 = △ (△ (△ (△ (△ △ _b2)) (△ (△ (△ △ _s)) (△ (△ (△ △ compose)))))) (△ (△ (△ △ (△ △))))
+_f6 = \self \x compose Snat.succ $ triage id self (_q6 self) x
+size__smallest6 = \x (fix _f6) x Snat.zero
+
+_size_body = \self \x compose △ $ triage (\self id) (\u \self self self u) (\v \u \self compose (self self u) (self self v)) x self
+size__fastest = \x (self_apply _size_body) x △
+size = \x (wait self_apply _size_body) x △
+
+_to_string = Snat.to_string
+size__smallest $ △
+# = 1
+size__smallest $ △ △
+# = 2
+size__smallest $ △ △ △
+# = 3
+size__smallest $ id
+# = 5
+
+size__fastest $ △
+# = 1
+size__fastest $ △ △
+# = 2
+size__fastest $ △ △ △
+# = 3
+size__fastest $ id
+# = 5
+
+size__smallest2 $ id
+# = 5
+size__smallest3 $ id
+# = 5
+size__smallest4 $ id
+# = 5
+size__smallest5 $ id
+# = 5
+size__smallest6 $ id
+# = 5
+
+size size__smallest
+# = 125
+size size__smallest2
+# = 125
+size size__smallest3
+# = 125
+size size__smallest4
+# = 125
+size size__smallest5
+# = 125
+size size__smallest6
+# = 125

@@ -1,0 +1,14 @@
+
+_to_string = Snat.to_string
+Fn.pow_snat 42 Snat.succ Snat.zero
+# = 42
+
+_to_string = Nat.to_source
+Fn.pow 42 Nat.succ Nat.zero
+# = 42
+Fn.pow_fast 0 Nat.mul 1 7
+# = 1
+Fn.pow_fast 3 Nat.mul 1 5
+# = 125
+Fn.pow_fast 10 Nat.mul 1 2
+# = 1024

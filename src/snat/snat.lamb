@@ -1,0 +1,23 @@
+zero = △
+succ = \sn △ sn
+one = succ zero
+two = succ one
+three = succ two
+four = succ three
+add = \a fix $ \self triage a (\pred △ $ self pred) _
+sub = fix $ \self \a \b triage (△ a) (\pb triage △ (\pa self pa pb) _ a) _ b
+is_lt = \a \b Option.match true (\_ false) $ sub a b
+match = \zero_case \succ_case \n triage zero_case (\pred succ_case pred) _ n
+is_zero = match true (\_ false)
+
+_to_string = Bool.to_source
+is_zero zero
+# = true
+is_zero one
+# = false
+is_lt zero one
+# = true
+is_lt one one
+# = false
+is_lt two one
+# = false

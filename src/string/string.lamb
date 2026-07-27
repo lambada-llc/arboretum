@@ -1,0 +1,48 @@
+to_source = \s △ '"' $ List.concat s ['"']
+
+_length = List.foldr (\_ Nat.succ) 0
+pad_left = \width \pad_char \s
+  let (_length s) $ \len
+  Bool.match (\len List.concat (List.repeat (Nat.sub width len) pad_char) s) (\_ s) (Nat.is_lte width len) len
+
+_to_string = to_source
+pad_left 5 ' ' "hi"
+# = "   hi"
+pad_left 5 ' ' "hello"
+# = "hello"
+pad_left 5 ' ' "toolong"
+# = "toolong"
+pad_left 3 '0' "7"
+# = "007"
+pad_left 0 ' ' "x"
+# = "x"
+pad_left 4 '.' ""
+# = "...."
+
+# UTF-8 encode a string (list of unicode code points) into a byte list,
+# e.g. for file tests, whose bytes are written to disk one element each
+_shr6 = \n Nat.div2 $ Nat.div2 $ Nat.div2 $ Nat.div2 $ Nat.div2 $ Nat.div2 n
+_low6 = \n Nat.sub n (Nat.mul_const 64 (_shr6 n))
+_utf8_char = \c Bool.match
+  (\c Bool.match
+    (\c Bool.match
+      (\c [Nat.add 240 (_shr6 (_shr6 (_shr6 c))); Nat.add 128 (_low6 (_shr6 (_shr6 c))); Nat.add 128 (_low6 (_shr6 c)); Nat.add 128 (_low6 c)])
+      (\c [Nat.add 224 (_shr6 (_shr6 c)); Nat.add 128 (_low6 (_shr6 c)); Nat.add 128 (_low6 c)])
+      (Nat.is_lt c 65536) c)
+    (\c [Nat.add 192 (_shr6 c); Nat.add 128 (_low6 c)])
+    (Nat.is_lt c 2048) c)
+  (\c [c])
+  (Nat.is_lt c 128) c
+to_utf8 = List.foldr (\c \acc List.concat (_utf8_char c) acc) ""
+
+_to_string = List.foldr (\b \acc List.concat (Nat.to_source b) (△ ' ' acc)) ""
+to_utf8 "A"
+# = 65 
+to_utf8 "¶"
+# = 194 182 
+to_utf8 "△"
+# = 226 150 179 
+to_utf8 "↦"
+# = 226 134 166 
+to_utf8 "🤡"
+# = 240 159 164 161 

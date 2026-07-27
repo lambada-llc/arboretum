@@ -1,0 +1,441 @@
+zero = △
+_succ_body = \self \n List.match 1 (\hd \tl Bool.match (\_ △ true) (\self \tl △ false $ self self tl) hd self tl) n
+succ__smallest = wait self_apply _succ_body
+succ__fastest = self_apply _succ_body
+succ = succ__fastest
+_pred_body = \self \n List.match 0 (\hd \tl Bool.match (\self \tl △ true $ self self tl) (\_ List.match △ (\hd \tl △ false $ △ hd tl)) hd self tl) n
+pred__smallest = wait self_apply _pred_body
+pred__fastest = self_apply _pred_body
+pred = pred__fastest
+match = \zero_case \succ_case List.match
+    zero_case
+    (\hd \tl succ_case $ pred $ △ hd tl)
+is_zero = List.match true (\_ \_ false)
+add_3bits =
+  Bool.match
+    (Bool.match (\c △ c false) (\c △ (Bool.not c) c))
+    (Bool.match (\c △ (Bool.not c) c) (\c △ c true))
+_add_3bits_k =
+  Bool.match
+    (Bool.match
+      (Bool.match (\k k false false) (\k k true false))
+      (Bool.match (\k k true false) (\k k false true)))
+    (Bool.match
+      (Bool.match (\k k true false) (\k k false true))
+      (Bool.match (\k k false true) (\k k true true)))
+double = triage 0 _ (\h \t △ false (△ h t))
+# Carry bit c into list l: l unchanged when there is no carry (O(1)), else succ l.
+# Even the no-carry branch destructures l, so on symbolic input reduction stays
+# stuck like List.zip; otherwise whole-program reduction of folds like from_string
+# would diverge. Both branches are functions of l so neither (in particular succ) 
+# fires until selected.
+_carry = \c Bool.match (\l List.match △ (\_ \_ l) l) succ c
+# Pair the common low bits of a and b into a list of (ha,hb) forks, terminated by
+# a stem △rem carrying the longer operand's remaining high tail (rem empty when
+# they end together). Same head/tail-split shape as List.zip and the same
+# per-step cost, but it stops at the shorter operand instead of padding to the
+# longer — so add of unequal-length operands (add b 0, adds into a growing
+# accumulator) costs O(min) rather than O(max).
+_zip_rest = fix $ \self \l1 \l2
+    (List.match (\l2 △)  (\h1 \t1 List.match △          (\h2 \t2 △ (△ h1 h2))) l1 l2)
+    (List.match (\l2 l2) (\h1 \t1 List.match (△ h1 t1)  (\h2 \t2 self t1 t2))  l1 l2)
+# Carry-fold over the paired bits, then ripple the final carry into the remainder
+# carried by the terminal stem. succ is delayed (inside _carry) so it doesn't fire
+# eagerly on every step. The recursion destructures its first argument so self
+# never expands unconditionally.
+_add = fix $ \self \lst \c triage
+    (\k _carry k [])
+    (\rem \k _carry k rem)
+    (\pair \rest \k Pair.match (_add_3bits_k k) pair $ \s \c2 △ s (self rest c2))
+    lst c
+add = \a \b _add (_zip_rest a b) false
+sub_3bits =
+  Bool.match
+    (Bool.match
+        (Bool.match (△ true false) (△ false false))
+        (Bool.match (△ false true) (△ true false)))
+    (Bool.match
+        (Bool.match (△ false true) (△ true false))
+        (Bool.match (△ true true) (△ false true)))
+_sub_3bits_k =
+  Bool.match
+    (Bool.match
+      (Bool.match (\k k true false) (\k k false false))
+      (Bool.match (\k k false true) (\k k true false)))
+    (Bool.match
+      (Bool.match (\k k false true) (\k k true false))
+      (Bool.match (\k k true true) (\k k false true)))
+_sub__smallest = fix $ \self List.match
+    (\c 0)
+    (\hd \tl \c Pair.match (\s \c △ s (self tl c)) (Pair.match (sub_3bits c) hd))
+_sub__fastest = fix $ \self List.match
+    (\c 0)
+    (\hd \tl \c Pair.match (_sub_3bits_k c) hd $ \s \c2 △ s (self tl c2))
+_sub_wc = fix $ \self List.match
+    (\c Pair.create c 0)
+    (\hd \tl \c Pair.match (_sub_3bits_k c) hd $ \s \c2
+        Pair.match (\ok \result Pair.create ok (△ s result)) (self tl c2))
+_canonicalize__common = \foldr foldr (\h \acc Bool.match 0 (△ h acc) (Bool.or (List.match false (\_ \_ true) acc) h)) 0
+canonicalize__smallest = _canonicalize__common List.foldr__smallest
+canonicalize__fastest = _canonicalize__common List.foldr__fastest
+canonicalize = canonicalize__fastest
+# ncsub: subtraction without the final canonicalize, so the result may carry
+# trailing zero bits (assumes a >= b, like sub). Cheaper than sub; sub is just
+# ncsub followed by canonicalize.
+ncsub__smallest = \a \b _sub__smallest (List.zip a b) true
+ncsub__fastest = \a \b _sub__fastest (List.zip a b) true
+ncsub = ncsub__fastest
+sub__smallest = \a \b canonicalize__smallest (ncsub__smallest a b)
+sub__fastest = \a \b canonicalize__fastest (ncsub__fastest a b)
+sub = sub__fastest
+_sub_check__smallest = \a \b Pair.match (\ok \raw Bool.match △ (△ $ canonicalize__smallest raw) ok) $ _sub_wc (List.zip a b) true
+mul = \a \b List.foldr (\h \s Bool.match id (add b) h (double s)) 0 a
+# mul_const_naive k specializes multiplication to a constant multiplier k. It folds
+# over the bits of k (most significant first) to *compose* a double-and-add function
+# of the multiplicand: bit -> compose double; set bit -> add the multiplicand.
+# Because the multiplicand is bound inside the composed pieces (not free in the
+# fold) and composition flattens under reduction, this nearly reproduces the
+# double/add chain one would write by hand — but two construction-time inefficiencies
+# (a defensive top-bit seed and an uncontracted compose double id) leave it slightly
+# larger than optimal. See mul_const for the version that fixes both.
+mul_const_naive = \k List.match (\x 0)
+    (\msb \rest List.foldl (\f \h Bool.match (compose double f) (\x add x (double (f x))) h) (\x Bool.match 0 x msb) rest)
+    (List.reverse k)
+# mul_const k: like mul_const_naive but emits the optimal double/add chain directly,
+# with no post-hoc optimization — mul_const <literal> is byte-for-byte the chain one
+# would write by hand. Two construction-time fixes over mul_const_naive: (1) seed the
+# fold with id instead of guarding the (always-set) top bit — k = 0 still falls to
+# the empty-bit-list case; (2) _smart_compose returns f when g is structurally id,
+# contracting compose double id (the η-redex weak reduction leaves stuck) to double
+# at compile time, using the now-cycle-free equal.
+_smart_compose = \f \g Bool.match (compose f g) f (equal id g)
+mul_const = \k List.match (\x 0)
+    (\_ \rest List.foldl (\f \h Bool.match (_smart_compose double f) (\x add x (double (f x))) h) id rest)
+    (List.reverse k)
+# is_lte, two shapes:
+# __smallest zips the operands and folds the pair list — smallest reduced
+# tree because it reuses the shared zip/fold machinery.
+is_lte__smallest = \a \b List.foldl__smallest
+    (\acc Pair.match (\ha \hb Bool.match acc hb (Bool.xor ha hb)))
+    true
+    (List.zip a b)
+# __fastest makes a single pass over both bit lists, LSB first, with no
+# intermediate zip (~20% fewer reductions, but a larger tree). The most
+# significant differing bit decides, so each step folds the current bit pair
+# into the verdict so far. The verdict is a bool, so instead of threading it
+# as data it selects one of two mutually recursive walks (_lte_t: a ≤ b so
+# far, _lte_f: a > b so far); each bit pair either keeps or switches the
+# walk. Once one operand is exhausted, any set bit remaining in the other
+# side is more significant than everything seen and forces the outcome
+# (_any). The walks tie the knot through _lte_body, which dispatches on the
+# verdict and passes itself along (self_apply style). Per-step closures
+# capture only self and single bits, so the reducer memoizes them.
+_any = fix $ \self List.match false (\h \t Bool.match self (\t true) h t)
+_lte_t = \self \a \b List.match
+    (\b true)
+    (\ha \ta \b List.match
+        (\ta Bool.not (Bool.or ha (_any ta)))
+        (\hb \tb \ta self self (Bool.or hb (Bool.not ha)) ta tb)
+        b ta)
+    a b
+_lte_f = \self \a \b List.match
+    _any
+    (\ha \ta \b List.match
+        (\ta false)
+        (\hb \tb \ta self self (Bool.and hb (Bool.not ha)) ta tb)
+        b ta)
+    a b
+_lte_body = \self \acc Bool.match _lte_f _lte_t acc self
+is_lte__fastest = _lte_t _lte_body
+is_lte = wait _lte_t _lte_body
+_divmod = \succ \sub_check \foldr \a \b foldr
+    (\h \acc
+        Pair.match
+            (\div \mod
+                triage
+                    (Pair.create (double div) mod)
+                    (\new_mod Pair.create (succ (double div)) new_mod)
+                    _
+                    (sub_check mod h)
+            )
+            acc
+    )
+    (Pair.create 0 a)
+divmod__smallest = \a \b _divmod succ__smallest _sub_check__smallest List.foldr__smallest a b
+    ((fix $ \self List.match (\small 0) (\_ \big \small Pair.create small (self big (double small)))) a b)
+divmod__fastest = \a \b
+  Pair.match (\q \r Pair.create q (canonicalize r)) $
+  List.foldr__fastest
+    (\bit \acc Pair.match (\q \r
+      Bool.match_ft
+        (\b Pair.create (double q) (△ bit r))
+        (\b Pair.create (succ__fastest (double q)) (sub__fastest (△ bit r) b))
+        (is_lte__fastest b (△ bit r)) b)
+    acc)
+    (Pair.create 0 0)
+    a
+divmod = divmod__fastest
+div__smallest = \a \b Pair.fst $ divmod__smallest a b
+div__fastest = \a \b Pair.fst $ divmod__fastest a b
+div = div__fastest
+mod__smallest = \a \b Pair.snd $ divmod__smallest a b
+mod__fastest = \a \b Pair.snd $ divmod__fastest a b
+mod = mod__fastest
+_to_digits = \base \digit fix $ \self List.match
+    id
+    (\hd \tl \acc Pair.match (\div \mod self div (△ (digit mod) acc)) (divmod (△ hd tl) base))
+to_string_base = \base \digit \n Bool.match (_to_digits base digit n "") "0" (is_zero n)
+from_string_base = \base \digit List.foldl (\acc \c add (mul_const base acc) (digit c)) 0
+# Fast constant-subtraction variants for ASCII parsing. Each assumes its argument
+# is in the stated range; the ASCII digit/letter blocks are power-of-two aligned,
+# so subtracting the block base is just keeping the low bits (_keep applied n
+# times = take n) plus a -1 for the letter blocks — no borrow, no zip, ~20-28x
+# cheaper than sub. The nc* forms skip canonicalization (trailing zero bits may
+# remain, like ncsub); the sub_x_* forms canonicalize, matching sub exactly.
+# Note: the non-canonicalizing forms must not feed functions the build reduces to
+# whole-program normal form against symbolic input (e.g. parser combinators), as
+# that reduction diverges; use the sub_x_* forms there.
+# TODO: replace these hand-rolled variants with generalized machinery that, given
+# a constant known at build time, generates the optimal (non-)canonicalizing
+# subtractor — e.g. picking the mask form when the constant is power-of-two
+# aligned and falling back to an unrolled borrow chain otherwise.
+_keep = \rest \l List.match [] (\h \t △ h (rest t)) l
+ncsub_x_48 = _keep (_keep (_keep (_keep (\_ []))))                             # c - '0', c in '0'..'9'
+ncsub_x_65 = \c pred (_keep (_keep (_keep (_keep (_keep (_keep (\_ [])))))) c) # c - 'A', c in 'A'..'Z'/'A'..'F'
+ncsub_x_97 = \c pred (_keep (_keep (_keep (_keep (_keep (\_ []))))) c)         # c - 'a', c in 'a'..'z'/'a'..'f'
+sub_x_48 = \c canonicalize (ncsub_x_48 c)
+sub_x_65 = \c canonicalize (ncsub_x_65 c)
+sub_x_97 = \c canonicalize (ncsub_x_97 c)
+to_string = to_string_base 10 (add '0')
+to_source = to_string
+to_dstring = \n Bool.match (_to_digits 10 (add '0') n) (△ '0') (is_zero n)
+# Decimal-string -> nat: subtract '0' from each digit directly. This is the small
+# default. The from_string.lamb sibling defines a [__fastest] variant that
+# memoizes the digit lookup into a table (larger tree, fewer reductions). Keeping
+# the default here avoids a Memo dependency, so core Nat stays Memo-free.
+from_string = from_string_base 10 sub_x_48
+is_gte = \a \b is_lte b a
+is_lt = \a \b Bool.not $ is_gte a b
+is_gt = \a \b Bool.not $ is_lte a b
+in_range = \lo \hi \x Bool.and (is_lte lo x) (is_lte x hi)
+max = \a \b Bool.match a b $ is_lte a b
+min = \a \b Bool.match b a $ is_lte a b
+diff = \a \b Bool.match sub (\a \b sub b a) (is_lte a b) a b
+sum = List.foldl add 0
+product = List.foldl mul 1
+pow = \base \exp Fn.pow_fast exp mul 1 base
+max_list = List.foldl max 0
+div2 = List.match 0 (\_ \tl tl)
+factorial = fix $ \self \n match 1 (\pred mul n $ self pred) n
+
+_to_string = to_source
+add 0 0
+# = 0
+add 0 1
+# = 1
+add 1 0
+# = 1
+add 1 2
+# = 3
+add 5 3
+# = 8
+add 10 20
+# = 30
+max 1 2
+# = 2
+max 2 1
+# = 2
+min 1 2
+# = 1
+min 2 1
+# = 1
+diff 5 3
+# = 2
+diff 3 5
+# = 2
+diff 3 3
+# = 0
+diff 0 7
+# = 7
+sum [1; 2; 3; 4]
+# = 10
+sum []
+# = 0
+sum [10; 20; 30]
+# = 60
+product [1; 2; 3; 4]
+# = 24
+product []
+# = 1
+product [5; 6]
+# = 30
+pow 2 0
+# = 1
+pow 2 1
+# = 2
+pow 2 8
+# = 256
+pow 3 4
+# = 81
+pow 10 3
+# = 1000
+pow 1 100
+# = 1
+pow 0 5
+# = 0
+max_list [3; 1; 4; 1; 5]
+# = 5
+max_list [42]
+# = 42
+max_list []
+# = 0
+factorial 0
+# = 1
+factorial 1
+# = 1
+factorial 5
+# = 120
+factorial 10
+# = 3628800
+
+pred__smallest 1
+# = 0
+pred__smallest 2
+# = 1
+pred__smallest 3
+# = 2
+pred__smallest 127
+# = 126
+pred__smallest 255
+# = 254
+pred__fastest 1
+# = 0
+pred__fastest 2
+# = 1
+pred__fastest 3
+# = 2
+pred__fastest 127
+# = 126
+pred__fastest 255
+# = 254
+
+sub__smallest 5 3
+# = 2
+sub__smallest 10 10
+# = 0
+sub__smallest 255 127
+# = 128
+sub__fastest  5 3
+# = 2
+sub__fastest  10 10
+# = 0
+sub__fastest  255 127
+# = 128
+
+ncsub 5 3
+# = 2
+ncsub 10 10
+# = 0
+ncsub 255 127
+# = 128
+sub_x_48 '5'
+# = 5
+sub_x_65 'C'
+# = 2
+sub_x_97 'c'
+# = 2
+ncsub_x_48 '5'
+# = 5
+ncsub_x_65 'C'
+# = 2
+ncsub_x_97 'c'
+# = 2
+
+div__smallest 7   3
+# = 2
+div__smallest 255 10
+# = 25
+div__fastest  7   3
+# = 2
+div__fastest  255 10
+# = 25
+
+mod__smallest 7   3
+# = 1
+mod__smallest 255 10
+# = 5
+mod__fastest  7   3
+# = 1
+mod__fastest  255 10
+# = 5
+
+_to_string = Bool.to_source
+is_lte 3 5
+# = true
+is_lte 5 5
+# = true
+is_lte 7 5
+# = false
+is_gte 5 3
+# = true
+is_gte 5 5
+# = true
+is_gte 3 5
+# = false
+is_lt 3 5
+# = true
+is_lt 5 5
+# = false
+is_gt 5 3
+# = true
+is_gt 5 5
+# = false
+in_range 1 5 0
+# = false
+in_range 1 5 1
+# = true
+in_range 1 5 3
+# = true
+in_range 1 5 5
+# = true
+in_range 1 5 6
+# = false
+
+is_lte__smallest 3 5
+# = true
+is_lte__smallest 5 5
+# = true
+is_lte__smallest 7 5
+# = false
+is_lte__fastest  3 5
+# = true
+is_lte__fastest  5 5
+# = true
+is_lte__fastest  7 5
+# = false
+
+_to_string = to_source
+div2 0
+# = 0
+div2 1
+# = 0
+div2 2
+# = 1
+div2 5
+# = 2
+div2 10
+# = 5
+div2 255
+# = 127
+
+_to_string = id
+to_dstring 0 ""
+# = 0
+to_dstring 42 ""
+# = 42
+to_dstring 7 " items"
+# = 7 items
+to_dstring 0 " items"
+# = 0 items
+to_dstring 255 "!"
+# = 255!

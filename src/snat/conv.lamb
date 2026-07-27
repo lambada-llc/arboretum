@@ -1,0 +1,20 @@
+to_nat = fix $ \self Snat.match 0 (\pred Nat.succ (self pred))
+from_nat = \n Fn.pow n Snat.succ Snat.zero
+to_string = \n Nat.to_string (to_nat n)
+
+_to_string = to_string
+Snat.zero
+# = 0
+Snat.one
+# = 1
+Snat.two
+# = 2
+Snat.three
+# = 3
+Snat.four
+# = 4
+from_nat 7
+# = 7
+Snat.add (from_nat 2) (from_nat 3)
+# = 5
+

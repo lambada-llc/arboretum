@@ -1,0 +1,4 @@
+# pow n f x = f^n x. Shared recursion; the variants differ only in the nat decoder.
+_pow = \match fix $ \self \n \f \x match x (\pred self pred f (f x)) n
+pow_snat = _pow Snat.match
+pow = _pow Nat.match

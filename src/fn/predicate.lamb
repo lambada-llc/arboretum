@@ -1,0 +1,27 @@
+p_and = \a \b \x Bool.match (\_ \_ false) id (a x) b x
+p_or  = \a \b \x Bool.match id (\_ \_ true) (a x) b x
+p_not = \a \x Bool.not (a x)
+
+_is_positive = Nat.is_lte 1
+_is_small = \n Nat.is_lte n 10
+
+_to_string = Bool.to_source
+
+p_and _is_positive _is_small 5
+# = true
+p_and _is_positive _is_small 0
+# = false
+p_and _is_positive _is_small 20
+# = false
+
+p_or _is_positive _is_small 0
+# = true
+p_or _is_positive _is_small 5
+# = true
+p_or _is_positive _is_small 20
+# = true
+
+p_not _is_positive 0
+# = true
+p_not _is_positive 1
+# = false

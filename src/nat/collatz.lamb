@@ -1,0 +1,24 @@
+# Collatz conjecture: count steps to reach 1
+# Even: n -> n/2, Odd: n -> 3n+1
+
+_is_even = List.match true (\hd \_ Bool.not hd)
+collatz_step = \n Bool.match (\n Nat.succ (Nat.add n (Nat.double n))) (\n Nat.div2 n) (_is_even n) n
+_is_one = List.match false (\hd \tl Bool.and hd (Nat.is_zero tl))
+collatz_steps = fix $ \self \n Bool.match (\n Nat.succ (self (collatz_step n))) (\n 0) (_is_one n) n
+
+_to_string = Nat.to_source
+collatz_steps 1
+# = 0
+collatz_steps 2
+# = 1
+collatz_steps 6
+# = 8
+collatz_steps 27
+# = 111
+collatz_steps 703
+# = 170
+collatz_steps 270271
+# = 406
+
+size collatz_steps
+# = 1273

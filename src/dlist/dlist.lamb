@@ -1,0 +1,63 @@
+# A dlist (difference list) is a function `tl -> list ++ tl` that prepends its
+# captured elements onto its argument. Concatenation is function composition,
+# so [append] and [snoc] are O(1) and [from_list] is O(n) once.
+
+empty = id
+single = △
+cons = \x \d \tl △ x $ d tl
+snoc = \d \x \tl d $ △ x tl
+append = compose
+concat = List.foldr append empty
+intersperse = \sep List.match empty (\hd \tl append (single hd) $ concat $ List.map (\x cons sep (single x)) tl)
+join = \sep List.match empty (\hd \tl append hd $ concat $ List.map (append (single sep)) tl)
+from_list = \xs List.foldr cons empty xs
+to_list = \d d []
+
+_to_string = String.to_source
+to_list empty
+# = ""
+to_list (single 'q')
+# = "q"
+to_list (cons 'a' (single 'b'))
+# = "ab"
+to_list (snoc (single 'a') 'b')
+# = "ab"
+to_list (from_list "hello")
+# = "hello"
+to_list (append (from_list "hello ") (from_list "world"))
+# = "hello world"
+to_list (append (cons 'x' (from_list "yz")) (snoc empty '!'))
+# = "xyz!"
+to_list (concat [from_list "hello"; single ' '; from_list "world"; single '!'])
+# = "hello world!"
+to_list (concat [])
+# = ""
+
+to_list (intersperse ' ' "hello")
+# = "h e l l o"
+to_list (intersperse ',' "abc")
+# = "a,b,c"
+to_list (intersperse ',' "")
+# = ""
+to_list (intersperse ',' "x")
+# = "x"
+to_list (join ',' [from_list "ab"; from_list "cd"; single 'e'])
+# = "ab,cd,e"
+to_list (join ',' [])
+# = ""
+to_list (join ',' [from_list "solo"])
+# = "solo"
+
+_to_string = List.to_source Nat.to_source
+to_list (from_list [1; 2; 3])
+# = [1; 2; 3]
+to_list (append (from_list [1; 2]) (from_list [3; 4; 5]))
+# = [1; 2; 3; 4; 5]
+to_list (cons 0 (from_list [1; 2; 3]))
+# = [0; 1; 2; 3]
+to_list (snoc (from_list [1; 2; 3]) 4)
+# = [1; 2; 3; 4]
+to_list (intersperse 0 [1; 2; 3])
+# = [1; 0; 2; 0; 3]
+to_list (join 0 [from_list [1; 2]; from_list [3; 4; 5]])
+# = [1; 2; 0; 3; 4; 5]

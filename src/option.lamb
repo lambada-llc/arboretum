@@ -1,0 +1,2 @@
+none = Option.none
+some = Option.some
