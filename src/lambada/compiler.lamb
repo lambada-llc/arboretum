@@ -1,0 +1,800 @@
+# very broad definition to support special characters without fuzz
+is_alpha_char =
+  Fn.p_and (Nat.is_lte 64) $ Fn.p_not $
+  Fn.p_and (Nat.is_lte 91) $ Fn.p_not $
+  Fn.p_and (Nat.is_lte 95) $ Fn.p_not $
+  Fn.p_and (Nat.is_lte 123) $ Fn.p_not $
+            Nat.is_lte 128
+is_alphanum_char = Fn.p_or is_alpha_char Char.is_digit
+is_identifier_char = Fn.p_or is_alphanum_char (equal '.')
+
+is_whitespace_char = Char.is_whitespace__fastest
+is_uppercase_char = Char.is_uppercase__fastest
+is_digit_char = Char.is_digit__fastest
+is_alpha_char = Memo.precompute_alt Memo.gen_ascii true is_alpha_char
+is_alphanum_char = Memo.precompute_alt Memo.gen_ascii true is_alphanum_char
+is_identifier_char = Memo.precompute_alt Memo.gen_ascii true is_identifier_char
+
+_to_string = Bool.to_source
+is_alpha_char 'A'
+# = true
+is_alpha_char 'x'
+# = true
+is_alpha_char '3'
+# = false
+is_alpha_char '{'
+# = false
+
+_to_string = id
+Bench.run [is_alpha_char; '=']
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 0 0  7  5  6 |   0  18
+Bench.run [is_alpha_char; 'C']
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 0 0  8  3  7 |   0  18
+Bench.run [is_alpha_char; 'c']
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 0 0  8  4  7 |   0  19
+Bench.run [is_alpha_char; '3']
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 0 0  7  4  6 |   0  17
+
+parse_whitespace = Parser.take_while is_whitespace_char
+# Only reached via the first-char dispatch table, which fires this parser only
+# when the leading byte is is_alpha_char (true for bytes >= 128 too). The head is
+# therefore always a valid identifier start, so consume it with [one] instead of
+# re-validating it with [satisfy is_alpha_char].
+parse_identifier = Parser.seq_pair Parser.one (Parser.take_while is_identifier_char)
+parse_nat = Parser.map Nat.from_string__fastest $ Parser.seq_pair Parser.one (Parser.take_while is_digit_char)
+
+_to_string = id
+Bench.run [parse_identifier; "compiler_tokenize"]
+# = oh |  0a  0b   1   2  3a 3b  3c | alc  red
+#   17 | 265 450 629 662 129 89 148 | 715 1657
+Bench.run [Nat.is_lte 64; 'x']
+# = oh |  0a  0b   1   2 3a 3b 3c | alc red
+#   22 | 121 192 323 318 14 13 13 | 313 681
+Bench.run [is_alpha_char; 'x']
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 0 0  8  4  7 |   0  19
+
+fail = "fail"
+
+# special chars
+Special_char = Schar_paren_open
+             | Schar_paren_close
+             | Schar_backslash
+             | Schar_equals
+             | Schar_separator
+             | Schar_pipe
+             | Schar_dollar
+             | Schar_colon
+             | Schar_sqbracket_open
+             | Schar_sqbracket_close
+             | Schar_curly_open
+             | Schar_curly_close
+
+schar_eq =
+  let (\s s 0 1 2 3 4 5 6 7 8 9 10 11) $ \id
+  \a \b equal (id a) (id b)
+
+# tokens
+Token = Token_special_char schar     # schar
+      | Token_identifier name        # string
+      | Token_identifier_adt name    # string
+      | Token_const_str value        # string
+      | Token_const_nat value        # nat
+      | Token_comment value          # string
+
+# First character of [name]'s last '.'-separated segment (uppercase here marks an
+# ADT name). [cand] holds the current segment's first character; each '.' promotes
+# the following character to [cand] by re-entering the loop on the re-consed tail,
+# so a promoted '.' (from "..") is itself checked for dot-ness again. Direct
+# recursion, no per-character pair state. [self] is threaded through the
+# Bool.match branches (self_apply style) instead of being captured by a fix
+# closure — both branches receive it as an explicit final argument, so each
+# unfolding pays only the small branch bodies, not the fix machinery.
+_is_dot = Memo.precompute_alt Memo.gen_ascii_low false (equal_const '.')
+_local_head = List.match _ $ self_apply $ \self \cand \l List.match cand (\c \rest
+    Bool.match
+      (\cand \rest \self self self cand rest)
+      (\cand \rest \self List.match cand (\c2 \r2 self self c2 (△ c2 r2)) rest)
+      (_is_dot c) cand rest self
+  ) l
+token_identifier = \name Bool.match Token_identifier Token_identifier_adt (is_uppercase_char (_local_head name)) name
+
+parse_char_map = \map List.match Parser.fail_result $ \head \tail Option.match Parser.fail_result (\v Parser.return v tail) $ Map.to_func map head
+
+# :: Parser Token
+parse_special_char = parse_char_map
+        {
+            '(': Schar_paren_open; 
+            ')': Schar_paren_close;
+            '\': Schar_backslash;
+            '=': Schar_equals;
+            ';': Schar_separator;
+            ',': Schar_separator;
+            '|': Schar_pipe;
+            '$': Schar_dollar;
+            ':': Schar_colon;
+            '[': Schar_sqbracket_open;
+            ']': Schar_sqbracket_close;
+            '{': Schar_curly_open;
+            '}': Schar_curly_close;
+        }
+_is_quot = equal_const '"'
+# The opening delimiter / '#' is re-checked here by satisfy/exact even though the
+# first-char dispatch only routes to these parsers when it already matches; consume
+# it with [one] instead. The closing-delimiter satisfy stays — it is a real check.
+parse_str  = Parser.map Token_const_str (Parser.seq_snd Parser.one (Parser.seq_fst (Parser.take_until _is_quot) (Parser.satisfy _is_quot)))
+_is_quot = equal_const '''
+parse_char  = Parser.map Token_const_nat (Parser.seq_snd Parser.one (Parser.seq_fst Parser.one (Parser.satisfy _is_quot)))
+parse_nat  = Parser.map Token_const_nat parse_nat
+parse_comment = Parser.map Token_comment (Parser.seq_snd Parser.one (Parser.take_until Char.is_newline))
+
+# Pick the value of the first (predicate, value) pair whose predicate accepts [x],
+# falling back to [default] when none match.
+_first_matching = \default \cases \x
+  List.foldr (\case \rest Bool.match rest (Pair.snd case) (Pair.fst case x)) default cases
+
+# First-char dispatch: each token kind starts with a disjoint set of characters,
+# so instead of trying every sub-parser in turn (re-running failing ones), peek at
+# the leading character and select the one parser that can match. The whole
+# selection is precomputed into a table over ASCII, so at runtime dispatch is a
+# single table lookup; bytes >= 128 fall through to the identifier parser (matching
+# is_alpha_char's broad fallback).
+_parse_identifier_token = Parser.map token_identifier parse_identifier
+_parse_token_dispatch = Memo.precompute_alt Memo.gen_ascii _parse_identifier_token $
+  _first_matching (Parser.map Token_special_char parse_special_char)
+    [ △ is_alpha_char     _parse_identifier_token
+    ; △ is_digit_char     parse_nat
+    ; △ (equal_const '"') parse_str
+    ; △ (equal_const ''') parse_char
+    ; △ (equal_const '#') parse_comment
+    ]
+
+# Strip only *leading* whitespace per token; the trailing whitespace of each gap
+# is then consumed as the next token's leading whitespace (productive), instead of
+# scanning every gap twice. A single trailing strip in compiler_tokenize handles
+# whitespace after the final token.
+parse_token = Parser.seq_snd parse_whitespace $ \input
+  List.match Parser.fail_result (\c \_ _parse_token_dispatch c input) input
+
+
+# str => Token list option
+compiler_tokenize = Parser.value_if_consumed $ Parser.seq_fst (Parser.many parse_token) parse_whitespace
+
+# Position tracking for tokens
+_token_text_len = \tok tok
+    (\schar 1)
+    (\name List.length name)
+    (\name List.length name)
+    (\value Nat.add 2 $ List.length value)
+    (\value List.length $ Nat.to_string value)
+    (\value Nat.succ $ List.length value)
+
+_count_leading_ws = fix $ \self List.match 0 (\h \t Bool.match 0 (Nat.succ (self t)) (is_whitespace_char h))
+
+_annotate_positions = fix $ \self \pos \str \tokens List.match [] (\tok \rest
+    let (_count_leading_ws str) $ \ws
+    let (Nat.add pos ws) $ \start
+    let (_token_text_len tok) $ \len
+    let (Nat.add start len) $ \end
+    △ (△ (△ start end) tok) (self end (List.drop (Nat.add ws len) str) rest)
+  ) tokens
+
+compiler_tokenize_positioned = \s Option.map (_annotate_positions 0 s) $ compiler_tokenize s
+
+
+Syntax_tree = Syntax_identifier name                        # string
+            | Syntax_const_null
+            | Syntax_const_nat value                        # nat
+            | Syntax_const_str value                        # string
+            | Syntax_list list                              # Syntax_tree list
+            | Syntax_map kvlist                             # (Syntax_tree * Syntax_tree) list
+            | Syntax_abs literal body                       # string Syntax_tree
+            | Syntax_app o1 o2                              # Syntax_tree Syntax_tree
+            | Syntax_assignment literal o                   # string Syntax_tree
+            | Syntax_adt literalType listPairInstanceArgs   # string (string * string list) list
+            | Syntax_spanned start end inner                # nat nat Syntax_tree
+
+syntax_app = List.match _ (List.foldl Syntax_app)
+syntax_abs = \vars \body List.foldr Syntax_abs body vars
+
+# _expr :=  name=expr | \name expr | identifier | str | nat | (expr) | comment | [expr*]
+# expr :=  app  :=  _expr* | _expr* $ expr
+
+# [compose_dep Parser.one cp] builds the intermediate result [△ head tail] only
+# for [compose_dep]'s [match_result] to immediately tear it back apart into
+# [cp head tail]. Consume the head token directly instead, skipping that round-trip.
+_one_then = List.match Parser.fail_result
+
+parse_abs_tail = \e
+    _one_then
+        (Token_identifier_Dispatch
+            (\literal Parser.map
+                (\rese Syntax_abs literal rese)
+                e
+            )
+            Parser.fail)
+
+# Each caller knows the expected special char statically, so match the parsed schar
+# with that constructor's *_Dispatch — a single elimination — instead of mapping
+# both schars to indices and comparing them via [schar_eq].
+parse_schar = \schar_dispatch
+    _one_then
+        (Token_special_char_Dispatch
+            (\schar schar_dispatch (Parser.return id) Parser.fail schar)
+            Parser.fail)
+
+parse_identifier = _one_then
+        (Token_identifier_Dispatch Parser.return Parser.fail)
+parse_identifier_adt = _one_then
+        (Token_identifier_adt_Dispatch Parser.return Parser.fail)
+        
+parse_paren_close = parse_schar Schar_paren_close_Dispatch
+parse_sqbracket_close = parse_schar Schar_sqbracket_close_Dispatch
+parse_curly_close = parse_schar Schar_curly_close_Dispatch
+parse_separator = parse_schar Schar_separator_Dispatch
+parse_colon = parse_schar Schar_colon_Dispatch
+parse_equals = parse_schar Schar_equals_Dispatch
+parse_pipe = parse_schar Schar_pipe_Dispatch
+parse_dollar = parse_schar Schar_dollar_Dispatch
+
+        
+parse_list_tail = \e Parser.seq_fst
+                    (Parser.map
+                        (\list Syntax_list list)
+                        (
+                            Parser.either
+                            (
+                                Parser.seq_pair
+                                    e
+                                    (Parser.many $ Parser.seq_snd parse_separator e)
+                            )
+                            (Parser.return [])
+                        )
+                    )
+                    (Parser.either parse_sqbracket_close (Parser.seq_fst parse_separator parse_sqbracket_close))
+
+parse_map_elem = \e Parser.compose_dep e (\k Parser.either (Parser.seq_snd parse_colon (Parser.map (△ k) e)) (Parser.return $ △ k Syntax_const_null))
+parse_map_tail = \e Parser.seq_fst
+                    (Parser.map
+                        (\list Syntax_map list)
+                        (
+                            Parser.either
+                            (
+                                Parser.seq_pair
+                                    (parse_map_elem e)
+                                    (Parser.many $ Parser.seq_snd parse_separator (parse_map_elem e))
+                            )
+                            (Parser.return [])
+                        )
+                    )
+                    (Parser.either parse_curly_close (Parser.seq_fst parse_separator parse_curly_close))
+
+parse_assign_tail = \literal \e Parser.map
+                        (\body Syntax_assignment literal body)
+                        (Parser.seq_snd parse_equals e)
+
+parse_adt_variant = Parser.seq_pair
+                            parse_identifier_adt
+                            (Parser.many parse_identifier)
+parse_adt_tail = \literal \e Parser.map
+                        (\list Syntax_adt literal list)
+                        (Parser.seq_snd
+                            parse_equals
+                            (Parser.seq_pair
+                              parse_adt_variant
+                              (Parser.many (Parser.seq_snd parse_pipe parse_adt_variant)))) 
+
+# The recursive parser [e] is applied *after* the token dispatch, so each
+# handler takes its own [e]. This keeps [parse__expr e] cheap to instantiate:
+# [e] flows to a single position instead of being substituted into every
+# branch, so only the dispatched branch's body is built per call.
+parse__expr = \e
+    _one_then
+        (\token token
+            (\schar \e schar
+                (\e Parser.seq_fst e parse_paren_close)
+                (\_ Parser.fail)
+                parse_abs_tail
+                (\_ Parser.fail)
+                (\_ Parser.fail)
+                (\_ Parser.fail)
+                (\_ Parser.fail)
+                (\_ Parser.fail)
+                parse_list_tail
+                (\_ Parser.fail)
+                parse_map_tail
+                (\_ Parser.fail)
+                e
+            )
+            (\literal \e
+                Parser.either
+                    (parse_assign_tail literal e)
+                    (Parser.return (Syntax_identifier literal))
+            )
+            (\literal \e
+                Parser.either
+                    (parse_adt_tail literal e)
+                    (Parser.return (Syntax_identifier literal))
+            )
+            (\value \e Parser.return $ Syntax_const_str value)
+            (\value \e Parser.return $ Syntax_const_nat value)
+            (\_ \e Parser.fail)
+            e
+        )
+
+_parse_expr_body = \e
+    Parser.compose_dep
+        (Parser.many $ parse__expr e)
+        (\ops
+            Bool.match
+            # Fold the operands into a left-nested application once, then apply a
+            # tail transform: a trailing [$ e] grafts one more application, its
+            # absence is [id]. Avoids the singleton-wrap + [concat ops []] + re-fold
+            # the prior form paid on every expression (the no-[$] case dominates).
+            (Parser.map
+                (\graft graft $ List.match _ (List.foldl Syntax_app) ops)
+                (Parser.either
+                    (Parser.map (\rhs \lhs Syntax_app lhs rhs) (Parser.seq_snd parse_dollar e))
+                    (Parser.return id)
+                )
+            )
+            Parser.fail
+            (List.is_empty ops)
+        )
+# Two unroll levels: [fix]'s wait delays all combinator construction until input
+# arrives, so a plain [fix _parse_expr_body] rebuilds the pipeline on every call.
+# Applying the body twice outside the fix lets the build pre-reduce the two
+# outermost levels — top-level expressions plus one nesting level
+# (parenthesized/list/map/$-tail), covering common inputs; only deeper
+# recursions pay per call.
+parse_expr = _parse_expr_body (_parse_expr_body (fix _parse_expr_body))
+
+parse_exprs = Parser.many parse_expr
+
+drop_comments = List.filter (Token_comment_Dispatch (\_ false) true)
+
+# Token list => Syntax_tree list option
+compiler_parse = \ts Parser.value_if_consumed parse_exprs $ drop_comments ts
+compiler_parse_expr_exn = Parser.value parse_expr
+
+# Span-aware parser operating on positioned token lists
+# Each positioned token is △ (△ start end) token
+_last = \l List.foldl (\_ \x x) (List.head_or _ l) l
+_ptok_start = \ptok Pair.fst (Pair.fst ptok)
+_ptok_end = \ptok Pair.snd (Pair.fst ptok)
+_drop_pcomments = List.filter (\ptok Token_comment_Dispatch (\_ false) true (Pair.snd ptok))
+
+# Consume one positioned token, return raw token value
+_pone = List.match Parser.fail_result (\h \t Parser.return (Pair.snd h) t)
+
+_pschar = \schar_expected Parser.compose_dep _pone
+    (Token_special_char_Dispatch (\schar Bool.match Parser.fail (Parser.return id) (schar_eq schar_expected schar)) Parser.fail)
+_pparen_close = _pschar Schar_paren_close
+_psqbracket_close = _pschar Schar_sqbracket_close
+_pcurly_close = _pschar Schar_curly_close
+_pseparator = _pschar Schar_separator
+_pcolon = _pschar Schar_colon
+_pequals = _pschar Schar_equals
+_ppipe = _pschar Schar_pipe
+_pdollar = _pschar Schar_dollar
+_pidentifier = Parser.compose_dep _pone (Token_identifier_Dispatch Parser.return Parser.fail)
+_pidentifier_adt = Parser.compose_dep _pone (Token_identifier_adt_Dispatch Parser.return Parser.fail)
+
+_pabs_tail = \e Parser.compose_dep _pone
+    (Token_identifier_Dispatch (\literal Parser.map (\rese [Syntax_abs literal rese]) e) Parser.fail)
+_plist_tail = \e Parser.seq_fst
+    (Parser.map (\list [Syntax_list list])
+        (Parser.either (Parser.seq_pair e (Parser.many $ Parser.seq_snd _pseparator e)) (Parser.return [])))
+    (Parser.either _psqbracket_close (Parser.seq_fst _pseparator _psqbracket_close))
+_pmap_elem = \e Parser.compose_dep e (\k Parser.either (Parser.seq_snd _pcolon (Parser.map (△ k) e)) (Parser.return $ △ k Syntax_const_null))
+_pmap_tail = \e Parser.seq_fst
+    (Parser.map (\list [Syntax_map list])
+        (Parser.either (Parser.seq_pair (_pmap_elem e) (Parser.many $ Parser.seq_snd _pseparator (_pmap_elem e))) (Parser.return [])))
+    (Parser.either _pcurly_close (Parser.seq_fst _pseparator _pcurly_close))
+_passign_tail = \literal \e Parser.map (\body [Syntax_assignment literal body]) (Parser.seq_snd _pequals e)
+_padt_variant = Parser.seq_pair _pidentifier_adt (Parser.many _pidentifier)
+_padt_tail = \literal \e Parser.map (\list [Syntax_adt literal list])
+    (Parser.seq_snd _pequals (Parser.seq_pair _padt_variant (Parser.many (Parser.seq_snd _ppipe _padt_variant))))
+
+# Spanned atom parser: wraps each atom result with its source span
+_p__expr = \e \ptoks
+  let (List.match 0 (\h \_ _ptok_start h) ptoks) $ \start
+  Parser.match_result Parser.fail_result (\items \remaining
+    let (List.length remaining) $ \rem_len
+    let (List.length ptoks) $ \orig_len
+    let (Nat.sub orig_len rem_len) $ \consumed_n
+    let (_ptok_end $ _last $ List.take consumed_n ptoks) $ \end
+    Parser.return (List.map (Syntax_spanned start end) items) remaining
+  ) (Parser.compose_dep _pone (\token token
+      (\schar schar
+          (Parser.seq_fst (Parser.map (\x [x]) e) _pparen_close)
+          Parser.fail (_pabs_tail e) Parser.fail Parser.fail Parser.fail Parser.fail Parser.fail
+          (_plist_tail e) Parser.fail (_pmap_tail e) Parser.fail)
+      (\literal Parser.either (_passign_tail literal e) (Parser.return [Syntax_identifier literal]))
+      (\literal Parser.either (_padt_tail literal e) (Parser.return [Syntax_identifier literal]))
+      (\value Parser.return $ [Syntax_const_str value])
+      (\value Parser.return $ [Syntax_const_nat value])
+      (\_ Parser.fail)
+  ) ptoks)
+
+_p_expr = fix $ \e \ptoks
+  let (List.match 0 (\h \_ _ptok_start h) ptoks) $ \start
+  let (Parser.compose_dep (Parser.many $ _p__expr e)
+        (\list (\ops Bool.match
+            (Parser.map (\tailx List.match _ (List.foldl Syntax_app) $ List.concat ops tailx)
+                (Parser.either (Parser.map (\x [x]) (Parser.seq_snd _pdollar e)) (Parser.return [])))
+            Parser.fail (List.is_empty ops)) (List.concat_list list))) $ \inner_parser
+  Parser.match_result Parser.fail_result (\syntax \remaining
+    let (List.length remaining) $ \rem_len
+    let (List.length ptoks) $ \orig_len
+    let (Nat.sub orig_len rem_len) $ \consumed_n
+    let (_ptok_end $ _last $ List.take consumed_n ptoks) $ \end
+    Parser.return (Syntax_spanned start end syntax) remaining
+  ) (inner_parser ptoks)
+
+_p_exprs = Parser.many _p_expr
+_compiler_parse_spanned = \ptoks Parser.value_if_consumed _p_exprs $ _drop_pcomments ptoks
+
+space = △ ' '
+newline = △ 10
+
+Native_stmt = Native_assignment literal o  # str * Native
+            | Native_expr o                # Native
+Native_expr = Native_identifier literal    # str
+            | Native_app o1 o2             # Native * Native
+            | Native_emit f                # gen_bin -> dag:dstring * identifier:dstring * gen_bin
+            | Native_spanned start end o   # nat nat Native
+
+nativeT = Native_identifier ":t"
+nativeI = Native_identifier ":i"
+nativeK = Native_identifier ":k"
+nativeB = Native_identifier ":b"
+nativeC = Native_identifier ":c"
+nativeS = Native_identifier ":s"
+
+# Native_expr => S => B
+native_contains_name = \eq_name fix $ \this \n
+    n
+        (\literal eq_name literal)
+        (\o1 \o2 Bool.match (this o2) true (this o1))
+        (\_emit false)
+        (\_start \_end \inner this inner)
+
+_dT = Dlist.cons ':' (Dlist.single 't')
+_dListEmpty = _dT
+_dFalse = _dT
+_dTrue = Dlist.cons ':' (Dlist.single 'k')
+_dBool = Bool.match _dFalse _dTrue
+_dag_nat = \fresh_res \fresh_helper List.foldr
+        (\b \acc Pair.let acc $ \dag \rhs
+          △ (\tl dag $
+            fresh_helper$space$_dT$space$_dBool b$newline $
+            fresh_res$space$fresh_helper$space$rhs$newline $ tl)
+          fresh_res)
+        (△ id _dListEmpty)
+_dag_str = \fresh_res \fresh_helper1 \fresh_helper2 List.foldr
+        (\n \acc Pair.let acc $ \dag \rhs
+          Pair.let (_dag_nat fresh_helper1 fresh_helper2 n) $ \nat_dag \nat_name
+          △ (\tl dag $ nat_dag $
+            fresh_helper1$space$_dT$space$nat_name$newline $
+            fresh_res$space$fresh_helper1$space$rhs$newline $ tl)
+          fresh_res)
+        (△ id _dListEmpty)
+
+quote_nat = \n Native_emit $ \gen_bin
+  Pair.let (gen_bin _) $ \fresh_res \gen_bin
+  Pair.let (gen_bin _) $ \fresh_helper \gen_bin
+  Pair.let (_dag_nat fresh_res fresh_helper n) $ \dag \result_name
+    \ontriple ontriple dag result_name gen_bin
+quote_str = \s Native_emit $ \gen_bin
+  Pair.let (gen_bin _) $ \fresh_res \gen_bin
+  Pair.let (gen_bin _) $ \fresh_helper1 \gen_bin
+  Pair.let (gen_bin _) $ \fresh_helper2 \gen_bin
+  Pair.let (_dag_str fresh_res fresh_helper1 fresh_helper2 s) $ \dag \result_name
+    \ontriple ontriple dag result_name gen_bin
+
+
+# SYNTAX => NATIVE
+_syntax_to_native_abs = \eq_name self_apply $ \strip \nbody nbody
+                (\literal \strip
+                    Bool.match
+                    (Native_app nativeK $ Native_identifier literal)
+                    nativeI
+                    $ eq_name literal
+                )
+                (\a \b \strip
+                    Bool.match
+                    (
+                        Bool.match
+                        (\strip Native_app nativeK $ Native_app a b)
+                        ( # check for: \b a b
+                            \strip b
+                              (\_lit a)
+                              (\_a \_b Native_app (Native_app nativeB a) (strip strip b))
+                              (\_emit _)
+                              (\_s \_e \_inner Native_app (Native_app nativeB a) (strip strip b))
+                        )
+                    )
+                    (
+                        Bool.match
+                        (\strip Native_app (Native_app nativeC (strip strip a)) b)
+                        (\strip Native_app (Native_app nativeS (strip strip a)) (strip strip b))
+                    )
+                    (native_contains_name eq_name a)
+                    (native_contains_name eq_name b)
+                    strip
+                )
+                (\emit \strip Native_app nativeK $ Native_emit emit)
+                (\start \end \inner \strip Native_spanned start end (strip strip inner))
+                strip
+_syntax_to_native = self_apply $ \this \syntax
+    syntax
+        (\name \this Native_identifier name)
+        (\this nativeT)
+        (\value \this quote_nat value)
+        (\value \this quote_str value)
+        (\list \this List.foldr (\item \list Native_app (Native_app nativeT (this this item)) list) nativeT list)
+        (\kvlist \this List.foldr (\item \map Native_app (Pair.match (\k \v Native_app (Native_app (Native_identifier "Map.set") (this this k)) (this this v)) item) map) nativeT kvlist)
+        # Bracket abstraction. [_syntax_to_native_abs] already K-wraps any subterm
+        # the bound variable doesn't reach (its identifier/app cases emit exactly
+        # [nativeK body] then), so a separate [syntax_contains_name] pre-pass to
+        # pick K vs. strip only re-walks the body to no effect. Always strip.
+        (\literal \body \this _syntax_to_native_abs (equal literal) (this this body))
+        (\o1 \o2 \this Native_app (this this o1) (this this o2))
+        (\literal \o \this Native_assignment fail nativeT)
+        (\typeLiteral \this Native_assignment fail nativeT)
+        (\start \end \inner \this Native_spanned start end (this this inner))
+        this
+
+
+_create_unique_name_from_nat = \n Dlist.from_list "::" $ Nat.to_string n
+_syntax_emit_adt_variant = \items \ctr_arg_list \index \args \name
+    [
+        Native_assignment 
+            name
+            (
+                _syntax_to_native
+                (syntax_abs (List.concat args ctr_arg_list) (syntax_app (List.map Syntax_identifier (△ (_create_unique_name_from_nat index) args))))
+            );
+        Native_assignment
+            (List.concat name "_Dispatch")
+            (
+                _syntax_to_native
+                (
+                    (\argDisp \argAlt \argItem syntax_abs [argDisp; argAlt; argItem] 
+                        (syntax_app 
+                            (△
+                                (Syntax_identifier argItem)
+                                (List.map (\item
+                                    Bool.match
+                                        (syntax_abs (Pair.snd (Pair.fst item)) (Syntax_identifier argAlt))
+                                        (Syntax_identifier argDisp)
+                                        (equal index (Pair.snd item))
+                                ) items)
+                            )
+                        )
+                    )
+                    "::f" # function to dispatch
+                    "::a" # alternative value
+                    "::x" # object to match on
+                )
+            )
+    ]
+_syntax_emit_adt = \type_name \items \ctr_arg_list
+        List.concat_map
+        (Pair.match (\pair \index _syntax_emit_adt_variant items ctr_arg_list index (Pair.snd pair) (Pair.fst pair)))
+        items
+
+_make_top_level_expr = \syntax_expr [Native_expr (_syntax_to_native syntax_expr)]
+
+syntax_to_native = \syntax
+    syntax
+        (\name       _make_top_level_expr (Syntax_identifier name))
+        (            _make_top_level_expr (Syntax_const_null))
+        (\value      _make_top_level_expr (Syntax_const_nat value))
+        (\value      _make_top_level_expr (Syntax_const_str value))
+        (\list       _make_top_level_expr (Syntax_list list))
+        (\kvlist     _make_top_level_expr (Syntax_map kvlist))
+        (\name \body _make_top_level_expr (Syntax_abs name body))
+        (\o1 \o2     _make_top_level_expr (Syntax_app o1 o2))
+        (\name \o    [Native_assignment name (_syntax_to_native o)])
+        (\type_name \pairs
+            (_syntax_emit_adt type_name (List.mapi △ pairs) (List.mapi (\_ _create_unique_name_from_nat) pairs))
+        )
+        (\start \end \inner _make_top_level_expr (Syntax_spanned start end inner))
+
+syntax_error = Syntax_identifier "ERROR"
+to_internal△ = fix $ \self \syntax syntax
+  (\name       Syntax_identifier "__ENV△")
+  (            syntax_error)
+  (\value      syntax_error)
+  (\value      syntax_error)
+  (\list       syntax_error)
+  (\kvlist     syntax_error)
+  (\name \body syntax_error)
+  (\o1 \o2     Syntax_app (self o1) (self o2))
+  (\_name \_o  syntax_error)
+  (\_type_name \_pairs syntax_error)
+  (\_start \_end \inner self inner)
+
+quick_parse_exn = \s to_internal△ $ Option.get_or syntax_error (Option.bind compiler_parse_expr_exn $ compiler_tokenize s)
+syntax_prelude =
+  [ Syntax_assignment ":t" $ quick_parse_exn "△"
+  ; Syntax_assignment ":k" $ quick_parse_exn "△ △"
+  ; Syntax_assignment ":i" $ quick_parse_exn "△ (△ (△ △)) △"
+  ; Syntax_assignment ":s" $ quick_parse_exn "△ (△ (△ △ △)) △"
+  ; Syntax_assignment ":b" $ quick_parse_exn "△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ △)"
+  ; Syntax_assignment ":c" $ quick_parse_exn "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
+  ]
+native_prelude = List.concat_map syntax_to_native syntax_prelude
+
+# Syntax list => Native list option
+compiler_lower = \synts some $ Dlist.from_list
+  native_prelude
+  (List.concat_map syntax_to_native synts)
+
+_compiler_lower = \synts some $ List.concat_map syntax_to_native synts
+
+# t generator = () -> t * t generator
+_gen_bin = fix $ \self \i \pair pair (stage Nat.to_bits_dstring i pair) (self $ stage Nat.succ i pair)
+gen_bin = _gen_bin 0
+# fst (Pair.snd (Pair.snd (gen_bin _) _) _) ""
+
+_span_suffix = \start \end \tl Dlist.from_list "::" $ Dlist.from_list (Nat.to_string start) $ Dlist.single ',' $ Dlist.from_list (Nat.to_string end) $ tl
+
+# Native => (dag dstring, name dstring, gen_bin) via continuation
+_native_expr_to_ddag = self_apply $ \self \n n
+    (\literal \self \gen_bin \triple triple Dlist.empty (Dlist.from_list literal) gen_bin)
+    (\o1 \o2 \self \gen_bin
+         self self o1 gen_bin $ \res1 \l1 \gen_bin
+         self self o2 gen_bin $ \res2 \l2 \gen_bin
+         \triple
+            gen_bin
+              (\fresh \gen_bin
+                triple
+                  (\tl res1 $ res2 $ fresh$space$l1$space$l2$newline $ tl)
+                  fresh
+                  gen_bin)
+    )
+    (\emit \self \gen_bin emit gen_bin)
+    (\start \end \inner \self \gen_bin
+         let (_span_suffix start end) $ \sfx
+         inner
+           (\literal \triple triple Dlist.empty (Dlist.from_list literal) gen_bin)
+           (\o1 \o2
+              self self o1 gen_bin $ \res1 \l1 \gen_bin
+              self self o2 gen_bin $ \res2 \l2 \gen_bin
+              \triple gen_bin (\fresh \gen_bin
+                let (Dlist.append fresh sfx) $ \fid
+                triple (\tl res1 $ res2 $ fid$space$l1$space$l2$newline $ tl) fid gen_bin))
+           (\emit emit gen_bin $ \dag \name \gen_bin
+              let (Dlist.append name sfx) $ \nid
+              \triple triple dag nid gen_bin)
+           (\s2 \e2 \inner2 self self (Native_spanned start end inner2) gen_bin)
+    )
+    self
+native_def_to_ddag = \n n
+   (\literal \o
+     _native_expr_to_ddag o gen_bin $ \res \l \_
+      \tl res $ Dlist.from_list literal $ space $ l $ newline $ tl
+   )
+   (\o
+     _native_expr_to_ddag o gen_bin $ \res \l \_
+      \tl res $ l $ newline $ tl
+   )
+
+# native_def_to_ddag (Native_expr (Native_identifier "△")) △
+# native_def_to_ddag (Native_expr (Native_app (Native_identifier "△") (Native_identifier "△"))) △
+
+compiler_emit_dag = \natives List.foldr native_def_to_ddag "" natives
+_compiler_emit_dag = \natives Dlist.from_list (compiler_emit_dag native_prelude) (compiler_emit_dag natives)
+compile_to_dag = \s
+    Option.get_or ""
+        (Option.map _compiler_emit_dag
+        $ Option.bind _compiler_lower
+        $ Option.bind compiler_parse
+        $ compiler_tokenize s)
+
+compile_to_dag_with_spans = \s
+    Option.get_or ""
+        (Option.map _compiler_emit_dag
+        $ Option.bind _compiler_lower
+        $ Option.bind _compiler_parse_spanned
+        $ compiler_tokenize_positioned s)
+
+compile_to_dag_bench = \s
+  let (Reflect.count_eval_steps compiler_tokenize s) $ \n_tokenize
+  let (compiler_tokenize s) $ Option.match _ $ \s
+  let (Reflect.count_eval_steps compiler_parse s) $ \n_parse
+  let (compiler_parse s) $ Option.match _ $ \s
+  let (Reflect.count_eval_steps compiler_lower s) $ \n_lower
+  let (_compiler_lower s) $ Option.match _ $ \s
+  let (Reflect.count_eval_steps compiler_emit_dag s) $ \n_emit
+  let (_compiler_emit_dag s) $ \s
+  List.concat_list [
+    "Tokenize: "; Nat.to_string n_tokenize; [10];
+    "Parse:    "; Nat.to_string n_parse; [10];
+    "Lower:    "; Nat.to_string n_lower; [10];
+    "Emit:     "; Nat.to_string n_emit; [10];
+  ]
+
+_to_string = id
+compile_to_dag_bench "x"
+# = Tokenize: 439
+#   Parse:    681
+#   Lower:    297
+#   Emit:     194
+
+compile_to_dag_bench "42"
+# = Tokenize: 683
+#   Parse:    532
+#   Lower:    321
+#   Emit:     1742
+
+compile_to_dag_bench "1337"
+# = Tokenize: 3178
+#   Parse:    532
+#   Lower:    321
+#   Emit:     2655
+
+compile_to_dag_bench "[42]"
+# = Tokenize: 1245
+#   Parse:    1511
+#   Lower:    514
+#   Emit:     3139
+
+compile_to_dag_bench "\x x"
+# = Tokenize: 1152
+#   Parse:    1361
+#   Lower:    1612
+#   Emit:     228
+
+compile_to_dag_bench "x = 42"
+# = Tokenize: 1489
+#   Parse:    1208
+#   Lower:    329
+#   Emit:     1830
+
+compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
+# = Tokenize: 20759
+#   Parse:    28121
+#   Lower:    5397
+#   Emit:     20043
+
+# compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
+# 
+# compile_to_dag_bench $ List.concat_list [ ['"'], List.repeat 100 '1', ['"'] ]
+# 
+# compile_to_dag_bench $ List.concat_list [ List.repeat 100 '1' ]
+# 
+# compile_to_dag_bench "\d \a \i i d (\x \x a) a a a a"
+
+_compiler_env =
+  Map.pmap_set "△" △ $
+  Map.pmap_set "t" △ $
+  Map.pmap_set ":t" △ $
+  Map.pmap_set ":k" (\a \b a) $
+  Map.pmap_set ":i" (\x x) $
+  Map.pmap_set ":s" (\a \b \c a c (b c)) $
+  Map.pmap_set ":b" (\a \b \c a (b c)) $
+  Map.pmap_set ":c" (\a \b \c a c b) $
+  Map.pmap_set "Map.set" Map.set $
+  Map.empty
+
+dag_to_val = Serialize.from_dag_with_env _compiler_env
+
+compile = compose dag_to_val compile_to_dag
+
+# _to_string = 
+# compile "[65,123,65,]"
+# compile "[65,123,65]"
+# compile "{△}"
+# compile "{△ △ △, △: △}"
+# compile "123"
+# compile "\x x"
+# compile ""
+
