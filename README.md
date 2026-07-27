@@ -43,8 +43,8 @@ There is no "import" statement or similar: Dependencies between modules are reso
 
 ## Pipeline
 
-This repository has no build logic of its own. [`build.sh`](./build.sh) is three
-invocations of tools that live in the submodules — the
+This repository has no build logic of its own. [`build.sh`](./build.sh) is a
+handful of invocations of tools that live in the submodules — the
 [LambAda build tool](https://github.com/lambada-llc/lambada/tree/main/bin), which
 knows about `.lamb` sources and expect tests, and the
 [tree calculus runtime](https://github.com/lambada-llc/tree-calculus/tree/main/bin),
@@ -63,6 +63,10 @@ which knows about [DAGs](https://github.com/lambada-llc/tree-calculus/tree/main/
    the result back into the source file it came from. A test symbol is named
    after that source line (`:test.Bool.Bool.12`), so no separate bookkeeping is
    needed to find it again.
+4. **Export the compiler** — `dag extract` takes `Lambada.compile` and
+   `Lambada.compile_to_dag` back out of the bundle as DAGs that stand on their
+   own, and writes them to `submodules/lambada/compiler/`, which is where the
+   [compiler source](./src/lambada/compiler.lamb) is published as a tree.
 
 Steps 1 and 3 are the ones that reduce trees, and both hand that to the C++
 runner — see [Setup](#setup).
