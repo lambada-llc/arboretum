@@ -1,0 +1,181 @@
+# Prefix map (trie indexed by key tree shape)
+# Default implementation, forwarded by the parent Map module; the historical
+# bit-encoding implementation lives in Map.Bits with the same public symbols.
+# Raw operations: values stored as-is, △ means empty/not-found
+# Node: △ (empty) | △ (△ vleaf stemtrie) forktrie. vleaf holds the value for
+# key △, stemtrie maps x for keys △ x, and forktrie maps x to a subtrie that
+# maps y for keys △ x y. Empty slots are △; the (vleaf, stemtrie) pair is △
+# when both its slots are empty.
+# `__smallest` variants recurse on one key node per step.
+# `__fastest` variants dispatch two key levels per step (a triage whose stem
+# and fork branches are themselves triages) and route data through small
+# closed glue combinators, minimizing the cost of compiled lambdas.
+_step_v = triage △ △ (\u \_ triage △ △ (\vl \_ vl) u)
+_step_s = triage △ △ (\u \_ triage △ △ (\_ \st st) u)
+_step_f = triage △ △ (\_ \ft ft)
+pmap_get__smallest = fix $ \self \k triage
+  _step_v
+  (\x \m self x (_step_s m))
+  (\x \y \m self y (self x (_step_f m)))
+  k
+# glue: one combinator per 2-level key pattern; f/g/h are sub-walks, applied
+# innermost first
+_get_vs = \m _step_v (_step_s m)
+_get_ss = \f \m f (_step_s (_step_s m))
+_get_sf = \f \g \m f (g (_step_f (_step_s m)))
+_get_fv = \f \m f (_step_v (_step_f m))
+_get_fs = \f \g \m f (g (_step_s (_step_f m)))
+_get_ff = \f \g \h \m f (g (h (_step_f (_step_f m))))
+_get_body = \self \k triage
+  (\_ _step_v)
+  (triage
+    (\_ _get_vs)
+    (\x \self _get_ss (self self x))
+    (\x \y \self _get_sf (self self y) (self self x)))
+  (triage
+    (\y \self _get_fv (self self y))
+    (\x \y \self _get_fs (self self y) (self self x))
+    (\x \y \z \self _get_ff (self self z) (self self y) (self self x)))
+  k self
+pmap_get__fastest = self_apply _get_body
+pmap_get = wait self_apply _get_body
+# set: rebuild a node around a slot transform g; dispatching on the node
+# first keeps all branches closed (no eager work on the untaken branch)
+_set_v = triage (\g △ (△ (g △) △) △) △ (\u \ft \g △ (triage (\g △ (g △) △) △ (\vl \st \g △ (g vl) st) u g) ft)
+_set_s = triage (\g △ (△ △ (g △)) △) △ (\u \ft \g △ (triage (\g △ △ (g △)) △ (\vl \st \g △ vl (g st)) u g) ft)
+_set_f = triage (\g △ △ (g △)) △ (\u \ft \g △ u (g ft))
+pmap_set__smallest = \k \v \m (fix $ \self \k triage
+  (\fin \m _set_v m fin)
+  (\x \fin \m _set_s m (self x fin))
+  (\x \y \fin \m _set_f m (self x (self y fin)))
+  k) k (\_ v) m
+# _at_X g is the slot transform that rebuilds at slot X with transform g
+_at_v = \g \t _set_v t g
+_at_s = \g \t _set_s t g
+_at_f = \g \t _set_f t g
+_set_vs = \g \m _set_s m (_at_v g)
+_set_ss = \g \m _set_s m (_at_s g)
+_set_sf = \g \m _set_s m (_at_f g)
+_set_fv = \g \m _set_f m (_at_v g)
+_set_fs = \g \m _set_f m (_at_s g)
+_set_ff = \g \m _set_f m (_at_f g)
+_set_body = \self \k triage
+  (\_ _at_v)
+  (triage
+    (\_ _set_vs)
+    (\x \self \fin _set_ss (self self x fin))
+    (\x \y \self \fin _set_sf (self self x (self self y fin))))
+  (triage
+    (\y \self \fin _set_fv (self self y fin))
+    (\x \y \self \fin _set_fs (self self x (self self y fin)))
+    (\x \y \z \self \fin _set_ff (self self x (self self y (self self z fin)))))
+  k self
+pmap_set__fastest = \k \v self_apply _set_body k (\_ v)
+pmap_set = \k \v wait self_apply _set_body k (\_ v)
+# remove: like set with transform (\_ △), but collapsing emptied pairs on the
+# way back up so removals leave no husk nodes
+_fork_unless_leafy = \u \v
+  let (△ u v) $ \fork
+  triage (triage △ (\_ fork) (\_ \_ fork) v) (\_ fork) (\_ \_ fork) u
+_rem_v = triage (\_ △) △ (\u \ft \g _fork_unless_leafy (triage (\_ △) △ (\vl \st \g _fork_unless_leafy (g vl) st) u g) ft)
+_rem_s = triage (\_ △) △ (\u \ft \g _fork_unless_leafy (triage (\_ △) △ (\vl \st \g _fork_unless_leafy vl (g st)) u g) ft)
+_rem_f = triage (\_ △) △ (\u \ft \g _fork_unless_leafy u (g ft))
+pmap_remove__smallest = \k \m (fix $ \self \k triage
+  (\fin \m _rem_v m fin)
+  (\x \fin \m _rem_s m (self x fin))
+  (\x \y \fin \m _rem_f m (self x (self y fin)))
+  k) k (\_ △) m
+# _rem_at_X g is the slot transform that rebuilds at slot X with transform g
+_rem_at_v = \g \t _rem_v t g
+_rem_at_s = \g \t _rem_s t g
+_rem_at_f = \g \t _rem_f t g
+_rem_vs = \g \m _rem_s m (_rem_at_v g)
+_rem_ss = \g \m _rem_s m (_rem_at_s g)
+_rem_sf = \g \m _rem_s m (_rem_at_f g)
+_rem_fv = \g \m _rem_f m (_rem_at_v g)
+_rem_fs = \g \m _rem_f m (_rem_at_s g)
+_rem_ff = \g \m _rem_f m (_rem_at_f g)
+_rem_body = \self \k triage
+  (\_ _rem_at_v)
+  (triage
+    (\_ _rem_vs)
+    (\x \self \fin _rem_ss (self self x fin))
+    (\x \y \self \fin _rem_sf (self self x (self self y fin))))
+  (triage
+    (\y \self \fin _rem_fv (self self y fin))
+    (\x \y \self \fin _rem_fs (self self x (self self y fin)))
+    (\x \y \z \self \fin _rem_ff (self self x (self self y (self self z fin)))))
+  k self
+pmap_remove__fastest = \k self_apply _rem_body k (\_ △)
+pmap_remove = \k wait self_apply _rem_body k (\_ △)
+_entries_or_more = fix $ \self triage [] _ (\u \ft
+  List.concat
+    (triage [] _ (\vl \st △ (△ △ vl) (List.map (Pair.match $ \k \v △ (△ k) v) (self st))) u)
+    (List.concat_map (Pair.match $ \kx \sub List.map (Pair.match $ \ky \v △ (△ kx ky) v) (self sub)) (self ft)))
+
+# Map API (wraps prefix map with Option values for clean get semantics)
+empty = △
+set = \k \v pmap_set k (Option.some v)
+get = pmap_get
+remove = pmap_remove
+entries = \m
+  let (_entries_or_more m) $
+  List.filter_map $ Pair.match $ \k
+  Option.match Option.none (\v Option.some (△ k v))
+
+# Tests
+_to_string = Option.to_source Nat.to_source
+get "a" empty
+# = none
+get "a" (set "a" 1 empty)
+# = (some 1)
+get "b" (set "a" 1 empty)
+# = none
+get "a" (set "b" 2 (set "a" 1 empty))
+# = (some 1)
+
+_to_string = Option.to_source Nat.to_source
+get "a" (remove "a" (set "a" 1 empty))
+# = none
+get "b" (remove "a" (set "b" 2 (set "a" 1 empty)))
+# = (some 2)
+get "a" (pmap_remove__smallest "a" (set "a" 1 empty))
+# = none
+get "a" (pmap_remove__fastest "a" (set "a" 1 empty))
+# = none
+get "b" (pmap_remove__smallest "a" (set "b" 2 (set "a" 1 empty)))
+# = (some 2)
+get "b" (pmap_remove__fastest "a" (set "b" 2 (set "a" 1 empty)))
+# = (some 2)
+
+_to_string = List.to_source (Pair.to_source Nat.to_source Nat.to_source)
+entries (set 1 10 empty)
+# = [(△ 1 10)]
+entries (set 2 20 (set 1 10 empty))
+# = [(△ 2 20); (△ 1 10)]
+
+# Convert a map to a function: key → value (returns △ for missing keys).
+# Partially evaluates the lookup against a known map: the trie is transformed
+# into a tree of key dispatchers, so the build can reduce `to_func m` to a
+# dispatcher with near-zero per-lookup cost. f transforms stored values; the
+# forktrie part stores subtries, transformed by another layer of _to_func.
+# The trie is dispatched first and the closed branches rebind f, so every
+# recursive call waits on a trie part (see docs/eager-evaluation-blowup.md).
+_to_func = fix $ \self \f \t triage
+  (\f \_ f △)
+  _
+  (\u \ft \f triage
+    (\ft \f triage (f △) (\_ f △) (self (self f) ft))
+    △
+    (\vl \st \ft \f triage (f vl) (self f st) (self (self f) ft))
+    u ft f)
+  t f
+to_func = _to_func id
+
+_to_string = Option.to_source Nat.to_source
+to_func (set "x" 42 (set "y" 99 empty)) "x"
+# = (some 42)
+to_func (set "x" 42 (set "y" 99 empty)) "y"
+# = (some 99)
+to_func (set "x" 42 empty) "z"
+# = none

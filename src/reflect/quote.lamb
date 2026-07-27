@@ -1,0 +1,86 @@
+# Reflection: quoting and construction of encoded tree terms.
+#
+# The encoding represents TC terms as data:
+#   △       <=>  △          (leaf encodes as leaf)
+#   △ a b   <=>  a b        (fork encodes as fork — applies when decoded)
+#   △ 'x    <=>  'x         (stem is opaque — blocks evaluation, treated as literal)
+#
+# This lets tree programs inspect and construct other tree programs as data.
+
+# Encode any tree as a quoted (reflective) representation.
+quote__smallest = fix $ \f triage △ (\x △ △ (f x)) (\x \y △ (△ △ (f x)) (f y))
+_quote_body = \self \x triage
+    (\self △)
+    (\a \self △ △ (self self a))
+    (\a \b \self △ (△ △ (self self a)) (self self b))
+    x self
+quote__fastest = self_apply _quote_body
+quote = wait self_apply _quote_body
+
+# Decode a quoted representation back to the original tree.
+# CAUTION: opaque stems (△ 'x) are treated as unknowns; this substitutes [△] for them.
+unsafe_unquote = fix $ \self triage △ (\_ △) (\a \b (self a) (self b))
+
+# Apply a quoted function to a list of quoted arguments.
+qapp = \f \args List.foldl △ f args
+
+# Build a quoted stem: [qstem qa] encodes [△ a] when [qa = quote a].
+qstem = \a △ △ a
+
+# Build a quoted fork: [qfork qa qb] encodes [△ a b] when [qa = quote a, qb = quote b].
+qfork = \a \b △ (△ △ a) b
+
+# Tests: show the encoding structure
+_to_string = String.to_source
+Serialize.to_source (quote △)
+# = "△"
+Serialize.to_source (quote (△ △))
+# = "(△ △ △)"
+Serialize.to_source (quote (△ △ △))
+# = "(△ (△ △ △) △)"
+
+# Tests: roundtrip via unsafe_unquote
+_to_string = Bool.to_source
+equal (unsafe_unquote (quote △)) △
+# = true
+equal (unsafe_unquote (quote (△ △))) (△ △)
+# = true
+equal (unsafe_unquote (quote id)) id
+# = true
+
+# Tests: qstem and qfork agree with quote
+equal (qstem (quote △)) (quote (△ △))
+# = true
+equal (qfork (quote △) (quote △)) (quote (△ △ △))
+# = true
+
+# Tests: variant correctness
+equal (quote__smallest △) (quote__fastest △)
+# = true
+equal (quote__smallest (△ △)) (quote__fastest (△ △))
+# = true
+equal (quote__smallest (△ △ △)) (quote__fastest (△ △ △))
+# = true
+equal (quote__smallest id) (quote__fastest id)
+# = true
+equal (quote__smallest fix) (quote__fastest fix)
+# = true
+
+_to_string = Nat.to_source
+size quote__smallest
+# = 137
+size quote__fastest
+# = 260
+size quote
+# = 156
+
+_to_string = id
+Bench.run [quote__smallest; Nat.succ]
+# =  oh |  0a   0b    1    2 3a 3b 3c |  alc  red
+#   188 | 751 1659 1846 2128 32 31 31 | 2410 4068
+Bench.run [quote__fastest;  Nat.succ]
+# =  oh |  0a  0b   1    2 3a 3b 3c |  alc  red
+#   218 | 341 837 994 1086 32 31 31 | 1178 2174
+Bench.run [quote;           Nat.succ]
+# =  oh |  0a  0b    1    2 3a 3b 3c |  alc  red
+#   220 | 343 843 1000 1093 32 31 31 | 1186 2187

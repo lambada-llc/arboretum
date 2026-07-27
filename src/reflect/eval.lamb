@@ -1,0 +1,91 @@
+
+# :: finalize:(T -> A -> R)
+# -> rule0a:A
+# -> rule0b:A
+# -> rule1:A
+# -> rule2:(A -> A -> A -> A)
+# -> rule3a:A
+# -> rule3b:(A -> A)
+# -> rule3c:(A -> A -> A)
+# -> (T -> T -> R)
+evaluator = \finalize \rule0a \rule0b \rule1 \rule2 \rule3a \rule3b \rule3c
+  \a \b triage _ _ finalize $ (fix $ \self
+    triage
+      (\z △ (△ z) rule0a)
+      (\y \z △ (△ y z) rule0b)
+      (triage
+        (\y \z △ y rule1)
+        (\x \y \z
+          Pair.let (self x z) $ \r1 \a1
+          Pair.let (self y z) $ \r2 \a2
+          Pair.let (self r1 r2) $ \r \a
+          △ r (rule2 a1 a2 a)
+        )
+        (\w \x \y \z
+          triage
+            (△ w rule3a)
+            (\a
+                Pair.let (self x a) $ \r \a
+                △ r (rule3b a))
+            (\a \b
+                Pair.let (self y a) $ \r \a1
+                Pair.let (self r b) $ \r \a2
+                △ r (rule3c a1 a2))
+            z))) a b
+
+_compose3 = \f \g \h compose f (compose g h)
+_compose4 = \f \g \h \i compose (compose f g) (compose h i)
+count_eval_steps = evaluator (\_ \cost cost 0) id id Nat.succ (_compose4 Nat.succ) Nat.succ (compose Nat.succ) (_compose3 Nat.succ)
+count_allocs = evaluator (\_ \cost cost 0) Nat.succ Nat.succ id _compose3 id id compose
+count_eval_steps_if_parallel = evaluator (\_ \cost cost) 0 0 1 (\cost1 \cost2 \cost Nat.add (Nat.max cost1 cost2) (Nat.succ cost)) 1 Nat.succ (\cost1 \cost2 Nat.succ (Nat.add cost1 cost2))
+max_parallel_steps = evaluator (\_ \cost cost) 1 1 1 (\cost1 \cost2 \cost Nat.max cost (Nat.add cost1 cost2)) 1 id Nat.max
+eval_with_cost = evaluator Pair.create 0 0 1 (\c1 \c2 \c Nat.succ $ Nat.add c $ Nat.add c1 c2) 1 Nat.succ (\c1 \c2 Nat.succ $ Nat.add c1 c2)
+
+eval = fix $ \self
+    triage
+      (\z △ z)
+      (\y \z △ y z)
+      (triage
+        (\y \z y)
+        (\x \y \z self (self x z) (self y z))
+        (\w \x \y \z
+          triage
+            w
+            (\a self x a)
+            (\a \b self (self y a) b)
+            z))
+
+_to_string = Pair.to_source Nat.to_source Nat.to_source
+eval_with_cost Nat.succ 0
+# = (△ 1 1)
+eval_with_cost Nat.succ 3
+# = (△ 4 37)
+eval_with_cost (Nat.add 1) 2
+# = (△ 3 125)
+
+_to_string = Nat.to_source
+count_eval_steps Nat.succ 0
+# = 1
+count_eval_steps Nat.succ 3
+# = 37
+count_eval_steps (Nat.add 1) 2
+# = 125
+
+count_allocs Nat.succ 0
+# = 0
+count_allocs Nat.succ 3
+# = 18
+
+count_eval_steps_if_parallel Nat.succ 3
+# = 25
+max_parallel_steps Nat.succ 3
+# = 6
+
+_to_string = Bool.to_source
+eval Bool.not false
+# = true
+eval Bool.not true
+# = false
+_to_string = Nat.to_source
+eval (Nat.add 2) 3
+# = 5

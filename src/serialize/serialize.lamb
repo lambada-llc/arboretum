@@ -1,0 +1,137 @@
+# Serialization: encode/decode tree calculus values to/from various string formats
+
+# Shared pre-order traversal for the encoders below. Walks x left to right,
+# threading a continuation [rest] (the suffix not yet emitted). Each node kind
+# supplies an emitter that prepends its tokens onto [rest]:
+#   leaf : rest -> out
+#   stem : self -> child         -> rest -> out
+#   fork : self -> left  -> right -> rest -> out
+# [self] is the recursive encoder, so each emitter picks its own traversal
+# order. The initial continuation is △ (the empty string).
+_preorder = \leaf \stem \fork \x
+  (fix $ \self \x \rest triage leaf (\a stem self a) (\a \b fork self a b) x rest) x △
+
+# Variant for bracket-delimited encodings: every node is wrapped in
+# [open]…[close], so the wrapper is emitted once around the per-kind dispatch
+# rather than repeated in each branch. A fork's two children are separated by
+# [sep], an (out -> out) prepender (id for none).
+_preorder_wrapped = \open \sep \close \x
+  (fix $ \self \x \rest △ open $ triage (\r r) self (\a \b \rest self a $ sep $ self b rest) x $ △ close rest) x △
+
+# 1. Bitstring (pre-order traversal: leaf=1, stem=01, fork=001)
+bitstr_encode = _preorder
+  (△ true)
+  (\self \a \rest △ false $ △ true $ self a rest)
+  (\self \a \b \rest △ false $ △ false $ △ true $ self a $ self b rest)
+bitstr_decode = \str triage △ △ (\x \_ x) $ List.foldr (triage (triage △ △ (\a triage △ △ (\b △ (a b)))) (\_ △ △) △) [] str
+
+# 2. Balanced parentheses (S-expression style)
+bps_encode = _preorder_wrapped '(' id ')'
+bps_decode = \x
+  let (List.map (triage △ △ (\hd \tl hd)) x) $ \bits
+  let (List.foldl (\s \b triage (△ △) (\_ triage △ △ $ \hd2 \tl let tl $ triage △ △ $ \hd1 △ (hd1 hd2)) △ b s) [\x x] bits) $ \stack
+  triage △ △ (\hd \tl hd) stack
+
+# 3. Ternary Polish notation (leaf=0, stem=1, fork=2)
+ternary_encode = _preorder
+  (△ '0')
+  (\self \a \rest △ '1' $ self a rest)
+  (\self \a \b \rest △ '2' $ self a $ self b rest)
+ternary_decode =
+  \x (fix $ \self \str
+    let str $ triage _ _ $ \hd \tl
+    let hd $ triage _ _ $ \d0 \hd
+    let hd $ triage _ _ $ \d1 \hd
+    let (\tl \f f △ tl) $ \on0
+    let (\tl self tl $ \res \tl \f f (△ res) tl) $ \on1
+    let (\tl self tl $ \resl \tl self tl $ \resr \tl \f f (△ resl resr) tl) $ \on2
+    triage (triage on0 (\_ on1) _ d0) (\_ on2) _ d1 tl
+  )
+  x (\res \tail res)
+
+# 4. Source code (renders tree as nested triangle notation)
+to_source = _preorder
+  (△ '△')
+  (\self \a \rest △ '(' $ △ '△' $ △ ' ' $ self a $ △ ')' rest)
+  (\self \a \b \rest △ '(' $ △ '△' $ △ ' ' $ self a $ △ ' ' $ self b $ △ ')' rest)
+
+# 5. JSON array notation (brackets and commas)
+js_array_encode = _preorder_wrapped '[' (△ ',') ']'
+
+# 6. Explicit binary tree (L = leaf, S = stem, F = fork)
+tree_encode = _preorder
+  (△ 'L')
+  (\self \a \rest △ '(' $ △ 'S' $ self a $ △ ')' rest)
+  (\self \a \b \rest △ '(' $ △ 'F' $ self a $ self b $ △ ')' rest)
+
+# Tests: roundtrips
+_to_string = Bool.to_source
+equal (bitstr_decode (bitstr_encode △)) △
+# = true
+equal (bitstr_decode (bitstr_encode 42)) 42
+# = true
+equal (bitstr_decode (bitstr_encode "hello")) "hello"
+# = true
+equal (bitstr_decode (bitstr_encode id)) id
+# = true
+
+equal (bps_decode (bps_encode △)) △
+# = true
+equal (bps_decode (bps_encode 42)) 42
+# = true
+equal (bps_decode (bps_encode "hello")) "hello"
+# = true
+
+equal (ternary_decode (ternary_encode △)) △
+# = true
+equal (ternary_decode (ternary_encode 42)) 42
+# = true
+equal (ternary_decode (ternary_encode "hello")) "hello"
+# = true
+
+# Tests: to_source
+_to_string = Bool.to_source
+equal (to_source △) "△"
+# = true
+equal (to_source (△ △)) "(△ △)"
+# = true
+equal (to_source (△ (△ △) △)) "(△ (△ △) △)"
+# = true
+
+# Tests: readable output
+_to_string = String.to_source
+ternary_encode △
+# = "0"
+ternary_encode (△ △)
+# = "10"
+
+bps_encode △
+# = "()"
+bps_encode (△ △)
+# = "(())"
+
+js_array_encode △
+# = "[]"
+js_array_encode (△ △)
+# = "[[]]"
+
+tree_encode △
+# = "L"
+tree_encode (△ △)
+# = "(SL)"
+
+# Tests: every encoder on the identity function (\x x)
+_to_string = String.to_source
+to_source id
+# = "(△ (△ (△ △)) △)"
+bps_encode id
+# = "(((()))())"
+ternary_encode id
+# = "21100"
+js_array_encode id
+# = "[[[[]]],[]]"
+tree_encode id
+# = "(F(S(SL))L)"
+_to_string = \bits String.to_source $ List.map (Bool.match '0' '1') bits
+bitstr_encode id
+# = "001010111"

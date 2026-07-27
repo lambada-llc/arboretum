@@ -1,0 +1,78 @@
+_fresh = Nat.to_bits_dstring
+
+_walk = fix $ \self \node \counter
+  triage
+    (\k k Dlist.empty (Dlist.from_list "△") counter)
+    _
+    (\left \right
+      self left counter $ \res_l \name_l \counter
+      self right counter $ \res_r \name_r \counter
+      \k
+        let (_fresh counter) $ \fresh
+        k
+          (\tl res_l $ res_r $ fresh $ △ ' ' $ name_l $ △ ' ' $ name_r $ △ 10 $ tl)
+          fresh
+          (Nat.succ counter)
+    )
+    node
+
+to_dag = \tree _walk (Reflect.quote tree) 0 $ \dag \root \_ △ (dag "") (root "")
+
+from_dag_with_env = \env \str
+  let (List.split_on 10 str) $ \lines
+  let (List.filter List.is_not_empty lines) $ \lines
+  let (List.foldl (\map \line
+    let (List.split_on 32 line) $
+    List.match map $ \a
+    List.match (Map.pmap_get a map) $ \b
+    List.match (Map.pmap_set a (Map.pmap_get b map) map) $ \c \_
+    Map.pmap_set a (Map.pmap_get b map $ Map.pmap_get c map) map
+  ) env) $ \emit
+  Bool.match (emit lines) △ (List.is_empty lines)
+
+from_dag = from_dag_with_env (Map.pmap_set "△" △ Map.empty)
+
+_to_string = String.to_source
+Pair.snd $ to_dag △
+# = "△"
+Pair.snd $ to_dag true
+# = "0"
+Pair.snd $ to_dag false
+# = "△"
+Pair.snd $ to_dag id
+# = "11"
+
+Pair.fst $ to_dag △
+# = ""
+Pair.fst $ to_dag true
+# = "0 △ △
+#   "
+Pair.fst $ to_dag false
+# = ""
+Pair.fst $ to_dag id
+# = "0 △ △
+#   1 △ 0
+#   01 △ 1
+#   11 01 △
+#   "
+Pair.fst $ to_dag Bool.not
+# = "0 △ △
+#   1 △ 0
+#   01 △ △
+#   11 01 △
+#   001 1 11
+#   101 △ 001
+#   011 101 △
+#   "
+
+_to_string = Bool.to_source
+equal △ (from_dag "")
+# = true
+equal △ (from_dag $ let (to_dag △) $ Pair.match $ \body \root List.concat body root)
+# = true
+equal true (from_dag $ let (to_dag true) $ Pair.match $ \body \root List.concat body root)
+# = true
+equal id (from_dag $ let (to_dag id) $ Pair.match $ \body \root List.concat body root)
+# = true
+equal Bool.not (from_dag $ let (to_dag Bool.not) $ Pair.match $ \body \root List.concat body root)
+# = true

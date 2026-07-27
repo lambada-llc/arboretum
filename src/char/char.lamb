@@ -1,0 +1,135 @@
+# Character classification predicates
+
+is_digit = Nat.in_range '0' '9'
+is_uppercase = Nat.in_range 'A' 'Z'
+is_lowercase = Nat.in_range 'a' 'z'
+is_alpha = Fn.p_or is_uppercase is_lowercase
+is_alphanum = Fn.p_or is_alpha is_digit
+is_whitespace = \c Nat.is_lte c ' '
+is_newline = Fn.p_or (equal_const 10) (equal_const 13)
+
+to_lower = \c Bool.match c (Nat.add ' ' c) (is_uppercase c)
+to_upper = \c Bool.match c (Nat.sub c ' ') (is_lowercase c)
+
+is_alpha__fastest = Memo.precompute_alt Memo.gen_ascii_high false is_alpha
+is_alphanum__fastest = Memo.precompute_alt Memo.gen_ascii false is_alphanum
+is_digit__fastest = Memo.precompute_alt Memo.gen_ascii_low false is_digit
+is_uppercase__fastest = Memo.precompute_alt Memo.gen_ascii_high false is_uppercase
+is_lowercase__fastest = Memo.precompute_alt Memo.gen_ascii_high false is_lowercase
+is_whitespace__fastest = Memo.precompute_alt Memo.gen_ascii_low false is_whitespace
+is_newline__fastest = Memo.precompute_alt Memo.gen_ascii_low false is_newline
+
+_single_quote = List.match _ (\hd \tl hd) "'"
+to_source = \c [_single_quote; c; _single_quote]
+
+_to_string = Bool.to_source
+is_digit '0'
+# = true
+is_digit '5'
+# = true
+is_digit '9'
+# = true
+is_digit 'a'
+# = false
+is_digit ' '
+# = false
+
+is_uppercase 'A'
+# = true
+is_uppercase 'Z'
+# = true
+is_uppercase 'a'
+# = false
+
+is_lowercase 'a'
+# = true
+is_lowercase 'z'
+# = true
+is_lowercase 'A'
+# = false
+
+is_alpha 'a'
+# = true
+is_alpha 'Z'
+# = true
+is_alpha '3'
+# = false
+
+is_alphanum 'a'
+# = true
+is_alphanum '3'
+# = true
+is_alphanum ' '
+# = false
+
+is_whitespace ' '
+# = true
+is_whitespace 'a'
+# = false
+
+_to_string = to_source
+to_lower 'A'
+# = 'a'
+to_lower 'Z'
+# = 'z'
+to_lower 'a'
+# = 'a'
+to_lower '3'
+# = '3'
+
+to_upper 'a'
+# = 'A'
+to_upper 'z'
+# = 'Z'
+to_upper 'A'
+# = 'A'
+to_upper '3'
+# = '3'
+
+_to_string = Bool.to_source
+is_digit__fastest '0'
+# = true
+is_digit__fastest '9'
+# = true
+is_digit__fastest 'a'
+# = false
+is_uppercase__fastest 'A'
+# = true
+is_uppercase__fastest 'a'
+# = false
+is_lowercase__fastest 'a'
+# = true
+is_lowercase__fastest 'A'
+# = false
+is_whitespace__fastest ' '
+# = true
+is_whitespace__fastest 'a'
+# = false
+
+is_alpha__fastest 'a'
+# = true
+is_alpha__fastest 'Z'
+# = true
+is_alpha__fastest '3'
+# = false
+is_alphanum__fastest 'a'
+# = true
+is_alphanum__fastest '3'
+# = true
+is_alphanum__fastest ' '
+# = false
+
+is_newline 10
+# = true
+is_newline 13
+# = true
+is_newline 'a'
+# = false
+is_newline ' '
+# = false
+is_newline__fastest 10
+# = true
+is_newline__fastest 13
+# = true
+is_newline__fastest 'a'
+# = false

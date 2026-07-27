@@ -1,0 +1,21 @@
+# Prefix map: maps arbitrary tree keys to values.
+# Two interchangeable implementations define the same public symbols:
+#   Map.Structural — trie indexed by key tree shape (the default, fastest)
+#   Map.Bits       — trie indexed by bitstring-encoded keys (historical)
+# This module forwards the structural implementation.
+# See build.sh / expect/ for rendered comparisons of the two encodings.
+pmap_get__smallest = Map.Structural.pmap_get__smallest
+pmap_get__fastest = Map.Structural.pmap_get__fastest
+pmap_get = Map.Structural.pmap_get
+pmap_set__smallest = Map.Structural.pmap_set__smallest
+pmap_set__fastest = Map.Structural.pmap_set__fastest
+pmap_set = Map.Structural.pmap_set
+pmap_remove__smallest = Map.Structural.pmap_remove__smallest
+pmap_remove__fastest = Map.Structural.pmap_remove__fastest
+pmap_remove = Map.Structural.pmap_remove
+empty = Map.Structural.empty
+set = Map.Structural.set
+get = Map.Structural.get
+remove = Map.Structural.remove
+entries = Map.Structural.entries
+to_func = Map.Structural.to_func

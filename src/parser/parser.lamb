@@ -1,0 +1,97 @@
+# Parser combinators for list-based parsing.
+#
+# A parser operates on lists (characters, tokens, or any elements).
+# Parse result: △ = failure, △ item remaining = success.
+
+fail_result = △
+return = \item \remaining △ item remaining
+match_result = \on_fail \on_succ triage on_fail _ on_succ
+map_result = \conv match_result fail_result (\item \remaining return (conv item) remaining)
+
+fail = \_ fail_result
+map = \conv \p \input map_result conv (p input)
+compose_dep = \p1 \cp2 \input match_result fail_result cp2 $ p1 input
+seq = \combine \p1 \p2 compose_dep p1 (\item \remaining map_result (combine item) (p2 remaining))
+seq_fst = seq (\a \_ a)
+# seq_snd keeps p2's result verbatim, so it needs no [map_result] rebuild: run p1,
+# discard its value, and hand the remaining input straight to p2.
+seq_snd = \p1 \p2 compose_dep p1 (\_ p2)
+seq_pair = seq Pair.create
+either = \p1 \p2 \input match_result p2 (\i \r \_ return i r) (p1 input) input
+any_of = List.foldr either fail
+
+# [self] is threaded through the success branch (and absorbed by the failure
+# branch) instead of threading [parser] through a fix: capturing [parser] in the
+# closure once beats re-passing it on every unfolding.
+many = \parser self_apply $ \self \s
+    match_result
+        (\_ return [] s)
+        (\item \remaining \self
+            match_result
+              fail_result
+              (\ritems \rremaining return (△ item ritems) rremaining)
+              (self self remaining)
+        )
+        (parser s)
+        self
+
+satisfy = \cond List.match fail_result $ \head \tail Bool.match fail_result (return head tail) (cond head)
+exact = \c satisfy (equal c)
+one = List.match fail_result return
+take_while = \cond \input Pair.match return (List.span cond input)
+take_until = \cond take_while (compose Bool.not cond)
+nonempty_take_while = \cond \input
+  let (take_while cond input) $ \res
+  let (match_result true (\item \_ List.is_empty item) res) $
+  Bool.match res fail_result
+
+_extract_if = \filter match_result Option.none (\item \remaining Bool.match Option.none (Option.some item) (filter remaining))
+value_if = \filter \parser \input _extract_if filter (parser input)
+value_if_consumed = value_if List.is_empty
+value = value_if (\_ true)
+
+# Tests: element matching
+_to_string = Option.to_source Char.to_source
+value (satisfy Char.is_alpha) "abc"
+# = (some 'a')
+value (satisfy Char.is_alpha) "123"
+# = none
+value (exact 'h') "hello"
+# = (some 'h')
+value (exact 'x') "hello"
+# = none
+
+# Tests: sequence matching
+_to_string = Option.to_source String.to_source
+value (take_while Char.is_alpha) "abc123"
+# = (some "abc")
+value_if_consumed (take_while Char.is_alpha) "hello"
+# = (some "hello")
+value_if_consumed (take_while Char.is_alpha) "hello1"
+# = none
+value (nonempty_take_while Char.is_alpha) "abc123"
+# = (some "abc")
+value (nonempty_take_while Char.is_alpha) "123"
+# = none
+
+# Tests: sequencing
+value (seq_fst (take_while Char.is_alpha) (take_while Char.is_digit)) "abc123xyz"
+# = (some "abc")
+value (seq_snd (take_while Char.is_alpha) (take_while Char.is_digit)) "abc123xyz"
+# = (some "123")
+
+# Tests: alternatives
+_to_string = Option.to_source Char.to_source
+value (either (exact 'a') (exact 'b')) "abc"
+# = (some 'a')
+value (either (exact 'a') (exact 'b')) "bcd"
+# = (some 'b')
+value (either (exact 'a') (exact 'b')) "cde"
+# = none
+
+# Tests: repetition and composition
+_to_string = Option.to_source Nat.to_source
+value_if_consumed (map Nat.from_string (nonempty_take_while Char.is_digit)) "42"
+# = (some 42)
+value_if_consumed (map Nat.from_string (nonempty_take_while Char.is_digit)) "abc"
+# = none
