@@ -77,6 +77,25 @@ Drop a `.lamb` file into the appropriate `src/` subdirectory and run `./build.sh
 — files are discovered automatically. Symbols may reference each other freely
 across files; only cycles are rejected.
 
+## Everything here terminates eagerly
+
+Tree calculus is a calculus: it prescribes no evaluation order. That freedom is
+the caller's, not the library's — so the rule for this repository is that every
+program in it terminates under **eager** evaluation.
+
+The discipline costs nothing and buys everything: a program that terminates
+eagerly also terminates lazily, so trees from here can be handed to any
+evaluator, in any order, without a caveat. Accept programs that only converge
+lazily and that flexibility is gone — and with it the eager evaluators, which in
+practice are the fast ones.
+
+So a definition that diverges under eager evaluation is a bug here, not a
+trade-off. What makes that workable is that delay is expressible: `wait` in
+[`src/core.lamb`](./src/core.lamb) holds an application as a value until it is
+applied, and `fix` is built on it, so a recursive definition unfolds one step
+per call instead of ahead of itself. Anything else that must not be evaluated
+yet is delayed the same way, explicitly.
+
 ## Writing [expect tests](https://blog.janestreet.com/the-joy-of-expect-tests/)
 
 Every bare top-level expression in a `.lamb` file is a test. If the file defines
