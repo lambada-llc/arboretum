@@ -9,8 +9,8 @@ all = \f List.foldr (\e \a Bool.and (f e) a) true
 head = List.match Option.none (\h \_ Option.some h)
 tail = List.match Option.none (\_ \t Option.some t)
 nth = fix $ \self \n List.match Option.none (\h \t Nat.match (Option.some h) (\pred self pred t) n)
-take = fix $ \self triage (\_ []) _ (\nhd \ntl List.match [] (\hd \tl △ hd $ self (Nat.pred $ △ nhd ntl) tl))
-drop = fix $ \self triage (\l l) _ (\nhd \ntl List.match [] (\hd \tl self (Nat.pred $ △ nhd ntl) tl))
+take = fix $ \self \n Nat.match (\_ []) (\pred List.match [] (\hd \tl △ hd (self pred tl))) n
+drop = fix $ \self \n Nat.match id (\pred List.match [] (\hd \tl self pred tl)) n
 nth_or = \default fix $ \self \i List.match default (\h \t Nat.match h (\pred self pred t) i)
 set_nth = \i \v \l List.concat (take i l) (△ v (drop (Nat.succ i) l))
 intersperse = \sep List.match [] (\h \t △ h (List.foldr (\e \a △ sep (△ e a)) [] t))
@@ -89,7 +89,7 @@ range 10
 filter_map = \f List.foldr (\e \a triage id (\e △ e) _ (f e) a) []
 concat_map = \f List.foldr (\e \a List.concat (f e) a) []
 partition = \f List.foldr (\e \acc Pair.match (\pass \fail Bool.match (△ pass (△ e fail)) (△ (△ e pass) fail) (f e)) acc) (△ [] [])
-chunk = \n fix $ \self \l List.match [] (\_ \_ △ (take n l) (self $ drop n l)) l
+chunk = \n fix $ \self List.match [] (\h \t △ (take n (△ h t)) (self $ drop n (△ h t)))
 
 # Both Bool.match branches are deferred behind \tt (bound to the tail) and
 # forced by the trailing [t]: under eager reduction, passing [self t] directly
