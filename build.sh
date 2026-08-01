@@ -16,7 +16,7 @@ export LAMBADA_TREE_CALCULUS="$PWD/submodules/tree-calculus"
 # module whose every binding has a normal form — which is the rule this
 # repository holds itself to (see README), so the build is also what enforces it:
 # a definition that only converges lazily hangs here rather than passing quietly.
-export TREE_CALCULUS_RUNNER=eager
+export TREE_CALCULUS_RUNNER=lazy
 lambada="node submodules/lambada/bin/lambada.js"
 dag="node submodules/tree-calculus/bin/dag.js"
 
