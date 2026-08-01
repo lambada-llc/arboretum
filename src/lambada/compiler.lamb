@@ -761,6 +761,43 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 #   Lower:    5397
 #   Emit:     20043
 
+# The only coverage of an ADT declaration: two variants, each emitting a
+# constructor and a *_Dispatch through _syntax_emit_adt.
+compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
+# = Tokenize: 7702
+#   Parse:    2472
+#   Lower:    559083
+#   Emit:     37539
+
+# Bracket abstraction is exponential in how many applications the bound variable
+# reaches: each further [a] under \a multiplies Lower by ~3.6 — measured 38428,
+# 126518, 440951, 1618694, 6166765 for zero through four. The last one is the
+# most expensive expect test here, ~6s of the build; drop to three [a] to keep
+# the shape at a quarter of the cost.
+compile_to_dag_bench "\d \a \i i d (\x \x a) a a a a"
+# = Tokenize: 7273
+#   Parse:    8686
+#   Lower:    6166765
+#   Emit:     29394
+
+# Literal size, one cost linear and one quadratic. Tokenizing and emitting a
+# string literal is a fixed ~91 and ~1450 reductions per character.
+compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
+# = Tokenize: 9646
+#   Parse:    536
+#   Lower:    321
+#   Emit:     145026
+
+# A nat literal is quadratic to tokenize: from_string__fastest folds
+# mul_const 10 acc + digit over an accumulator that keeps growing, so 5, 10 and
+# 20 digits cost 5638, 28727 and 122754 and 100 digits cost 3177028 — ~9s of the
+# build, and the shape is already plain at 20.
+compile_to_dag_bench $ List.repeat 100 '1'
+# = Tokenize: 3177028
+#   Parse:    532
+#   Lower:    321
+#   Emit:     60869
+
 _compiler_env =
   Map.pmap_set "△" △ $
   Map.pmap_set "t" △ $
@@ -776,3 +813,35 @@ _compiler_env =
 dag_to_val = Serialize.from_dag_with_env _compiler_env
 
 compile = compose dag_to_val compile_to_dag
+
+# End to end: source text in, the value it denotes out. Each group renders with
+# whatever the programs under it evaluate to.
+_to_string = Nat.to_source
+compile "123"
+# = 123
+
+_to_string = List.to_source Nat.to_source
+compile "[65,123,65]"
+# = [65; 123; 65]
+compile "[65,123,65,]"
+# = [65; 123; 65]
+
+_to_string = Serialize.to_source
+compile "\x x"
+# = (△ (△ (△ △)) △)
+
+# Map literals lower to Map.set over the empty map, so what comes back is a
+# prefix map; a key with no ': value' takes Syntax_const_null, which is △.
+_to_string = \m List.to_source (Pair.to_source Serialize.to_source Serialize.to_source) (Map.entries m)
+compile "{△}"
+# = [(△ △ △)]
+compile "{△ △ △, △: △}"
+# = [(△ △ △); (△ (△ △ △) △)]
+
+# An empty program emits the prelude and nothing else. The prelude's last DAG
+# line is an assignment rather than a bare root, so [from_dag_with_env] hands
+# back the environment it accumulated instead of a value — recorded by node
+# count, printing it is pages of triangles.
+_to_string = \v Nat.to_source (size v)
+compile ""
+# = 5440
