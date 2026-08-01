@@ -55,6 +55,63 @@ eval = fix $ \self
             (\a \b self (self y a) b)
             z))
 
+# [eval] reduces by recursing on the host: it normalizes both halves of an
+# application before combining them, so a program the eager evaluators hang on
+# hangs here too. [lazy_eval] reduces in normal order instead, and so returns on
+# every program that has a normal form at all — while itself terminating
+# eagerly, which is what lets this repository keep its rule and still run those.
+#
+# What buys that is the representation. Every term is △ applied to a list of
+# arguments, so here a term *is* that list:
+#     []            △
+#     [a]           △ a
+#     [a; b]        △ a b
+#     [a; b; c; …]  a redex
+# An unreduced application is just a longer list. Being data, it can be dropped
+# or duplicated without the host ever looking inside it — which is the whole of
+# the laziness: only [a], and for the fork rule [c], are ever forced.
+_spine = fix $ \self triage [] (\a [self a]) (\a \b [self a; self b])
+_unspine = fix $ \self List.match △ (\a \tl List.match (△ (self a)) (\b \_ △ (self a) (self b)) tl)
+
+# [triage] for spines: dispatch one that is already in weak head normal form.
+_triage_spine = \on_leaf \on_stem \on_fork
+  List.match on_leaf (\p \tl List.match (on_stem p) (\q \_ on_fork p q) tl)
+
+# Which argument gets forced, and when, is the whole point here, and on an eager
+# host that is decided by *scope*: a subterm of a branch that mentions none of
+# the branch's own variables is evaluated when the branch is built rather than
+# when it is taken. So each forcing lives in a binding that takes what it forces
+# as its last argument — [_redex] forces [a] only once there is a redex to
+# dispatch, [_fork_rule] forces [c] only once the fork rule is the one running —
+# and the partial applications that close over the rest force nothing.
+_fork_rule = \self \b \rest \w \x \c _triage_spine
+  (List.concat w rest)
+  (\u List.concat x (△ u rest))
+  (\u \v List.concat b (△ u (△ v rest)))
+  (self c)
+
+# The rule at the root, by the shape of [a] and, for a fork, of [c]:
+#     △ △       b c  →  b
+#     △ (△ x)   b c  →  (x c) (b c)
+#     △ (△ w x) b c  →  w  |  x u  |  b u v   as c is  △ | △ u | △ u v
+_redex = \self \b \rest \c \a _triage_spine
+  (List.concat b rest)
+  (\x List.concat x (△ c (△ (List.concat b [c]) rest)))
+  (\w \x _fork_rule self b rest w x c)
+  (self a)
+
+# Weak head normal form: rewrite the root until fewer than three arguments are
+# left, which is when there is no rule to apply and the spine is a tree again.
+_whnf = fix $ \self \t
+  List.match t (\a \t1
+  List.match t (\b \t2
+  List.match t (\c \rest self $ _redex self b rest c a) t2) t1) t
+
+_nf = fix $ \self compose (List.map self) _whnf
+
+# Normal form of [a b], for every [a] and [b] that have one.
+lazy_eval = \a \b _unspine $ _nf $ List.concat (_spine a) [_spine b]
+
 _to_string = Pair.to_source Nat.to_source Nat.to_source
 eval_with_cost Nat.succ 0
 # = (△ 1 1)
@@ -88,4 +145,14 @@ eval Bool.not true
 # = false
 _to_string = Nat.to_source
 eval (Nat.add 2) 3
+# = 5
+
+# lazy_eval agrees with eval wherever eval is defined at all
+_to_string = Bool.to_source
+lazy_eval Bool.not false
+# = true
+lazy_eval Bool.not true
+# = false
+_to_string = Nat.to_source
+lazy_eval (Nat.add 2) 3
 # = 5
