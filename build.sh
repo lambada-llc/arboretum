@@ -9,14 +9,7 @@ cd "$(dirname "$0")"
 
 # Use the pinned submodule rather than a published runtime.
 export LAMBADA_TREE_CALCULUS="$PWD/submodules/tree-calculus"
-
-# Reduce in C++ rather than in Node, eagerly rather than on demand. The runtime
-# compiles the runner from source on first use; nothing else about the build
-# changes. Eager reduction is the faster evaluator and only terminates on a
-# module whose every binding has a normal form — which is the rule this
-# repository holds itself to (see README), so the build is also what enforces it:
-# a definition that only converges lazily hangs here rather than passing quietly.
-export TREE_CALCULUS_RUNNER=lazy
+export TREE_CALCULUS_RUNNER=eager
 lambada="node submodules/lambada/bin/lambada.js"
 dag="node submodules/tree-calculus/bin/dag.js"
 
