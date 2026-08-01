@@ -32,19 +32,29 @@ _f6 = \self \x compose Snat.succ $ triage id self (_q6 self) x
 size__smallest6 = \x (fix _f6) x Snat.zero
 
 # Smaller still, once the program no longer has to terminate under eager
-# evaluation. Nathan Farlow found these two by deleting subtrees of
-# size__smallest — sometimes several at once — and searching for smaller
-# replacements (lambada-llc/tree-calculus#20). Both hang every eager evaluator,
-# which is what __lazy marks, so they are applied through Reflect.lazy_eval:
-# it reduces in normal order and so returns on any program that has a normal
-# form at all, while itself terminating eagerly, which is what lets this
-# repository hold its own rule and still run these. The pair shares all of the
-# 89-node _lazy_body and differs only in the knot tied around it, 19 nodes for
-# the 108 against 24 for the 113.
+# evaluation. Nathan Farlow found these by deleting subtrees of a known program
+# — sometimes several at once — and searching for smaller replacements
+# (lambada-llc/tree-calculus#20). Every one of them hangs an eager evaluator,
+# which is what __lazy marks, so they are applied through Reflect.lazy_eval: it
+# reduces in normal order and so returns on anything that has a normal form at
+# all, while terminating eagerly itself, which is what lets this repository keep
+# its rule and still run them. They are named by node count rather than by rank,
+# so that finding a smaller one adds a line instead of renumbering the rest.
+#
+# They are not one family. _lazy_body is what the 108 and the 113 have in common
+# (and 79 nodes of it is shared with size__smallest, which is where those two
+# were carved from); _lazy_body2 is a different architecture altogether. The 103
+# and the 106 share only 30 nodes with each other, and little with anything
+# else, so they are written out whole.
 _lazy_body = △ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ △)))))))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ (△ △)) △)))) (△ (△ (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ △)))) (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ △)))))))) (△ (△ (△ △ (△ △))))))))) (△ (△ (△ (△ △) △)) △))
-size__smallest__lazy = △ (△ (△ (△ (△ △ (△ (△ (△ (△ △))) (△ △)))) _lazy_body)) (△ (△ △) (△ △ △))
-size__smallest__lazy2 = △ (△ (△ (△ (△ (△ (△ △ (△ (△ (△ (△ (△ (△ (△ △)) △)) (△ △)))))) (△ △))) _lazy_body)) (△ △ △)
-
+_lazy_body2 = △ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △))))))) (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ △) △))) (△ (△ (△ △ (△ (△ (△ △ △))))) △)))
+size__lazy_100 = △ (△ (△ (△ (△ △ (△ (△ (△ (△ (△ △)) △)) (△ △)))) (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ △ △)))) _lazy_body2))) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ (△ △) △)) △)))))) (△ △)
+size__lazy_103 = △ (△ (△ (△ (△ △ (△ (△ (△ (△ △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △)))))))))) (△ △ (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ △)) △)))))))) (△ △))))) (△ (△ (△ (△ (△ △)) △)) (△ △ △))))) (△ (△ (△ (△ △) △)) △))))) (△ △)
+size__lazy_104 = △ (△ (△ (△ (△ △ (△ (△ (△ (△ (△ △)) △)) (△ △)))) (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ △ △)))) (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ △)))))))) _lazy_body2)))) (△ (△ (△ (△ △) △)) △))))) (△ △)
+size__lazy_106 = △ (△ (△ (△ (△ △ (△ (△ (△ (△ △))) (△ △)))) (△ △ (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ △)) △)))))))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △)))))))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △)))) (△ △ △))))) (△ (△ (△ (△ △) △)) △))))) (△ △)
+size__lazy_108 = △ (△ (△ (△ (△ △ (△ (△ (△ (△ △))) (△ △)))) _lazy_body)) (△ (△ △) (△ △ △))
+size__lazy_113 = △ (△ (△ (△ (△ (△ (△ △ (△ (△ (△ (△ (△ (△ (△ △)) △)) (△ △)))))) (△ △))) _lazy_body)) (△ △ △)
+size__smallest__lazy = size__lazy_100
 _size_body = \self \x compose △ $ triage (\self id) (\u \self self self u) (\v \u \self compose (self self u) (self self v)) x self
 size__fastest = \x (self_apply _size_body) x △
 size = \x (wait self_apply _size_body) x △
@@ -79,7 +89,7 @@ size__smallest5 $ id
 size__smallest6 $ id
 # = 5
 
-# The __lazy pair returns only under normal order, so Reflect.lazy_eval is what
+# The __lazy ones return only under normal order, so Reflect.lazy_eval is what
 # applies them here; applying them directly is what hangs the build.
 Reflect.lazy_eval size__smallest__lazy △
 # = 1
@@ -89,13 +99,15 @@ Reflect.lazy_eval size__smallest__lazy $ △ △ △
 # = 3
 Reflect.lazy_eval size__smallest__lazy id
 # = 5
-Reflect.lazy_eval size__smallest__lazy2 △
-# = 1
-Reflect.lazy_eval size__smallest__lazy2 $ △ △
-# = 2
-Reflect.lazy_eval size__smallest__lazy2 $ △ △ △
-# = 3
-Reflect.lazy_eval size__smallest__lazy2 id
+Reflect.lazy_eval size__lazy_103 id
+# = 5
+Reflect.lazy_eval size__lazy_104 id
+# = 5
+Reflect.lazy_eval size__lazy_106 id
+# = 5
+Reflect.lazy_eval size__lazy_108 id
+# = 5
+Reflect.lazy_eval size__lazy_113 id
 # = 5
 
 size size__smallest
@@ -110,7 +122,15 @@ size size__smallest5
 # = 125
 size size__smallest6
 # = 125
-size size__smallest__lazy
+size size__lazy_100
+# = 100
+size size__lazy_103
+# = 103
+size size__lazy_104
+# = 104
+size size__lazy_106
+# = 106
+size size__lazy_108
 # = 108
-size size__smallest__lazy2
+size size__lazy_113
 # = 113
