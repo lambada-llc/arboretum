@@ -17,8 +17,9 @@ Node.js and a C++ compiler are the only dependencies. The LambAda compiler is it
 The C++ one is there because reducing trees is what a build spends its time on,
 and [`runner`](https://github.com/lambada-llc/tree-calculus/blob/main/implementation/cpp/dag-machine/runner.md)
 does that faster and in bounded memory. `build.sh` asks for it with
-`TREE_CALCULUS_RUNNER=1`; the runtime compiles it from source on first use. Drop
-that line and the same build runs on Node alone, to the same results.
+`TREE_CALCULUS_RUNNER=eager`; the runtime compiles it from source on first use.
+`=1` picks the lazy evaluator instead, and dropping the line runs the same build
+on Node alone — all three to the same results.
 
 ## Build
 
