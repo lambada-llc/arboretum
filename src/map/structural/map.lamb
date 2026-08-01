@@ -1,6 +1,5 @@
 # Prefix map (trie indexed by key tree shape)
-# Default implementation, forwarded by the parent Map module; the historical
-# bit-encoding implementation lives in Map.Bits with the same public symbols.
+# The implementation behind the parent Map module, which forwards to it.
 # Raw operations: values stored as-is, △ means empty/not-found
 # Node: △ (empty) | △ (△ vleaf stemtrie) forktrie. vleaf holds the value for
 # key △, stemtrie maps x for keys △ x, and forktrie maps x to a subtrie that
@@ -160,7 +159,8 @@ entries (set 2 20 (set 1 10 empty))
 # dispatcher with near-zero per-lookup cost. f transforms stored values; the
 # forktrie part stores subtries, transformed by another layer of _to_func.
 # The trie is dispatched first and the closed branches rebind f, so every
-# recursive call waits on a trie part (see docs/eager-evaluation-blowup.md).
+# recursive call waits on a trie part: under eager evaluation a call that did
+# not would unfold against every possible key, not just the ones in the map.
 _to_func = fix $ \self \f \t triage
   (\f \_ f △)
   _

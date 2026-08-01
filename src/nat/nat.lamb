@@ -27,7 +27,7 @@ double = triage 0 _ (\h \t △ false (△ h t))
 # Carry bit c into list l: l unchanged when there is no carry (O(1)), else succ l.
 # Even the no-carry branch destructures l, so on symbolic input reduction stays
 # stuck like List.zip; otherwise whole-program reduction of folds like from_string
-# would diverge. Both branches are functions of l so neither (in particular succ) 
+# would diverge. Both branches are functions of l so neither (in particular succ)
 # fires until selected.
 _carry = \c Bool.match (\l List.match △ (\_ \_ l) l) succ c
 # Pair the common low bits of a and b into a list of (ha,hb) forks, terminated by
