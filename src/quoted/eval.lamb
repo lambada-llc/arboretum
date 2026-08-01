@@ -1,0 +1,91 @@
+# Symbolic evaluation of quoted terms (encoding: src/reflect/quote.lamb).
+#
+# Reduction treats an opaque stem [△ 'x] as an unknown and stops the moment one
+# reaches a position whose value it would need — head position, or a triage
+# scrutinee. [eval q] returns [△ result blocker], where the blocker is △ if
+# reduction ran to completion and [△ 'x] if it is waiting on x.
+#
+# An absent blocker says the reduction path never consulted an unknown, so the
+# residual term shows where, and how often, each variable flows into the output.
+# Reduction is head reduction, so a residual can still contain redexes under a
+# constructor; recurse on it to normalize all the way down.
+
+# Classify a quoted term as leaf / stem / fork and call the matching handler,
+# reducing it first when it is an unreduced application. A term whose head is an
+# opaque variable is none of the three: it goes to [ounk] with that variable,
+# which is where the blocker comes from.
+_qtriage = \apply \ounk \ot \os \of fix $ \self \x
+  triage
+    ot
+    (\a ounk x a)
+    (\x1 \x2
+      triage
+        os
+        (\a \_ ounk x a)
+        (\x0 \x1 \x2
+          triage
+            of
+            (\a \_ \_ ounk x a)
+            (\x00 \x0 \x1 \x2 let (apply (△ (△ x00 x0) x1) x2) $ Pair.match $ \x \blocker triage self (\blocker \x ounk x blocker) _ blocker x)
+            x0 x1 x2
+        )
+        x1 x2
+    )
+    x
+
+# [apply qf qx] — the reduction rules, over quoted terms. The nesting follows
+# them: the outer classification is of qf, and a leaf or stem there simply grows
+# into a stem or a fork, since neither is yet applied enough to reduce. Only a
+# fork fires a rule, chosen by its left child (leaf = rule 1, stem = rule 2,
+# fork = rule 3), and rule 3 alone goes on to classify qx — that is its triage.
+# A block at any of those points leaves the term unreduced and propagates out.
+apply = fix $ \self \a \b
+  _qtriage self
+    (\a \blocker \b △ (△ a b) $ △ blocker)
+    (\b △ (Reflect.qstem b) △)
+    (\a1 \b △ (Reflect.qfork a1 b) △)
+    (\a1 \a2 \b
+      _qtriage self
+        (\a1 \blocker \a2 \b △ (△ (Reflect.qfork a1 a2) b) $ △ blocker)
+        (\a2 \b △ a2 △)
+        (\a1 \a2 \b self (Pair.fst $ self a1 b) (Pair.fst $ self a2 b))
+        (\a0 \a1 \a2 \b
+          _qtriage self
+            (\b \blocker △ (△ (Reflect.qfork (Reflect.qfork a0 a1) a2) b) $ △ blocker)
+            (△ a0 △)
+            (\y self a1 y)
+            (\x \y self (Pair.fst $ self a2 x) y)
+            b
+        )
+        a1 a2 b
+    )
+    a b
+
+# Triage a quoted term after reducing it as far as its head shape requires.
+qtriage = _qtriage apply
+
+# Head-reduce a quoted term, pairing the residual with the blocker (△ if none).
+eval = \x qtriage (\x \blocker △ x $ △ blocker) (△ △ △) (\a △ (Reflect.qstem a) △) (\a \b △ (Reflect.qfork a b) △) x
+
+_render = Pair.match $ \res \blocker
+  List.concat (Quoted.to_string res) $
+  triage "" (\v List.concat " [blocked: " $ List.concat v "]") _ blocker
+_to_string = _render
+
+eval (Reflect.quote △)
+# = △
+eval (Reflect.quote (△ △))
+# = △ △
+eval (△ "x")
+# = x [blocked: x]
+eval (Reflect.qapp (Reflect.quote id) [△ "x"])
+# = x [blocked: x]
+eval (Reflect.qapp (Reflect.quote (\a \b a)) [△ "x"; △ "y"])
+# = x [blocked: x]
+eval (Reflect.qapp (Reflect.quote (\a \b b)) [△ "x"; △ "y"])
+# = y [blocked: y]
+
+apply (Reflect.quote Bool.not) (Reflect.quote false)
+# = △ △
+apply (Reflect.quote Bool.not) (Reflect.quote true)
+# = △
