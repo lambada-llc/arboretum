@@ -96,14 +96,10 @@ applied, and `fix` is built on it, so a recursive definition unfolds one step
 per call instead of ahead of itself. Anything else that must not be evaluated
 yet is delayed the same way, explicitly.
 
-The exception is a program kept to be *studied* rather than run — one worth
-having precisely because of how small it is, which only converges in normal
-order. Those carry a `__lazy` suffix and are never applied directly; they are
-data here, handed to
-[`Reflect.lazy_eval`](./src/reflect/eval.lamb), a normal-order evaluator that
-terminates eagerly itself. So every binding the build evaluates still obeys the
-rule above. See [`Snat.size__smallest__lazy`](./src/snat/size.lamb), at 108
-nodes against the 125 of the smallest that runs eagerly.
+A program worth keeping that only converges in normal order carries a `__lazy`
+suffix. Nothing applies one directly: `Reflect.lazy_eval` evaluates it, and
+terminates eagerly itself, so the rule above still holds of everything the build
+runs.
 
 ## Writing [expect tests](https://blog.janestreet.com/the-joy-of-expect-tests/)
 
