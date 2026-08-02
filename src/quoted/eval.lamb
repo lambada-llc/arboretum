@@ -139,6 +139,34 @@ _normalize = fix $ \self \fuel \q
 # [normalize_eager budget q] — q's normal form, or none if the budget ran out.
 normalize_eager = \budget \q Option.map Pair.snd $ _normalize budget q
 
+# Normal order, to a normal form, on a budget of head reductions.
+#
+# [eval] stops at the head; recursing under its result normalizes inside the
+# constructors it leaves, which is the normal form again — reached the other
+# way round, and reached where eager order would not have got started. It needs
+# a budget for the same reason the eager one does, from the other side: a term
+# can have a head normal form and no normal form at all. A stuck triage is
+# exactly that shape — its untaken branches are still whatever built them, and
+# for a program whose recursion unfolds ahead of its dispatch, that is an
+# unfolding with no end. So this spends a unit per head reduction and stops.
+_normalize_lazy = fix $ \self \fuel \q
+  Snat.match Option.none (\fuel
+    Pair.let (Quoted.eval q) $ \r \blocked
+    triage
+      (_ok fuel $ △ r blocked)
+      (\_ _ok fuel $ △ r blocked)
+      (\f \x Option.bind (Pair.match $ \fuel Pair.match $ \f2 \bf
+              Option.bind (Pair.match $ \fuel Pair.match $ \x2 \bx
+                _ok fuel $ △ (△ f2 x2) (Option.alt blocked $ Option.alt bf bx))
+              (self fuel x))
+              (self fuel f))
+      r)
+    fuel
+
+# [normalize_lazy budget q] — q's normal form paired with the variable reduction
+# is waiting on, or none if the budget ran out.
+normalize_lazy = \budget \q Option.map Pair.snd $ _normalize_lazy budget q
+
 _render = Pair.match $ \res \blocker
   List.concat (Quoted.to_string res) $
   triage "" (\v List.concat " [blocked: " $ List.concat v "]") _ blocker
@@ -203,6 +231,25 @@ _drops_a_loop = \x const △ (_never x)
 _to_string = _render
 eval (Reflect.qapp (Reflect.quote _drops_a_loop) [△ "t"])
 # = △
+
+# Normal order goes on where [eval] stops, and stops for the same reason eager
+# order does, one constructor further in. [_counts_forever t] head-reduces to a
+# successor of itself, so every head reduction produces one more and the budget
+# is what ends it — which is the shape of the __lazy programs in
+# src/snat/size.lamb, and why Certify normalizes on a budget.
+_counts_forever = fix $ \self \x Snat.succ (self x)
+_counting = Reflect.qapp (Reflect.quote _counts_forever) [△ "t"]
+# [eval] returns, and is not waiting on t to do it: one successor needs no case.
+_to_string = Bool.to_source
+Option.match true (\_ false) $ Pair.snd $ eval _counting
+# = true
+_to_string = Option.to_source _render
+normalize_lazy _budget _counting
+# = none
+normalize_lazy _budget (Reflect.qapp (Reflect.quote _drops_a_loop) [△ "t"])
+# = (some △)
+normalize_lazy _budget _stem_of_a_redex
+# = (some △ △)
 
 # [self_apply self_apply] has no normal form, so quoting it takes qapp rather
 # than quote. Discarding it is a value in one order and a divergence in the other.

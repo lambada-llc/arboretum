@@ -119,12 +119,29 @@ Certify.computes_size_eagerly size__lazy_108
 Certify.computes_size_eagerly size__lazy_113
 # = false
 
-# A false is "not certifiable eagerly", not "not `size`" — but nothing here
-# establishes that they are `size` either. Certify.computes_size cannot be
-# asked: it normalizes what it is handed, and what these leave it holding under
-# a variable input has no normal form. That leaves one input apiece through
-# Reflect.lazy_eval, which is a smoke test and not much more — `_deep_bug` in
-# src/certify/test.lamb is not `size`, and returns 5 on this input too.
+# Certify.computes_size, which asks only for the count, is not a true for them
+# either, and four of them get far enough to say so. Their residual under a
+# variable input has no normal form — the recursion unfolds under a constructor
+# that reduction would have discarded, and normalizing that is what outruns the
+# budget — so the verdict is the same "not certifiable" for the same reason the
+# certificate exists to give: no proof, not a counterexample.
+Certify.computes_size size__lazy_100
+# = false
+Certify.computes_size size__lazy_104
+# = false
+Certify.computes_size size__lazy_108
+# = false
+Certify.computes_size size__lazy_113
+# = false
+
+# The 103 and the 106 are not on that list because they cannot be asked at all:
+# they unfold in head position rather than under a constructor, so the very
+# first head reduction does not come back and there is no budget outside it to
+# spend. They are the two that share almost nothing with the rest.
+#
+# So that these are `size` is not established here at all. What is left of that
+# claim is one input apiece below, which is a smoke test and not much more —
+# `_deep_bug` in src/certify/test.lamb is not `size`, and returns 5 on it too.
 _to_string = Snat.to_string
 Reflect.lazy_eval size__smallest__lazy id
 # = 5

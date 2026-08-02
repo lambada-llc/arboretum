@@ -11,8 +11,8 @@
 # abstract Snat: a multiset of `1`s, `|t|`s (the size of tree variable t) and
 # `n`s (the value of an Snat variable). The top goal is `p t ⊨ |t|`. Five rules
 # close it, each either a fact about trees or a step of the induction:
-#   • NORMALIZE  reduce the term symbolically; opaque variables block reduction
-#                and the evaluator reports the one it is waiting on
+#   • NORMALIZE  reduce the term symbolically, on a budget; opaque variables
+#                block reduction and the evaluator reports the one it waits on
 #   • PEEL       a term that reduced to `△ x` is a successor, so spend a `1`
 #                from the spec and continue with `x`
 #   • SPLIT      case on the blocking variable — every tree is △, △a or △ab and
@@ -39,9 +39,15 @@
 # bounds". The analysis is an underapproximation by design: it gives up beyond
 # `_depth` nested case splits, and when the accumulated state never folds, as in
 # `compose Snat.from_nat size` — that is `size`, but it counts in binary Nat and
-# converts at the end, so the induction never closes over the unary spec. It
-# also presumes termination: it reads through Quoted.eval, which does not return
-# on a program that diverges under symbolic evaluation.
+# converts at the end, so the induction never closes over the unary spec.
+#
+# NORMALIZE runs on a budget, so a term with no normal form costs a false rather
+# than an answer that never comes. That covers a program whose recursion unfolds
+# under a constructor reduction would have discarded, which is how most of the
+# `__lazy` programs in src/snat/size.lamb are built. What it does not cover is
+# the same unfolding in head position: there a single head reduction does not
+# come back, and the budget, which is spent per head reduction, never gets to
+# count. Two of those programs are like that, and this does not return on them.
 #
 # Which order it diverges under is the other question a reader of a program can
 # settle, since tree calculus prescribes none and `size` can be written to
@@ -54,11 +60,10 @@
 # order can converge where another does not, so a program that terminates under
 # this order terminates under every one: [p t] strongly normalizes.
 #
-# It costs a budget. Eager reduction of an eagerly divergent program does not
-# come back, so the eager normalizer counts rule applications and calls a
-# program that outruns it not certifiable — which is what makes
-# [computes_size_eagerly] total, where [computes_size] is the one that can fail
-# to answer. Neither refines the other: each is a verdict the other cannot give.
+# That one is on a budget too, of rule applications rather than head
+# reductions, and outrunning it is what an eagerly divergent program does — so
+# [computes_size_eagerly] answers on everything, which the other one still does
+# not. Neither refines the other: each is a verdict the other cannot give.
 #
 # The tests are next door in test.lamb, which is free to reach into Snat for
 # programs to judge. This file is not: Snat's size programs depend on it.
@@ -94,18 +99,6 @@ _spec_eq = \a \b Option.match false List.is_empty $ _minus a b
 _first = \f fix $ \self List.match Option.none
   (\hd \tl Option.match self (\x \_ Option.some x) (f hd) tl)
 _all = \f fix $ \self List.match true (\hd \tl Bool.match (\_ false) self (f hd) tl)
-
-# Normalize, and report the variable reduction is waiting on.
-# Quoted.eval is head reduction with blocker tracking; recursing under the
-# result normalizes inside constructors, so equal states look equal.
-_nf = fix $ \self \q
-  Pair.let (Quoted.eval q) $ \r \blocked
-  triage
-    (△ r blocked)
-    (\_ △ r blocked)
-    (\f \x Pair.let (self f) $ \f2 \bf Pair.let (self x) $ \x2 \bx
-           △ (△ f2 x2) (Option.alt blocked $ Option.alt bf bx))
-    r
 
 # First-order matching: pattern variables bind to subterms of the target.
 _capture = \n \t \s Option.match
@@ -185,16 +178,16 @@ _prove = \nf fix $ \self \depth \g \asms \e \q
       self)
   (nf q) self
 
-# The two reduction orders, as the two normalizers the prover runs on. [_lazily]
-# is what Quoted.eval does: reduce the head, and leave what a rule discards
-# unevaluated. [_eagerly] normalizes both halves of an application before a rule
-# fires on it, and reports [none] rather than not returning once `_budget` rule
-# applications are spent. Where both return they return the same normal form —
-# reduction is confluent — so `_nf` on the eager one is not more reduction, only
-# the blocker read off it.
-_budget = Snat.from_nat 1000
-_lazily = \q Option.some $ _nf q
-_eagerly = \q Option.map _nf $ Quoted.normalize_eager _budget q
+# The two reduction orders, as the two normalizers the prover runs on. Both
+# normalize all the way down and both answer [none] rather than not returning,
+# so which one the prover is handed decides what a verdict means, not whether
+# there is one. Where both return they return the same normal form — reduction
+# is confluent — so running the lazy one over the eager one's result is not more
+# reduction, only the blocker read off it.
+_budget = Snat.from_nat 1000            # rule applications, eagerly
+_head_budget = Snat.from_nat 40000      # head reductions, in normal order
+_lazily = Quoted.normalize_lazy _head_budget
+_eagerly = \q Option.bind (Quoted.normalize_lazy _head_budget) $ Quoted.normalize_eager _budget q
 
 _certify = \nf \p _prove nf _depth Snat.one [] [_sz _input] $ _app (Reflect.quote p) (_var _input)
 
