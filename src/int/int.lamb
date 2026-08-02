@@ -1,0 +1,101 @@
+# Signed integers as a sign flag paired with a magnitude: `△ is_negative abs`.
+#
+# Sign-magnitude leaves `Nat` arithmetic intact — `mul` and the magnitude of a
+# sum are the `Nat` operations unchanged, and `negate`, `abs` and `is_negative`
+# are projections. The price is `add`, which has to case-split on the two signs,
+# and a zero that is not unique: `negate zero` is a negative zero and nothing
+# normalizes it away. Anything observing an integer therefore ignores the sign
+# once the magnitude is zero, as `is_zero` and `to_string` do.
+
+create = Pair.create
+is_negative = Pair.fst
+abs = Pair.snd
+from_nat = create false
+negate = Pair.match $ \sign \val create (Bool.not sign) val
+zero = from_nat 0
+is_zero = Pair.match $ \_ \val Nat.is_zero val
+
+# Opposite signs: the larger magnitude wins and the result takes its sign.
+# `sign` is a's, kept when a's magnitude is the larger one and negated otherwise.
+# Both branches subtract the smaller magnitude from the larger — `Nat.sub` wraps
+# around on underflow, so the comparison is what keeps the result defined rather
+# than a shortcut.
+_add_opposite = \sign \av \bv Bool.match
+  (\av \bv create sign $ Nat.sub av bv)
+  (\av \bv create (Bool.not sign) $ Nat.sub bv av)
+  (Nat.is_lte av bv) av bv
+add = \a \b
+  Pair.let a $ \as \av
+  Pair.let b $ \bs \bv
+  Bool.match (\av \bv create as $ Nat.add av bv) (_add_opposite as) (Bool.xor as bs) av bv
+
+sub = \a \b add a (negate b)
+mul = \a \b create (Bool.xor (is_negative a) (is_negative b)) (Nat.mul (abs a) (abs b))
+
+to_string = Pair.match $ \sign \val Bool.match (△ 45) id (Bool.or (Bool.not sign) (Nat.is_zero val)) $ Nat.to_string val
+# A negative has no `Nat`, so it clamps to zero.
+to_nat = Pair.match $ \sign \val Bool.match val 0 sign
+
+_p3 = from_nat 3
+_p5 = from_nat 5
+_p10 = from_nat 10
+_n3 = negate _p3
+_n6 = negate (from_nat 6)
+
+_to_string = to_string
+add _p3 _p5
+# = 8
+add _p10 _n3
+# = 7
+add _n3 _p10
+# = 7
+add (negate (from_nat 4)) _n6
+# = -10
+add _p5 (negate _p5)
+# = 0
+add zero _p5
+# = 5
+sub _p10 _p3
+# = 7
+sub _p3 _p10
+# = -7
+sub _p5 _p5
+# = 0
+negate _p3
+# = -3
+negate _n3
+# = 3
+mul _p3 _p5
+# = 15
+mul _p3 _n3
+# = -9
+mul _n3 _n3
+# = 9
+mul _n6 _p5
+# = -30
+mul _p5 zero
+# = 0
+
+_to_string = Nat.to_source
+to_nat _p10
+# = 10
+to_nat _n3
+# = 0
+to_nat zero
+# = 0
+abs _n6
+# = 6
+abs _p5
+# = 5
+
+_to_string = Bool.to_source
+is_negative _p5
+# = false
+is_negative _n3
+# = true
+is_negative zero
+# = false
+is_zero zero
+# = true
+is_zero _p5
+# = false
