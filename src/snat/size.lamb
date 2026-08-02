@@ -134,10 +134,14 @@ Certify.computes_size size__lazy_108
 Certify.computes_size size__lazy_113
 # = false
 
-# The 103 and the 106 are not on that list because they cannot be asked at all:
-# they unfold in head position rather than under a constructor, so the very
-# first head reduction does not come back and there is no budget outside it to
-# spend. They are the two that share almost nothing with the rest.
+# The 103 and the 106 are missing from that list for a reason that is about the
+# evaluator rather than about them. Certify.computes_size answers false for both
+# in a few seconds under a normal-order runner; under the eager one the build
+# uses, it does not come back. Head-reducing either of them here is fine — a few
+# hundred nodes of residual, blocked on the input — so what those two cost is
+# not reduction but the eager evaluation of it. Reading them is where the
+# certifier stops being an eager program, which is what this file is about, and
+# so the verdict exists without being a test this build can run.
 #
 # So that these are `size` is not established here at all. What is left of that
 # claim is one input apiece below, which is a smoke test and not much more —

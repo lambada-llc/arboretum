@@ -42,12 +42,17 @@
 # converts at the end, so the induction never closes over the unary spec.
 #
 # NORMALIZE runs on a budget, so a term with no normal form costs a false rather
-# than an answer that never comes. That covers a program whose recursion unfolds
-# under a constructor reduction would have discarded, which is how most of the
-# `__lazy` programs in src/snat/size.lamb are built. What it does not cover is
-# the same unfolding in head position: there a single head reduction does not
-# come back, and the budget, which is spent per head reduction, never gets to
-# count. Two of those programs are like that, and this does not return on them.
+# than an answer that never comes. That is what the `__lazy` programs in
+# src/snat/size.lamb cost it: their recursion unfolds under a constructor that
+# reduction would have discarded, so head reduction returns and normalizing what
+# it returns does not.
+#
+# The budget is spent per head reduction and says nothing about what one costs,
+# and on two of those programs that bill comes due: reading the 103 and the 106
+# answers false in seconds under a normal-order evaluator and does not come back
+# under an eager one. Which is the same distinction this file is about, one
+# level up — the analysis is a program in this repository like any other, and
+# those two are the inputs on which it stops being an eager one.
 #
 # Which order it diverges under is the other question a reader of a program can
 # settle, since tree calculus prescribes none and `size` can be written to
