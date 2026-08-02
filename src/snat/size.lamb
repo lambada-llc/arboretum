@@ -119,10 +119,12 @@ Certify.computes_size_eagerly size__lazy_108
 Certify.computes_size_eagerly size__lazy_113
 # = false
 
-# A false is "not certifiable", not "not `size`", and these are `size`: that
-# half is still sampled, because Certify.computes_size cannot be asked. It
-# normalizes what it is handed, and what these leave it holding under a variable
-# input has no normal form. Reflect.lazy_eval is what reduces them instead.
+# A false is "not certifiable eagerly", not "not `size`" — but nothing here
+# establishes that they are `size` either. Certify.computes_size cannot be
+# asked: it normalizes what it is handed, and what these leave it holding under
+# a variable input has no normal form. That leaves one input apiece through
+# Reflect.lazy_eval, which is a smoke test and not much more — `_deep_bug` in
+# src/certify/test.lamb is not `size`, and returns 5 on this input too.
 _to_string = Snat.to_string
 Reflect.lazy_eval size__smallest__lazy id
 # = 5
