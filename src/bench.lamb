@@ -1,0 +1,36 @@
+Bench.run [id; 0]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    1 |  1  1 1 1  0  0  0 |   2   2
+Bench.run [id; true]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    1 |  1  1 1 1  0  0  0 |   2   2
+Bench.run [compose; Nat.succ; Nat.succ; 0]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  2  1 2 2  0  0  0 |   3   4
+#    0 |  0  1 0 0  0  0  0 |   1   0
+#    2 |  2  7 9 9  2  1  1 |   9  22
+Bench.run [compose; Nat.succ; Nat.succ; 127]
+# = oh | 0a 0b  1  2 3a 3b 3c | alc red
+#    0 |  2  1  2  2  0  0  0 |   3   4
+#    0 |  0  1  0  0  0  0  0 |   1   0
+#   15 | 14 50 59 58  2  7  8 |  64 134
+Bench.run [equal; 0; 0]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    3 |  2  6 8 8  1  0  0 |   8  17
+#    0 |  0  0 0 0  1  0  0 |   0   1
+Bench.run [equal; 0; 1]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    3 |  2  6 8 8  1  0  0 |   8  17
+#    0 |  0  0 2 0  0  0  1 |   0   3
+Bench.run [equal; [1; 2; 3]; [1; 2; 3]]
+# = oh |  0a  0b   1   2 3a 3b 3c | alc red
+#   51 | 126 274 360 380  9  4  8 | 400 761
+#    8 |  24  24  64  56  9 12  8 |  48 149
+Bench.run [equal; [1; 2; 3]; [1; 2; 4]]
+# = oh |  0a  0b   1   2 3a 3b 3c | alc red
+#   51 | 126 274 360 380  9  4  8 | 400 761
+#   29 |  21  21  63  53 11  7  9 |  42 143
+
+_to_string = Nat.to_source
+size Nat.succ
+# = 94

@@ -1,0 +1,36 @@
+_to_string = Bool.to_source
+
+equal (Lambada.compile (Nat.to_source 0)) 0
+# = true
+equal (Lambada.compile (Nat.to_source 1)) 1
+# = true
+equal (Lambada.compile (Nat.to_source 42)) 42
+# = true
+
+equal (Lambada.compile (String.to_source "hello")) "hello"
+# = true
+equal (Lambada.compile (String.to_source "")) ""
+# = true
+equal (Lambada.compile (String.to_source "abc")) "abc"
+# = true
+
+equal (Lambada.compile (Serialize.to_source △)) △
+# = true
+equal (Lambada.compile (Serialize.to_source (△ △))) (△ △)
+# = true
+equal (Lambada.compile (Serialize.to_source (△ △ △))) (△ △ △)
+# = true
+
+equal (Lambada.compile (List.to_source Nat.to_source [1; 2; 3])) [1; 2; 3]
+# = true
+equal (Lambada.compile (List.to_source Nat.to_source [])) []
+# = true
+equal (Lambada.compile (List.to_source Nat.to_source [42])) [42]
+# = true
+
+equal (Lambada.compile "[1, 2, 3]") [1; 2; 3]
+# = true
+equal (Lambada.compile "{}") {}
+# = true
+equal (Lambada.compile "[1, 2; 3, 4]") [1; 2; 3; 4]
+# = true

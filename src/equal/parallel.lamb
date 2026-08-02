@@ -1,0 +1,48 @@
+# Validation of `equal__parallel` against the naive `equal__common` using the
+# parallel-reduction step counters (see src/reflect/eval.lamb).
+#
+# `_deep d` is a perfect binary tree of depth d (2^(d+1)-1 nodes); each tree is
+# compared against itself — the worst case, where every node must be visited.
+# Its recursive call sits under the `\pred` binder rather than in a `Bool.if`
+# branch, because an eager reduction evaluates both branches before the
+# condition picks one, and this one would never bottom out.
+#
+# `count_eval_steps_if_parallel` is the critical-path length under unlimited
+# parallelism. For `equal__common` it grows with the tree's *node count*, because
+# the naive fork case `Bool.and (self ax bx) (self ay by)` forces the two subtree
+# comparisons in sequence. For `equal__parallel` it grows only with the tree's
+# *depth*: the fork case emits a native fork application `△ (△ x) y b` whose
+# reduction `△ (△ x) y z → (x z) (y z)` runs the two subtree comparisons in
+# parallel, so the whole tree collapses in O(depth) parallel steps.
+_deep = fix $ \self \d Nat.match △ (\pred let (self pred) \t △ t t) d
+_com = \d Reflect.count_eval_steps_if_parallel (equal__common   (_deep d)) (_deep d)
+_par = \d Reflect.count_eval_steps_if_parallel (equal__parallel (_deep d)) (_deep d)
+
+_to_string = Nat.to_source
+# critical path (parallel span): common ~doubles per depth, parallel grows linearly
+_com 3
+# = 99
+_par 3
+# = 49
+_com 4
+# = 211
+_par 4
+# = 65
+_com 5
+# = 435
+_par 5
+# = 81
+_com 6
+# = 883
+_par 6
+# = 97
+# max parallelism exposed (peak simultaneous reductions) at depth 6
+Reflect.max_parallel_steps (equal__common   (_deep 6)) (_deep 6)
+# = 19
+Reflect.max_parallel_steps (equal__parallel (_deep 6)) (_deep 6)
+# = 538
+# total sequential steps at depth 6 — the extra work the parallel variant trades for span
+Reflect.count_eval_steps (equal__common   (_deep 6)) (_deep 6)
+# = 1135
+Reflect.count_eval_steps (equal__parallel (_deep 6)) (_deep 6)
+# = 1891

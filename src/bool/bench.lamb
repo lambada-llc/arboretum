@@ -1,0 +1,22 @@
+Bench.run [Bool.not; true]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 1 0  0  1  0 |   0   2
+Bench.run [Bool.not; false]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 0 0  1  0  0 |   0   1
+Bench.run [Bool.and; true; true]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 1 0  0  1  0 |   0   2
+#    1 |  1  1 1 1  0  0  0 |   2   2
+Bench.run [Bool.and; true; false]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 1 0  0  1  0 |   0   2
+#    1 |  1  1 1 1  0  0  0 |   2   2
+Bench.run [Bool.or; false; true]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 0 0  1  0  0 |   0   1
+#    1 |  1  1 1 1  0  0  0 |   2   2
+Bench.run [Bool.or; false; false]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  0  0 0 0  1  0  0 |   0   1
+#    1 |  1  1 1 1  0  0  0 |   2   2
