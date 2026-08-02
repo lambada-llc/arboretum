@@ -59,44 +59,33 @@ _size_body = \self \x compose △ $ triage (\self id) (\u \self self self u) (\v
 size__fastest = \x (self_apply _size_body) x △
 size = \x (wait self_apply _size_body) x △
 
+# One line per program, in place of the examples each used to carry:
+# Certify.computes_size reads the program as the tree it is and proves by
+# induction over the shape of the input that it returns that input's node count
+# — for every tree, including the ones no test would reach.
+_to_string = Bool.to_source
+Certify.computes_size size
+# = true
+Certify.computes_size size__fastest
+# = true
+Certify.computes_size size__smallest
+# = true
+Certify.computes_size size__smallest2
+# = true
+Certify.computes_size size__smallest3
+# = true
+Certify.computes_size size__smallest4
+# = true
+Certify.computes_size size__smallest5
+# = true
+Certify.computes_size size__smallest6
+# = true
+
+# The __lazy ones stay sampled: certifying a program means normalizing it, and
+# the symbolic reduction the certifier reads through forces arguments, so these
+# hang it exactly as they hang an eager evaluator. They are applied rather than
+# proved, through Reflect.lazy_eval, one input apiece.
 _to_string = Snat.to_string
-size__smallest $ △
-# = 1
-size__smallest $ △ △
-# = 2
-size__smallest $ △ △ △
-# = 3
-size__smallest $ id
-# = 5
-
-size__fastest $ △
-# = 1
-size__fastest $ △ △
-# = 2
-size__fastest $ △ △ △
-# = 3
-size__fastest $ id
-# = 5
-
-size__smallest2 $ id
-# = 5
-size__smallest3 $ id
-# = 5
-size__smallest4 $ id
-# = 5
-size__smallest5 $ id
-# = 5
-size__smallest6 $ id
-# = 5
-
-# The __lazy ones return only under normal order, so Reflect.lazy_eval is what
-# applies them here; applying them directly is what hangs the build.
-Reflect.lazy_eval size__smallest__lazy △
-# = 1
-Reflect.lazy_eval size__smallest__lazy $ △ △
-# = 2
-Reflect.lazy_eval size__smallest__lazy $ △ △ △
-# = 3
 Reflect.lazy_eval size__smallest__lazy id
 # = 5
 Reflect.lazy_eval size__lazy_103 id
@@ -110,6 +99,7 @@ Reflect.lazy_eval size__lazy_108 id
 Reflect.lazy_eval size__lazy_113 id
 # = 5
 
+# Node counts, which is what the __lazy ones are named after.
 size size__smallest
 # = 125
 size size__smallest2
