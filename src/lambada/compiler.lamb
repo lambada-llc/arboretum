@@ -499,38 +499,49 @@ quote_str = \s Native_emit $ \gen_bin
 
 
 # SYNTAX => NATIVE
-_syntax_to_native_abs = \eq_name self_apply $ \strip \nbody nbody
+# Bracket abstraction, in one pass. Which combinator an application takes is
+# decided by whether each side mentions the bound name, and that is exactly what
+# abstracting the side already discovers — so [_abs] returns both at once, as
+# [△ mentions_name abstracted]. Asking [native_contains_name] instead re-walked
+# each side from the top at every level: quadratic in the term, and every
+# identifier it passed cost a full string comparison. Now each subterm is walked
+# once, and each name compared once.
+_abs = \eq_name self_apply $ \strip \nbody nbody
                 (\literal \strip
                     Bool.match
-                    (Native_app nativeK $ Native_identifier literal)
-                    nativeI
+                    (△ false $ Native_app nativeK $ Native_identifier literal)
+                    (△ true nativeI)
                     $ eq_name literal
                 )
                 (\a \b \strip
+                    Pair.let (strip strip a) $ \in_a \sa
+                    Pair.let (strip strip b) $ \in_b \sb
                     Bool.match
                     (
                         Bool.match
-                        (\strip Native_app nativeK $ Native_app a b)
+                        (△ false $ Native_app nativeK $ Native_app a b)
                         ( # check for: \b a b
-                            \strip b
+                            △ true $ b
                               (\_lit a)
-                              (\_a \_b Native_app (Native_app nativeB a) (strip strip b))
+                              (\_a \_b Native_app (Native_app nativeB a) sb)
                               (\_emit _)
-                              (\_s \_e \_inner Native_app (Native_app nativeB a) (strip strip b))
+                              (\_s \_e \_inner Native_app (Native_app nativeB a) sb)
                         )
                     )
                     (
                         Bool.match
-                        (\strip Native_app (Native_app nativeC (strip strip a)) b)
-                        (\strip Native_app (Native_app nativeS (strip strip a)) (strip strip b))
+                        (△ true $ Native_app (Native_app nativeC sa) b)
+                        (△ true $ Native_app (Native_app nativeS sa) sb)
                     )
-                    (native_contains_name eq_name a)
-                    (native_contains_name eq_name b)
-                    strip
+                    in_a
+                    in_b
                 )
-                (\emit \strip Native_app nativeK $ Native_emit emit)
-                (\start \end \inner \strip Native_spanned start end (strip strip inner))
+                (\emit \strip △ false $ Native_app nativeK $ Native_emit emit)
+                (\start \end \inner \strip
+                    Pair.let (strip strip inner) $ \in_inner \sinner
+                    △ in_inner $ Native_spanned start end sinner)
                 strip
+_syntax_to_native_abs = \eq_name compose Pair.snd (_abs eq_name)
 _syntax_to_native = self_apply $ \this \syntax
     syntax
         (\name \this Native_identifier name)
@@ -746,7 +757,7 @@ compile_to_dag_bench "[42]"
 compile_to_dag_bench "\x x"
 # = Tokenize: 1152
 #   Parse:    1361
-#   Lower:    1612
+#   Lower:    1484
 #   Emit:     228
 
 compile_to_dag_bench "x = 42"
@@ -766,7 +777,7 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 7702
 #   Parse:    2472
-#   Lower:    559083
+#   Lower:    208828
 #   Emit:     37539
 
 # Bracket abstraction is exponential in how many applications the bound variable
@@ -777,7 +788,7 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 compile_to_dag_bench "\d \a \i i d (\x \x a) a a a a"
 # = Tokenize: 7273
 #   Parse:    8686
-#   Lower:    6166765
+#   Lower:    48824
 #   Emit:     29394
 
 # Literal size, one cost linear and one quadratic. Tokenizing and emitting a
