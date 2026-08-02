@@ -1,0 +1,73 @@
+# Size and cost of the polymorphic programs — the ones that read an arbitrary
+# tree without knowing what it encodes, so their cost is set by the argument's
+# shape alone. They live at the root; this directory only benches them.
+_to_string = Nat.to_source
+size equal__smallest
+# = 278
+size equal__fastest
+# = 542
+size equal
+# = 297
+
+_to_string = id
+Bench.run [equal__smallest; △; △]
+# = oh | 0a 0b  1  2 3a 3b 3c | alc red
+#    2 | 11 22 27 30  1  0  0 |  33  58
+#    0 |  0  0  0  0  1  0  0 |   0   1
+Bench.run [equal__fastest;  △; △]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    1 |  0  0 2 1  1  0  0 |   0   4
+#    0 |  0  0 0 0  1  0  0 |   0   1
+Bench.run [equal;           △; △]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    3 |  2  6 8 8  1  0  0 |   8  17
+#    0 |  0  0 0 0  1  0  0 |   0   1
+Bench.run [equal__smallest; fix; fix]
+# =  oh |  0a   0b    1    2 3a 3b 3c |  alc  red
+#   128 | 839 1642 2097 2289 19 27 18 | 2481 4450
+#    18 |  54   54  144  126 19 45 18 |  108  352
+Bench.run [equal__fastest;  fix; fix]
+# =  oh |  0a  0b    1    2 3a 3b 3c |  alc  red
+#   145 | 405 837 1118 1180 19 27 18 | 1242 2362
+#    18 |  54  54  144  126 19 45 18 |  108  352
+Bench.run [equal;           fix; fix]
+# =  oh |  0a  0b    1    2 3a 3b 3c |  alc  red
+#   147 | 407 843 1124 1187 19 27 18 | 1250 2375
+#    18 |  54  54  144  126 19 45 18 |  108  352
+Bench.run [size__smallest; Nat.succ]
+# =  oh |   0a   0b    1    2  3a  3b  3c |  alc  red
+#   673 | 1180 3028 3548 3837 126 120 207 | 4208 7838
+Bench.run [size__fastest;  Nat.succ]
+# =  oh |  0a   0b    1    2  3a  3b  3c |  alc  red
+#   515 | 582 1673 2163 2168 126 120 207 | 2255 4784
+Bench.run [size;           Nat.succ]
+# =  oh |  0a   0b    1    2  3a  3b  3c |  alc  red
+#   517 | 584 1680 2170 2176 126 120 207 | 2264 4799
+
+# equal_const specialized to a constant: a short-circuiting recognizer. The
+# second row of each bench (recognizer applied to the arg) is the runtime cost;
+# note equal_const bails immediately on a mismatch ('.' vs 'a') while equal pays
+# the same full-walk cost whether the arg matches or not.
+_to_string = Nat.to_source
+size (equal_const '.')
+# = 224
+size (equal '.')
+# = 374
+
+_to_string = id
+Bench.run [equal_const; '.'; '.']
+# = oh |  0a  0b   1   2 3a 3b 3c | alc  red
+#   34 | 243 402 543 594  7  4  6 | 645 1154
+#    0 |   0   0  12   6  7 10  6 |   0   41
+Bench.run [equal_const; '.'; 'a']
+# = oh |  0a  0b   1   2 3a 3b 3c | alc  red
+#   34 | 243 402 543 594  7  4  6 | 645 1154
+#    0 |   0   0   3   1  1  1  1 |   0    7
+Bench.run [equal;       '.'; '.']
+# = oh |  0a  0b   1   2 3a 3b 3c | alc red
+#   41 | 102 220 290 306  7  4  6 | 322 613
+#    6 |  18  18  48  42  7 10  6 |  36 113
+Bench.run [equal;       '.'; 'a']
+# =  oh |  0a  0b   1   2 3a 3b 3c | alc red
+#    41 | 102 220 290 306  7  4  6 | 322 613
+#   112 |  14  14  47  38  9  4  7 |  28 105

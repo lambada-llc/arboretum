@@ -1,0 +1,50 @@
+_to_string = Nat.to_source
+stage Nat.succ 5 △
+# = 6
+stage Nat.succ 0 △
+# = 1
+
+size $ stage
+# = 34
+size $ stage △
+# = 11
+size $ stage △ △
+# = 8
+
+_to_string = id
+Bench.run [stage; △; △; △]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  4  3 6 6  0  0  0 |   7  12
+#    0 |  0  2 1 1  0  0  0 |   2   2
+#    0 |  1  0 2 1  0  0  0 |   1   3
+
+# bench: fix vs fix__naive on succ
+_succ_functional = \self List.match 1 (\hd \tl Bool.match (\_ △ true) (\self \tl △ false $ self tl) hd self tl)
+Bench.run [fix; _succ_functional]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  2  4 5 5  0  0  0 |   6  10
+Bench.run [fix _succ_functional; 8]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    2 |  1  9 9 9  1  0  1 |  10  20
+Bench.run [fix _succ_functional; 15]
+# = oh | 0a 0b  1  2 3a 3b 3c | alc red
+#    5 |  5 48 47 48  1  4  4 |  53 104
+Bench.run [fix__naive; _succ_functional]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  2  4 5 5  0  0  0 |   6  10
+Bench.run [fix__naive _succ_functional; 8]
+# = oh | 0a 0b  1  2 3a 3b 3c | alc red
+#    3 |  2 10 11 11  1  0  1 |  12  24
+Bench.run [fix__naive _succ_functional; 15]
+# = oh | 0a 0b  1  2 3a 3b 3c | alc red
+#   10 | 10 53 57 58  1  4  4 |  63 124
+
+_to_string = Nat.to_source
+size $ fix
+# = 64
+size $ fix__naive
+# = 76
+Nat.pred $ size $ fix △
+# = 44
+Nat.pred $ size $ fix__naive △
+# = 56

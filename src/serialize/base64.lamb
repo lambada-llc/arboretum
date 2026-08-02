@@ -1,0 +1,66 @@
+# Any tree as ASCII text: Serialize.bitstr_encode writes the tree as a list of
+# bits, and six bits become one base64 character. So this is not base64 of a
+# byte string — nothing here goes through bytes, and there is no padding
+# character; a short final group is filled with false bits, which decode back to
+# the leaf the bitstring already ended on.
+
+# Encoding direction: the alphabet is halved five times into a tree of pairs, so
+# looking a character up is six selections on the six bits, with no arithmetic
+# and no traversal of the list.
+_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+_alphabet_tree =
+  let (\f Pair.match $ \a \b △ (f a) (f b)) $ \map_pair
+  let (List.foldr (\e Pair.match $ \a \b △ (△ e b) a) (△ [] [])) $ \splitter
+  let (\x compose (map_pair x) splitter) $ \split
+  (split $ split $ split $ split $ split splitter) _alphabet
+_pair_at = \b Pair.match (Bool.match (\a \b a) (\a \b b) b)
+_alphabet_get = \x0 \x1 \x2 \x3 \x4 \x5
+  List.head_or _ $ _pair_at x5 $ _pair_at x4 $ _pair_at x3 $ _pair_at x2 $ _pair_at x1 $ _pair_at x0 _alphabet_tree
+
+# Decoding direction: the alphabet is regular, so a character's index is
+# arithmetic — no lookup table needed. Ranges: A-Z → 0-25, a-z → 26-51,
+# 0-9 → 52-61, '+' → 62, '/' → 63.
+_b64_index = \c Bool.match
+  (Bool.match
+    (Bool.match
+      (Bool.match 62 63 (Nat.is_lte '/' c))
+      (Nat.add 52 (Nat.sub c '0'))
+      (Nat.is_lte '0' c))
+    (Nat.sub c 'A')
+    (Nat.is_lte 'A' c))
+  (Nat.add 26 (Nat.sub c 'a'))
+  (Nat.is_lte 'a' c)
+_of_base64 = List.foldr
+  (\b64 \res List.concat (List.take 6 $ List.concat (_b64_index b64) [false;false;false;false;false;false]) res)
+  []
+
+_to_base64 = fix $ \self List.match [] $ \x0
+                         List.match [_alphabet_get x0 false false false false false] $ \x1
+                         List.match [_alphabet_get x0 x1 false false false false] $ \x2
+                         List.match [_alphabet_get x0 x1 x2 false false false] $ \x3
+                         List.match [_alphabet_get x0 x1 x2 x3 false false] $ \x4
+                         List.match [_alphabet_get x0 x1 x2 x3 x4 false] $ \x5 \xs
+                         △ (_alphabet_get x0 x1 x2 x3 x4 x5) (self xs)
+
+base64_encode = compose _to_base64 Serialize.bitstr_encode
+base64_decode = compose Serialize.bitstr_decode _of_base64
+
+_to_string = String.to_source
+base64_encode △
+# = "B"
+base64_encode 42
+# = "MNTz0B"
+base64_encode "hello"
+# = "kZmmppTammZa6kZaammOZmmmppTaaaamme"
+
+_to_string = Nat.to_source
+base64_decode (base64_encode 0)
+# = 0
+base64_decode (base64_encode 42)
+# = 42
+base64_decode (base64_encode 255)
+# = 255
+
+_to_string = String.to_source
+base64_decode (base64_encode "hello")
+# = "hello"
