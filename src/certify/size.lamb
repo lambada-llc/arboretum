@@ -42,11 +42,10 @@
 # converts at the end, so the induction never closes over the unary spec. It
 # also presumes termination: it reads through Quoted.eval, which does not return
 # on a program that diverges under symbolic evaluation — the `__lazy` size
-# programs in src/snat/size.lamb are exactly that, and stay sampled there.
+# programs in src/snat/size.lamb are exactly that, and are sampled there instead.
 #
-# The tests are next door in test.lamb, because src/snat/size.lamb certifies the
-# library's size programs where they are defined and so depends on this file:
-# a test here that reached back into Snat would close the cycle.
+# The tests are next door in test.lamb, which is free to reach into Snat for
+# programs to judge. This file is not: Snat's size programs depend on it.
 
 # Symbolic terms. Reflect's quoted encoding doubles as the term language:
 #   △ = a leaf, [△ n] = an opaque variable named n, [△ f x] = the application f x

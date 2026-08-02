@@ -59,10 +59,8 @@ _size_body = \self \x compose △ $ triage (\self id) (\u \self self self u) (\v
 size__fastest = \x (self_apply _size_body) x △
 size = \x (wait self_apply _size_body) x △
 
-# One line per program, in place of the examples each used to carry:
-# Certify.computes_size reads the program as the tree it is and proves by
-# induction over the shape of the input that it returns that input's node count
-# — for every tree, including the ones no test would reach.
+# Certify.computes_size proves a program returns its argument's node count for
+# every tree, by reading it as the tree it is; src/certify/size.lamb has the how.
 _to_string = Bool.to_source
 Certify.computes_size size
 # = true
@@ -81,10 +79,9 @@ Certify.computes_size size__smallest5
 Certify.computes_size size__smallest6
 # = true
 
-# The __lazy ones stay sampled: certifying a program means normalizing it, and
-# the symbolic reduction the certifier reads through forces arguments, so these
-# hang it exactly as they hang an eager evaluator. They are applied rather than
-# proved, through Reflect.lazy_eval, one input apiece.
+# The __lazy ones are sampled instead of certified: certifying means normalizing
+# the program, and the certifier's symbolic reduction forces argument positions,
+# so these hang it exactly as they hang an eager evaluator.
 _to_string = Snat.to_string
 Reflect.lazy_eval size__smallest__lazy id
 # = 5
