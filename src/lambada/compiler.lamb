@@ -456,81 +456,93 @@ nativeB = Native_identifier ":b"
 nativeC = Native_identifier ":c"
 nativeS = Native_identifier ":s"
 
-# Native_expr => S => B
-native_contains_name = \eq_name fix $ \this \n
-    n
-        (\literal eq_name literal)
-        (\o1 \o2 Bool.match (this o2) true (this o1))
-        (\_emit false)
-        (\_start \_end \inner this inner)
-
 _dT = Dlist.cons ':' (Dlist.single 't')
 _dListEmpty = _dT
 _dFalse = _dT
 _dTrue = Dlist.cons ':' (Dlist.single 'k')
 _dBool = Bool.match _dFalse _dTrue
-_dag_nat = \fresh_res \fresh_helper List.foldr
+# A cons cell is [△ head tail], and a DAG line applies one name to at most two
+# others, so spelling one takes two lines: the stem [△ head], then that stem
+# applied to the tail. For the bits of a nat the head is a boolean, so there are
+# only two stems in the whole language — [△ false], which is [△ △] and so is
+# already the prelude's [:k], and [△ true], which the prelude now names [:ct].
+# Naming them once turns every bit of every literal into one line instead of two,
+# and leaves [_dag_nat] with no scratch name left to allocate.
+_dConsFalse = _dTrue
+_dConsTrue = Dlist.from_list ":ct"
+_dCons = Bool.match _dConsFalse _dConsTrue
+_dag_nat = \fresh_res List.foldr
         (\b \acc Pair.let acc $ \dag \rhs
           △ (\tl dag $
-            fresh_helper$space$_dT$space$_dBool b$newline $
-            fresh_res$space$fresh_helper$space$rhs$newline $ tl)
+            fresh_res$space$_dCons b$space$rhs$newline $ tl)
           fresh_res)
         (△ id _dListEmpty)
-_dag_str = \fresh_res \fresh_helper1 \fresh_helper2 List.foldr
+# A string's elements are nats rather than bits, so its cons stems are not shared
+# and each character still costs the [△ char] line plus the cons.
+_dag_str = \fresh_res \fresh_helper List.foldr
         (\n \acc Pair.let acc $ \dag \rhs
-          Pair.let (_dag_nat fresh_helper1 fresh_helper2 n) $ \nat_dag \nat_name
+          Pair.let (_dag_nat fresh_helper n) $ \nat_dag \nat_name
           △ (\tl dag $ nat_dag $
-            fresh_helper1$space$_dT$space$nat_name$newline $
-            fresh_res$space$fresh_helper1$space$rhs$newline $ tl)
+            fresh_helper$space$_dT$space$nat_name$newline $
+            fresh_res$space$fresh_helper$space$rhs$newline $ tl)
           fresh_res)
         (△ id _dListEmpty)
 
 quote_nat = \n Native_emit $ \gen_bin
   Pair.let (gen_bin _) $ \fresh_res \gen_bin
-  Pair.let (gen_bin _) $ \fresh_helper \gen_bin
-  Pair.let (_dag_nat fresh_res fresh_helper n) $ \dag \result_name
+  Pair.let (_dag_nat fresh_res n) $ \dag \result_name
     \ontriple ontriple dag result_name gen_bin
 quote_str = \s Native_emit $ \gen_bin
   Pair.let (gen_bin _) $ \fresh_res \gen_bin
-  Pair.let (gen_bin _) $ \fresh_helper1 \gen_bin
-  Pair.let (gen_bin _) $ \fresh_helper2 \gen_bin
-  Pair.let (_dag_str fresh_res fresh_helper1 fresh_helper2 s) $ \dag \result_name
+  Pair.let (gen_bin _) $ \fresh_helper \gen_bin
+  Pair.let (_dag_str fresh_res fresh_helper s) $ \dag \result_name
     \ontriple ontriple dag result_name gen_bin
 
 
 # SYNTAX => NATIVE
-_syntax_to_native_abs = \eq_name self_apply $ \strip \nbody nbody
+# Bracket abstraction, in one pass. Which combinator an application takes is
+# decided by whether each side mentions the bound name, and that is exactly what
+# abstracting the side already discovers — so [_abs] returns both at once, as
+# [△ mentions_name abstracted]. Asking a separate "does this mention the name"
+# walk instead re-scanned each side from the top at every level: quadratic in the
+# term, and every identifier it passed cost a full string comparison. Now each
+# subterm is walked once, and each name compared once.
+_abs = \eq_name self_apply $ \strip \nbody nbody
                 (\literal \strip
                     Bool.match
-                    (Native_app nativeK $ Native_identifier literal)
-                    nativeI
+                    (△ false $ Native_app nativeK $ Native_identifier literal)
+                    (△ true nativeI)
                     $ eq_name literal
                 )
                 (\a \b \strip
+                    Pair.let (strip strip a) $ \in_a \sa
+                    Pair.let (strip strip b) $ \in_b \sb
                     Bool.match
                     (
                         Bool.match
-                        (\strip Native_app nativeK $ Native_app a b)
+                        (△ false $ Native_app nativeK $ Native_app a b)
                         ( # check for: \b a b
-                            \strip b
+                            △ true $ b
                               (\_lit a)
-                              (\_a \_b Native_app (Native_app nativeB a) (strip strip b))
+                              (\_a \_b Native_app (Native_app nativeB a) sb)
                               (\_emit _)
-                              (\_s \_e \_inner Native_app (Native_app nativeB a) (strip strip b))
+                              (\_s \_e \_inner Native_app (Native_app nativeB a) sb)
                         )
                     )
                     (
                         Bool.match
-                        (\strip Native_app (Native_app nativeC (strip strip a)) b)
-                        (\strip Native_app (Native_app nativeS (strip strip a)) (strip strip b))
+                        (△ true $ Native_app (Native_app nativeC sa) b)
+                        (△ true $ Native_app (Native_app nativeS sa) sb)
                     )
-                    (native_contains_name eq_name a)
-                    (native_contains_name eq_name b)
-                    strip
+                    in_a
+                    in_b
                 )
-                (\emit \strip Native_app nativeK $ Native_emit emit)
-                (\start \end \inner \strip Native_spanned start end (strip strip inner))
+                (\emit \strip △ false $ Native_app nativeK $ Native_emit emit)
+                (\start \end \inner \strip
+                    Pair.let (strip strip inner) $ \in_inner \sinner
+                    △ in_inner $ Native_spanned start end sinner)
                 strip
+_syntax_to_native_abs = \eq_name compose Pair.snd (_abs eq_name)
 _syntax_to_native = self_apply $ \this \syntax
     syntax
         (\name \this Native_identifier name)
@@ -629,6 +641,8 @@ syntax_prelude =
   ; Syntax_assignment ":s" $ quick_parse_exn "△ (△ (△ △ △)) △"
   ; Syntax_assignment ":b" $ quick_parse_exn "△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ △)"
   ; Syntax_assignment ":c" $ quick_parse_exn "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
+  # [△ true], the cons stem every set bit of every literal is built from
+  ; Syntax_assignment ":ct" $ quick_parse_exn "△ (△ △)"
   ]
 native_prelude = List.concat_map syntax_to_native syntax_prelude
 
@@ -722,43 +736,43 @@ _to_string = id
 compile_to_dag_bench "x"
 # = Tokenize: 439
 #   Parse:    681
-#   Lower:    297
+#   Lower:    299
 #   Emit:     194
 
 compile_to_dag_bench "42"
-# = Tokenize: 683
+# = Tokenize: 865
 #   Parse:    532
-#   Lower:    321
-#   Emit:     1742
+#   Lower:    319
+#   Emit:     1250
 
 compile_to_dag_bench "1337"
-# = Tokenize: 3178
+# = Tokenize: 2070
 #   Parse:    532
-#   Lower:    321
-#   Emit:     2655
+#   Lower:    319
+#   Emit:     1991
 
 compile_to_dag_bench "[42]"
-# = Tokenize: 1245
+# = Tokenize: 1427
 #   Parse:    1511
-#   Lower:    514
-#   Emit:     3139
+#   Lower:    512
+#   Emit:     2589
 
 compile_to_dag_bench "\x x"
 # = Tokenize: 1152
 #   Parse:    1361
-#   Lower:    1612
+#   Lower:    1486
 #   Emit:     228
 
 compile_to_dag_bench "x = 42"
-# = Tokenize: 1489
+# = Tokenize: 1671
 #   Parse:    1208
-#   Lower:    329
-#   Emit:     1830
+#   Lower:    327
+#   Emit:     1338
 
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
 # = Tokenize: 20759
 #   Parse:    28121
-#   Lower:    5397
+#   Lower:    5399
 #   Emit:     20043
 
 # The only coverage of an ADT declaration: two variants, each emitting a
@@ -766,37 +780,41 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 7702
 #   Parse:    2472
-#   Lower:    559083
+#   Lower:    208830
 #   Emit:     37539
 
-# Bracket abstraction is exponential in how many applications the bound variable
-# reaches: each further [a] under \a multiplies Lower by ~3.6 — measured 38428,
-# 126518, 440951, 1618694, 6166765 for zero through four. The last one is the
-# most expensive expect test here, ~6s of the build; drop to three [a] to keep
-# the shape at a quarter of the cost.
+# Bracket abstraction over an application spine, which used to be exponential in
+# how many applications the bound variable reaches: each further [a] under \a
+# multiplied Lower by ~3.6 — 38428, 126518, 440951, 1618694, 6166765 for zero
+# through four — and this one expression was ~6s of the build. Deciding each
+# application from what abstracting its sides already returned made it linear:
+# the same five now cost 22674, 29212, 35750, 42288, 48826, a flat 6538 apiece.
 compile_to_dag_bench "\d \a \i i d (\x \x a) a a a a"
 # = Tokenize: 7273
 #   Parse:    8686
-#   Lower:    6166765
+#   Lower:    48826
 #   Emit:     29394
 
-# Literal size, one cost linear and one quadratic. Tokenizing and emitting a
-# string literal is a fixed ~91 and ~1450 reductions per character.
+# Literal size. A string literal is linear in both directions: a fixed ~91
+# reductions per character to tokenize and ~1205 to emit (50 characters cost
+# 5096 and 61021). Emitting is where the bulk is, because every character
+# becomes its own run of DAG lines — one per bit, plus two for the cons.
 compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 # = Tokenize: 9646
 #   Parse:    536
-#   Lower:    321
-#   Emit:     145026
+#   Lower:    319
+#   Emit:     121271
 
-# A nat literal is quadratic to tokenize: from_string__fastest folds
-# mul_const 10 acc + digit over an accumulator that keeps growing, so 5, 10 and
-# 20 digits cost 5638, 28727 and 122754 and 100 digits cost 3177028 — ~9s of the
-# build, and the shape is already plain at 20.
+# A nat literal is quadratic to tokenize, and stays that way: Horner's rule has
+# to walk an accumulator that grows by ~3.3 bits per digit, so 5, 10, 20 and 40
+# digits cost 3102, 12806, 53632 and 221280. What was shaved off is the constant
+# — [from_string__fastest] used to spend two traversals and a multiply per digit
+# where one table-driven pass does, which is worth 2.3x here.
 compile_to_dag_bench $ List.repeat 100 '1'
-# = Tokenize: 3177028
+# = Tokenize: 1409237
 #   Parse:    532
-#   Lower:    321
-#   Emit:     60869
+#   Lower:    319
+#   Emit:     49019
 
 _compiler_env =
   Map.pmap_set "△" △ $
@@ -844,4 +862,4 @@ compile "{△ △ △, △: △}"
 # count, printing it is pages of triangles.
 _to_string = \v Nat.to_source (size v)
 compile ""
-# = 5440
+# = 5509
