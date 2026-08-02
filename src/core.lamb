@@ -12,4 +12,3 @@ fix__naive = let self_apply $ \m
 fix = let (\x x (\_ x)) $ \self_apply_k
       \f wait self_apply_k (\x f (△ (△ $ \b \c self_apply_k c b) x))
 stage = \f \x \_ (\_ f) _ x
-

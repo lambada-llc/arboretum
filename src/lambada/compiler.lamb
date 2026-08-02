@@ -108,7 +108,7 @@ parse_char_map = \map List.match Parser.fail_result $ \head \tail Option.match P
 # :: Parser Token
 parse_special_char = parse_char_map
         {
-            '(': Schar_paren_open; 
+            '(': Schar_paren_open;
             ')': Schar_paren_close;
             '\': Schar_backslash;
             '=': Schar_equals;
@@ -123,9 +123,9 @@ parse_special_char = parse_char_map
             '}': Schar_curly_close;
         }
 _is_quot = equal_const '"'
-# The opening delimiter / '#' is re-checked here by satisfy/exact even though the
-# first-char dispatch only routes to these parsers when it already matches; consume
-# it with [one] instead. The closing-delimiter satisfy stays — it is a real check.
+# The first-char dispatch only routes here once the opening delimiter (or '#')
+# has already matched, so the opener is consumed with [one] rather than checked
+# a second time. The closing-delimiter satisfy stays — it is a real check.
 parse_str  = Parser.map Token_const_str (Parser.seq_snd Parser.one (Parser.seq_fst (Parser.take_until _is_quot) (Parser.satisfy _is_quot)))
 _is_quot = equal_const '''
 parse_char  = Parser.map Token_const_nat (Parser.seq_snd Parser.one (Parser.seq_fst Parser.one (Parser.satisfy _is_quot)))
@@ -231,7 +231,7 @@ parse_identifier = _one_then
         (Token_identifier_Dispatch Parser.return Parser.fail)
 parse_identifier_adt = _one_then
         (Token_identifier_adt_Dispatch Parser.return Parser.fail)
-        
+
 parse_paren_close = parse_schar Schar_paren_close_Dispatch
 parse_sqbracket_close = parse_schar Schar_sqbracket_close_Dispatch
 parse_curly_close = parse_schar Schar_curly_close_Dispatch
@@ -241,7 +241,7 @@ parse_equals = parse_schar Schar_equals_Dispatch
 parse_pipe = parse_schar Schar_pipe_Dispatch
 parse_dollar = parse_schar Schar_dollar_Dispatch
 
-        
+
 parse_list_tail = \e Parser.seq_fst
                     (Parser.map
                         (\list Syntax_list list)
@@ -286,7 +286,7 @@ parse_adt_tail = \literal \e Parser.map
                             parse_equals
                             (Parser.seq_pair
                               parse_adt_variant
-                              (Parser.many (Parser.seq_snd parse_pipe parse_adt_variant)))) 
+                              (Parser.many (Parser.seq_snd parse_pipe parse_adt_variant))))
 
 # The recursive parser [e] is applied *after* the token dispatch, so each
 # handler takes its own [e]. This keeps [parse__expr e] cheap to instantiate:
@@ -541,8 +541,8 @@ _syntax_to_native = self_apply $ \this \syntax
         (\kvlist \this List.foldr (\item \map Native_app (Pair.match (\k \v Native_app (Native_app (Native_identifier "Map.set") (this this k)) (this this v)) item) map) nativeT kvlist)
         # Bracket abstraction. [_syntax_to_native_abs] already K-wraps any subterm
         # the bound variable doesn't reach (its identifier/app cases emit exactly
-        # [nativeK body] then), so a separate [syntax_contains_name] pre-pass to
-        # pick K vs. strip only re-walks the body to no effect. Always strip.
+        # [nativeK body] then), so a pre-pass over the syntax to pick K vs. strip
+        # would only re-walk the body to no effect. Always strip.
         (\literal \body \this _syntax_to_native_abs (equal literal) (this this body))
         (\o1 \o2 \this Native_app (this this o1) (this this o2))
         (\literal \o \this Native_assignment fail nativeT)
@@ -554,7 +554,7 @@ _syntax_to_native = self_apply $ \this \syntax
 _create_unique_name_from_nat = \n Dlist.from_list "::" $ Nat.to_string n
 _syntax_emit_adt_variant = \items \ctr_arg_list \index \args \name
     [
-        Native_assignment 
+        Native_assignment
             name
             (
                 _syntax_to_native
@@ -565,8 +565,8 @@ _syntax_emit_adt_variant = \items \ctr_arg_list \index \args \name
             (
                 _syntax_to_native
                 (
-                    (\argDisp \argAlt \argItem syntax_abs [argDisp; argAlt; argItem] 
-                        (syntax_app 
+                    (\argDisp \argAlt \argItem syntax_abs [argDisp; argAlt; argItem]
+                        (syntax_app
                             (△
                                 (Syntax_identifier argItem)
                                 (List.map (\item
@@ -642,7 +642,6 @@ _compiler_lower = \synts some $ List.concat_map syntax_to_native synts
 # t generator = () -> t * t generator
 _gen_bin = fix $ \self \i \pair pair (stage Nat.to_bits_dstring i pair) (self $ stage Nat.succ i pair)
 gen_bin = _gen_bin 0
-# fst (Pair.snd (Pair.snd (gen_bin _) _) _) ""
 
 _span_suffix = \start \end \tl Dlist.from_list "::" $ Dlist.from_list (Nat.to_string start) $ Dlist.single ',' $ Dlist.from_list (Nat.to_string end) $ tl
 
@@ -686,9 +685,6 @@ native_def_to_ddag = \n n
      _native_expr_to_ddag o gen_bin $ \res \l \_
       \tl res $ l $ newline $ tl
    )
-
-# native_def_to_ddag (Native_expr (Native_identifier "△")) △
-# native_def_to_ddag (Native_expr (Native_app (Native_identifier "△") (Native_identifier "△"))) △
 
 compiler_emit_dag = \natives List.foldr native_def_to_ddag "" natives
 _compiler_emit_dag = \natives Dlist.from_list (compiler_emit_dag native_prelude) (compiler_emit_dag natives)
@@ -765,13 +761,42 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 #   Lower:    5397
 #   Emit:     20043
 
-# compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
-# 
-# compile_to_dag_bench $ List.concat_list [ ['"'], List.repeat 100 '1', ['"'] ]
-# 
-# compile_to_dag_bench $ List.concat_list [ List.repeat 100 '1' ]
-# 
-# compile_to_dag_bench "\d \a \i i d (\x \x a) a a a a"
+# The only coverage of an ADT declaration: two variants, each emitting a
+# constructor and a *_Dispatch through _syntax_emit_adt.
+compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
+# = Tokenize: 7702
+#   Parse:    2472
+#   Lower:    559083
+#   Emit:     37539
+
+# Bracket abstraction is exponential in how many applications the bound variable
+# reaches: each further [a] under \a multiplies Lower by ~3.6 — measured 38428,
+# 126518, 440951, 1618694, 6166765 for zero through four. The last one is the
+# most expensive expect test here, ~6s of the build; drop to three [a] to keep
+# the shape at a quarter of the cost.
+compile_to_dag_bench "\d \a \i i d (\x \x a) a a a a"
+# = Tokenize: 7273
+#   Parse:    8686
+#   Lower:    6166765
+#   Emit:     29394
+
+# Literal size, one cost linear and one quadratic. Tokenizing and emitting a
+# string literal is a fixed ~91 and ~1450 reductions per character.
+compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
+# = Tokenize: 9646
+#   Parse:    536
+#   Lower:    321
+#   Emit:     145026
+
+# A nat literal is quadratic to tokenize: from_string__fastest folds
+# mul_const 10 acc + digit over an accumulator that keeps growing, so 5, 10 and
+# 20 digits cost 5638, 28727 and 122754 and 100 digits cost 3177028 — ~9s of the
+# build, and the shape is already plain at 20.
+compile_to_dag_bench $ List.repeat 100 '1'
+# = Tokenize: 3177028
+#   Parse:    532
+#   Lower:    321
+#   Emit:     60869
 
 _compiler_env =
   Map.pmap_set "△" △ $
@@ -789,12 +814,34 @@ dag_to_val = Serialize.from_dag_with_env _compiler_env
 
 compile = compose dag_to_val compile_to_dag
 
-# _to_string = 
-# compile "[65,123,65,]"
-# compile "[65,123,65]"
-# compile "{△}"
-# compile "{△ △ △, △: △}"
-# compile "123"
-# compile "\x x"
-# compile ""
+# End to end: source text in, the value it denotes out. Each group renders with
+# whatever the programs under it evaluate to.
+_to_string = Nat.to_source
+compile "123"
+# = 123
 
+_to_string = List.to_source Nat.to_source
+compile "[65,123,65]"
+# = [65; 123; 65]
+compile "[65,123,65,]"
+# = [65; 123; 65]
+
+_to_string = Serialize.to_source
+compile "\x x"
+# = (△ (△ (△ △)) △)
+
+# Map literals lower to Map.set over the empty map, so what comes back is a
+# prefix map; a key with no ': value' takes Syntax_const_null, which is △.
+_to_string = \m List.to_source (Pair.to_source Serialize.to_source Serialize.to_source) (Map.entries m)
+compile "{△}"
+# = [(△ △ △)]
+compile "{△ △ △, △: △}"
+# = [(△ △ △); (△ (△ △ △) △)]
+
+# An empty program emits the prelude and nothing else. The prelude's last DAG
+# line is an assignment rather than a bare root, so [from_dag_with_env] hands
+# back the environment it accumulated instead of a value — recorded by node
+# count, printing it is pages of triangles.
+_to_string = \v Nat.to_source (size v)
+compile ""
+# = 5440
