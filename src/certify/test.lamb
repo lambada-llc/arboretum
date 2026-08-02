@@ -1,0 +1,70 @@
+# Tests for the size certifier in src/certify/size.lamb.
+#
+# They are a file of their own because the analysis is applied where the
+# programs it judges are defined: src/snat/size.lamb certifies its size programs
+# there, and so depends on Certify.computes_size. Dependencies are per file and
+# cycles are rejected, so the analysis cannot also be the file that reaches back
+# into Snat. What belongs here is the rest — size written in styles the library
+# does not use, and programs that are not size at all.
+
+# Size written in styles that reduce differently.
+# Direct structural recursion: 1 + (|a| + |b|).
+_naive = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ (Snat.add (self a) (self b)))
+# Same, with the two subtree counts added the other way round.
+_swapped = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ (Snat.add (self b) (self a)))
+# Same, with the successor pushed inside the addition: |a| + (1 + |b|).
+_shifted = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.add (self a) (Snat.succ (self b)))
+# Accumulator passing: no addition at all, the count is threaded through.
+_accumulating = \x (fix $ \self \x \n triage
+  (Snat.succ n) (\a Snat.succ (self a n)) (\a \b Snat.succ (self b (self a n))) x) x Snat.zero
+
+_to_string = Bool.to_source
+Certify.computes_size _naive
+# = true
+Certify.computes_size _swapped
+# = true
+Certify.computes_size _shifted
+# = true
+Certify.computes_size _accumulating
+# = true
+
+# Programs that are not size, and are rejected.
+_leaves = fix $ \self triage Snat.one (\a self a) (\a \b Snat.add (self a) (self b))
+_left_spine = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ (self a))
+_off_by_one = compose Snat.succ Snat.size
+# `size`, except a fork's right child counts one too many when it is a stem. It
+# agrees with `size` on all four trees of up to three nodes, and the smallest
+# input that separates them is [△ △ (△ △)] — so sampling small inputs accepts
+# it, while reading it under an arbitrary tree does not.
+_deep_bug = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ $ Snat.add (self a) $
+  triage Snat.one (\c Snat.succ $ Snat.succ (self c)) (\c \d Snat.succ $ Snat.add (self c) (self d)) b)
+
+Certify.computes_size _leaves
+# = false
+Certify.computes_size _left_spine
+# = false
+Certify.computes_size _off_by_one
+# = false
+Certify.computes_size _deep_bug
+# = false
+# The disagreement, from four nodes up:
+_to_string = Snat.to_string
+_deep_bug (△ △ △)
+# = 3
+Snat.size (△ △ △)
+# = 3
+_deep_bug (△ △ (△ △))
+# = 5
+Snat.size (△ △ (△ △))
+# = 4
+
+_to_string = Bool.to_source
+Certify.computes_size id
+# = false
+Certify.computes_size Snat.add
+# = false
+
+# Conservative, not wrong: this is size, but it counts in binary Nat and
+# converts only at the end, so the induction never closes over the unary spec.
+Certify.computes_size (compose Snat.from_nat size)
+# = false

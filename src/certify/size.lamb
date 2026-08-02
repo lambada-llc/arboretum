@@ -41,7 +41,11 @@
 # `compose Snat.from_nat size` — that is `size`, but it counts in binary Nat and
 # converts at the end, so the induction never closes over the unary spec. It
 # also presumes termination: it reads through Quoted.eval, which does not return
-# on a program that diverges under symbolic evaluation.
+# on a program that diverges under symbolic evaluation — the `__lazy` size
+# programs in src/snat/size.lamb are exactly that, and are sampled there instead.
+#
+# The tests are next door in test.lamb, which is free to reach into Snat for
+# programs to judge. This file is not: Snat's size programs depend on it.
 
 # Symbolic terms. Reflect's quoted encoding doubles as the term language:
 #   △ = a leaf, [△ n] = an opaque variable named n, [△ f x] = the application f x
@@ -168,75 +172,3 @@ _prove = fix $ \self \depth \g \asms \e \q
 # computes_size p — true only if p returns the node count of its argument, as an
 # Snat, for every tree. False means "not certifiable here", not "not size".
 computes_size = \p _prove _depth Snat.one [] [_sz _input] $ _app (Reflect.quote p) (_var _input)
-
-# The library's own size programs.
-_to_string = Bool.to_source
-computes_size Snat.size
-# = true
-computes_size Snat.size__smallest
-# = true
-computes_size Snat.size__fastest
-# = true
-computes_size Snat.size__smallest3
-# = true
-
-# Size written in styles that reduce differently.
-# Direct structural recursion: 1 + (|a| + |b|).
-_naive = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ (Snat.add (self a) (self b)))
-# Same, with the two subtree counts added the other way round.
-_swapped = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ (Snat.add (self b) (self a)))
-# Same, with the successor pushed inside the addition: |a| + (1 + |b|).
-_shifted = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.add (self a) (Snat.succ (self b)))
-# Accumulator passing: no addition at all, the count is threaded through.
-_accumulating = \x (fix $ \self \x \n triage
-  (Snat.succ n) (\a Snat.succ (self a n)) (\a \b Snat.succ (self b (self a n))) x) x Snat.zero
-
-computes_size _naive
-# = true
-computes_size _swapped
-# = true
-computes_size _shifted
-# = true
-computes_size _accumulating
-# = true
-
-# Programs that are not size, and are rejected.
-_leaves = fix $ \self triage Snat.one (\a self a) (\a \b Snat.add (self a) (self b))
-_left_spine = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ (self a))
-_off_by_one = compose Snat.succ Snat.size
-# `size`, except a fork's right child counts one too many when it is a stem. It
-# agrees with `size` on all four trees of up to three nodes, and the smallest
-# input that separates them is [△ △ (△ △)] — so sampling small inputs accepts
-# it, while reading it under an arbitrary tree does not.
-_deep_bug = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ $ Snat.add (self a) $
-  triage Snat.one (\c Snat.succ $ Snat.succ (self c)) (\c \d Snat.succ $ Snat.add (self c) (self d)) b)
-
-computes_size _leaves
-# = false
-computes_size _left_spine
-# = false
-computes_size _off_by_one
-# = false
-computes_size _deep_bug
-# = false
-# The disagreement, from four nodes up:
-_to_string = Snat.to_string
-_deep_bug (△ △ △)
-# = 3
-Snat.size (△ △ △)
-# = 3
-_deep_bug (△ △ (△ △))
-# = 5
-Snat.size (△ △ (△ △))
-# = 4
-
-_to_string = Bool.to_source
-computes_size id
-# = false
-computes_size Snat.add
-# = false
-
-# Conservative, not wrong: this is size, but it counts in binary Nat and
-# converts only at the end, so the induction never closes over the unary spec.
-computes_size (compose Snat.from_nat size)
-# = false
