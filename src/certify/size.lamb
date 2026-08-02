@@ -41,8 +41,24 @@
 # `compose Snat.from_nat size` — that is `size`, but it counts in binary Nat and
 # converts at the end, so the induction never closes over the unary spec. It
 # also presumes termination: it reads through Quoted.eval, which does not return
-# on a program that diverges under symbolic evaluation — the `__lazy` size
-# programs in src/snat/size.lamb are exactly that, and are sampled there instead.
+# on a program that diverges under symbolic evaluation.
+#
+# Which order it diverges under is the other question a reader of a program can
+# settle, since tree calculus prescribes none and `size` can be written to
+# converge in only one of them — the `__lazy` programs in src/snat/size.lamb are
+# exactly that, and smaller for it. NORMALIZE is where the difference lives, so
+# it is the only thing [computes_size_eagerly] changes: it normalizes both
+# halves of an application before letting a rule fire on it, so a rule only ever
+# discards a term that is already a normal form. Discarding a normal form
+# discards nothing that could have diverged, and discarding is the only way one
+# order can converge where another does not, so a program that terminates under
+# this order terminates under every one: [p t] strongly normalizes.
+#
+# It costs a budget. Eager reduction of an eagerly divergent program does not
+# come back, so the eager normalizer counts rule applications and calls a
+# program that outruns it not certifiable — which is what makes
+# [computes_size_eagerly] total, where [computes_size] is the one that can fail
+# to answer. Neither refines the other: each is a verdict the other cannot give.
 #
 # The tests are next door in test.lamb, which is free to reach into Snat for
 # programs to judge. This file is not: Snat's size programs depend on it.
@@ -144,8 +160,8 @@ _split = \recurse \e \s \v Option.match
 # are bound, whether or not its branch was selected, so an unguarded `self` here
 # would unfold the whole search space rather than the path the proof takes.
 _depth = Snat.from_nat 6
-_prove = fix $ \self \depth \g \asms \e \q
-  Pair.let (_nf q) (\s \blocked \self                           # NORMALIZE
+_prove = \nf fix $ \self \depth \g \asms \e \q
+  Option.match (\_ false) (Pair.match $ \s \blocked \self       # NORMALIZE
     # SPLIT, held back until a branch below asks for it. The goal being split
     # is what enters `asms`, so it is available as a hypothesis from here down.
     let (\self Snat.match (\_ false) (\d \_ Option.match (\_ false)
@@ -167,8 +183,26 @@ _prove = fix $ \self \depth \g \asms \e \q
       (\_ true)
       (List.any (\a Option.match false (_spec_eq e) $ _fold a s) asms)
       self)
-  self
+  (nf q) self
+
+# The two reduction orders, as the two normalizers the prover runs on. [_lazily]
+# is what Quoted.eval does: reduce the head, and leave what a rule discards
+# unevaluated. [_eagerly] normalizes both halves of an application before a rule
+# fires on it, and reports [none] rather than not returning once `_budget` rule
+# applications are spent. Where both return they return the same normal form —
+# reduction is confluent — so `_nf` on the eager one is not more reduction, only
+# the blocker read off it.
+_budget = Snat.from_nat 1000
+_lazily = \q Option.some $ _nf q
+_eagerly = \q Option.map _nf $ Quoted.normalize_eager _budget q
+
+_certify = \nf \p _prove nf _depth Snat.one [] [_sz _input] $ _app (Reflect.quote p) (_var _input)
 
 # computes_size p — true only if p returns the node count of its argument, as an
 # Snat, for every tree. False means "not certifiable here", not "not size".
-computes_size = \p _prove _depth Snat.one [] [_sz _input] $ _app (Reflect.quote p) (_var _input)
+computes_size = _certify _lazily
+
+# computes_size_eagerly p — true only if, on top of that, [p t] terminates in
+# every reduction order. False means "not certifiable here" as before, and now
+# covers running out of budget too, which is what makes this one total.
+computes_size_eagerly = _certify _eagerly

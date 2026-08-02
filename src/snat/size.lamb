@@ -79,9 +79,50 @@ Certify.computes_size size__smallest5
 Certify.computes_size size__smallest6
 # = true
 
-# The __lazy ones are sampled instead of certified: certifying means normalizing
-# the program, and the certifier's symbolic reduction forces argument positions,
-# so these hang it exactly as they hang an eager evaluator.
+# Certify.computes_size_eagerly proves that and more: that reduction terminates
+# in every order, so these are `size` for an evaluator that reduces arguments
+# before it uses them, which is what this repository's rule asks of them. The
+# eight above are written to that rule and pass.
+Certify.computes_size_eagerly size
+# = true
+Certify.computes_size_eagerly size__fastest
+# = true
+Certify.computes_size_eagerly size__smallest
+# = true
+Certify.computes_size_eagerly size__smallest2
+# = true
+Certify.computes_size_eagerly size__smallest3
+# = true
+Certify.computes_size_eagerly size__smallest4
+# = true
+Certify.computes_size_eagerly size__smallest5
+# = true
+Certify.computes_size_eagerly size__smallest6
+# = true
+
+# And it is what the __lazy ones fail, on the very first state: reducing them
+# eagerly under a variable input spends the whole budget without reaching a
+# normal form, which is the same wall an eager evaluator hits on a real one.
+# That is what separates the two families here, read off the programs rather
+# than taken on faith — and what the naming, the lazy_eval below and the node
+# counts at the bottom are all about.
+Certify.computes_size_eagerly size__lazy_100
+# = false
+Certify.computes_size_eagerly size__lazy_103
+# = false
+Certify.computes_size_eagerly size__lazy_104
+# = false
+Certify.computes_size_eagerly size__lazy_106
+# = false
+Certify.computes_size_eagerly size__lazy_108
+# = false
+Certify.computes_size_eagerly size__lazy_113
+# = false
+
+# A false is "not certifiable", not "not `size`", and these are `size`: that
+# half is still sampled, because Certify.computes_size cannot be asked. It
+# normalizes what it is handed, and what these leave it holding under a variable
+# input has no normal form. Reflect.lazy_eval is what reduces them instead.
 _to_string = Snat.to_string
 Reflect.lazy_eval size__smallest__lazy id
 # = 5
