@@ -737,19 +737,19 @@ compile_to_dag_bench "x"
 #   Emit:     194
 
 compile_to_dag_bench "42"
-# = Tokenize: 683
+# = Tokenize: 865
 #   Parse:    532
 #   Lower:    321
 #   Emit:     1742
 
 compile_to_dag_bench "1337"
-# = Tokenize: 3178
+# = Tokenize: 2070
 #   Parse:    532
 #   Lower:    321
 #   Emit:     2655
 
 compile_to_dag_bench "[42]"
-# = Tokenize: 1245
+# = Tokenize: 1427
 #   Parse:    1511
 #   Lower:    514
 #   Emit:     3139
@@ -761,7 +761,7 @@ compile_to_dag_bench "\x x"
 #   Emit:     228
 
 compile_to_dag_bench "x = 42"
-# = Tokenize: 1489
+# = Tokenize: 1671
 #   Parse:    1208
 #   Lower:    329
 #   Emit:     1830
@@ -804,7 +804,7 @@ compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 # 20 digits cost 5638, 28727 and 122754 and 100 digits cost 3177028 — ~9s of the
 # build, and the shape is already plain at 20.
 compile_to_dag_bench $ List.repeat 100 '1'
-# = Tokenize: 3177028
+# = Tokenize: 1409237
 #   Parse:    532
 #   Lower:    321
 #   Emit:     60869
