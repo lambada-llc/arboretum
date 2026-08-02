@@ -120,30 +120,30 @@ Certify.computes_size_eagerly size__lazy_113
 # = false
 
 # Certify.computes_size, which asks only for the count, is not a true for them
-# either, and four of them get far enough to say so. Their residual under a
-# variable input has no normal form — the recursion unfolds under a constructor
-# that reduction would have discarded, and normalizing that is what outruns the
-# budget — so the verdict is the same "not certifiable" for the same reason the
-# certificate exists to give: no proof, not a counterexample.
+# either. Their residual under a variable input has no normal form — the
+# recursion unfolds under a constructor that reduction would have discarded, and
+# normalizing that is what outruns the budget — so the verdict is the same "not
+# certifiable" for the same reason the certificate exists to give: no proof,
+# rather than a counterexample.
 Certify.computes_size size__lazy_100
 # = false
+Certify.computes_size size__lazy_103
+# = false
 Certify.computes_size size__lazy_104
+# = false
+Certify.computes_size size__lazy_106
 # = false
 Certify.computes_size size__lazy_108
 # = false
 Certify.computes_size size__lazy_113
 # = false
 
-# The 103 and the 106 are missing from that list for a reason that is about the
-# evaluator rather than about them. Certify.computes_size answers false for both
-# in a few seconds under a normal-order runner; under the eager one the build
-# uses, it does not come back. Head-reducing either of them here is fine — a few
-# hundred nodes of residual, blocked on the input — so what those two cost is
-# not reduction but the eager evaluation of it. Reading them is where the
-# certifier stops being an eager program, which is what this file is about, and
-# so the verdict exists without being a test this build can run.
+# All six are on that list only because the certifier reduces over spines now
+# (src/quoted/spine.lamb). Reading the 103 and the 106 through the term-rebuilding
+# evaluator did not come back under this build's eager runner, which made the
+# analysis a program this repository could not run on its own subject matter.
 #
-# So that these are `size` is not established here at all. What is left of that
+# What none of this establishes is that these are `size`. What is left of that
 # claim is one input apiece below, which is a smoke test and not much more —
 # `_deep_bug` in src/certify/test.lamb is not `size`, and returns 5 on it too.
 _to_string = Snat.to_string
