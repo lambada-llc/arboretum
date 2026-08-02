@@ -1,0 +1,242 @@
+# Certifying that a program computes `size`: given a tree, does it return the
+# node count of its argument, as an Snat, on every input?
+#
+# In tree calculus a program is a tree, and so is its data, so a checker can
+# read the program it is handed instead of trusting the toolchain behind it.
+# [computes_size] evaluates the program on a symbolic tree and discharges the
+# result by structural induction, so a verdict covers all inputs rather than
+# the ones a test enumerates.
+#
+# A goal pairs a symbolic term with what it must evaluate to, written in an
+# abstract Snat: a multiset of `1`s, `|t|`s (the size of tree variable t) and
+# `n`s (the value of an Snat variable). The top goal is `p t ⊨ |t|`. Five rules
+# close it, each either a fact about trees or a step of the induction:
+#   • NORMALIZE  reduce the term symbolically; opaque variables block reduction
+#                and the evaluator reports the one it is waiting on
+#   • PEEL       a term that reduced to `△ x` is a successor, so spend a `1`
+#                from the spec and continue with `x`
+#   • SPLIT      case on the blocking variable — every tree is △, △a or △ab and
+#                every Snat is △ or △n, so the cases are exhaustive; the spec is
+#                updated by the defining equations of size. The goal split here
+#                becomes an induction hypothesis, reusable only on a variable
+#                the split created.
+#   • FOLD       a goal that is an instance of such a hypothesis is closed by
+#                it. The instance must map the split variable to one strictly
+#                below it, so the recursion is on a strictly smaller tree: that
+#                is the well-founded measure the induction rests on.
+#   • GENERALIZE a subterm a hypothesis proves is a known Snat becomes a fresh
+#                Snat variable, and its share of the spec goes with it. Without
+#                it the analysis chases an unbounded family of accumulator
+#                states; with it, the state space is finite.
+#
+# Generalization is what makes the certificate style-agnostic: `1+(|a|+|b|)` and
+# an accumulator threaded through the traversal reduce differently, and both
+# close, because the arithmetic is done by the abstract Snat rather than by
+# matching one program's shape against another's.
+#
+# This does not decide `size` — Rice's theorem forbids that. Passing guarantees
+# the program is `size` on all inputs; failing means "no proof within the search
+# bounds". The analysis is an underapproximation by design: it gives up beyond
+# `_depth` nested case splits, and when the accumulated state never folds, as in
+# `compose Snat.from_nat size` — that is `size`, but it counts in binary Nat and
+# converts at the end, so the induction never closes over the unary spec. It
+# also presumes termination: it reads through Quoted.eval, which does not return
+# on a program that diverges under symbolic evaluation.
+
+# Symbolic terms. Reflect's quoted encoding doubles as the term language:
+#   △ = a leaf, [△ n] = an opaque variable named n, [△ f x] = the application f x
+_var = \n △ n
+_app = \f \x △ f x
+
+# Names are lists: splitting a variable prefixes a step to its name, so
+# [_extends v w] — "w names a part the splitting of v produced" — is exactly
+# "v is a proper suffix of w". Fresh Snat variables get one-element names.
+_extends = \v fix $ \self triage false (\_ false) (\_ \tl Bool.or (equal tl v) (self tl))
+_part = \i \v △ i v
+_fresh = \g [g]
+_input = _fresh Snat.zero
+
+# The abstract Snat: a multiset of atoms.
+_one = △              # a literal successor
+_sz = \v △ v          # the size of tree variable v
+_val = \v △ △ v       # the value of Snat variable v
+_atom = \o1 \osz \oval triage o1 osz (\_ oval)
+
+_remove = \x fix $ \self List.match Option.none
+  (\hd \tl Bool.match (Option.map (△ hd) (self tl)) (Option.some tl) (equal hd x))
+_minus = \f \e List.foldl (\acc \x Option.bind (_remove x) acc) (Option.some e) f
+_spec_eq = \a \b Option.match false List.is_empty $ _minus a b
+
+# Search combinators that stop at the first answer. List.any and List.all force
+# every element under eager reduction, and each element here is a whole subproof;
+# these keep the tail under a lambda, so a later element is explored only if the
+# earlier ones leave the question open.
+_first = \f fix $ \self List.match Option.none
+  (\hd \tl Option.match self (\x \_ Option.some x) (f hd) tl)
+_all = \f fix $ \self List.match true (\hd \tl Bool.match (\_ false) self (f hd) tl)
+
+# Normalize, and report the variable reduction is waiting on.
+# Quoted.eval is head reduction with blocker tracking; recursing under the
+# result normalizes inside constructors, so equal states look equal.
+_nf = fix $ \self \q
+  Pair.let (Quoted.eval q) $ \r \blocked
+  triage
+    (△ r blocked)
+    (\_ △ r blocked)
+    (\f \x Pair.let (self f) $ \f2 \bf Pair.let (self x) $ \x2 \bx
+           △ (△ f2 x2) (Option.alt blocked $ Option.alt bf bx))
+    r
+
+# First-order matching: pattern variables bind to subterms of the target.
+_capture = \n \t \s Option.match
+  (Option.some $ △ (△ n t) s)
+  (\prev Bool.match Option.none (Option.some s) (equal prev t))
+  (List.lookup n s)
+_match = fix $ \self \p \t \s triage
+  (triage (Option.some s) (\_ Option.none) (\_ \_ Option.none) t)
+  (\n _capture n t s)
+  (\pf \px triage Option.none (\_ Option.none)
+     (\tf \tx Option.match Option.none (\s2 self px tx s2) $ self pf tf s) t)
+  p
+
+# Hypotheses: [△ state (△ spec split_variable)].
+# The instance must send the split variable strictly below itself; that is the
+# measure that makes reuse an induction hypothesis rather than a circular claim.
+_image = \s \v Option.bind (triage Option.none (\w Option.some w) (\_ \_ Option.none)) $ List.lookup v s
+_rename = \s _atom (Option.some _one) (\v Option.map _sz $ _image s v) (\v Option.map _val $ _image s v)
+_fold = \a \t Pair.let a $ \state \r Pair.let r $ \spec \v
+  Option.bind (\s Option.bind
+    (\w Bool.match Option.none (Option.sequence $ List.map (_rename s) spec) $ _extends v w)
+    (_image s v))
+    (_match state t [])
+
+# Generalization: a subterm a hypothesis proves is a known Snat.
+_subterms = \t (fix $ \self \t \acc triage acc (\_ acc)
+  (\f \x △ f $ self f $ △ x $ self x acc) t) t []
+_replace = \needle \v fix $ \self \t
+  Bool.match (triage △ (\a △ a) (\f \x △ (self f) (self x)) t) v (equal t needle)
+_generalize = \g \asms \e \s
+  _first (\c _first (\a Option.bind (\f Option.map
+    (\rest △ (_replace c (_var g) s) (△ (_val g) rest)) $ _minus f e) $ _fold a c) asms) (_subterms s)
+
+# Case split: every tree is one of three shapes, every Snat one of two.
+_stem = \w _app △ (_var w)
+_shapes = \v let (_part Snat.zero v) $ \a let (_part Snat.one v) $ \b Bool.match
+  [ △ △ []; △ (_stem a) [_one; _val a] ]
+  [ △ △ [_one]
+  ; △ (_stem a) [_one; _sz a]
+  ; △ (_app (_stem a) (_var b)) [_one; _sz a; _sz b] ]
+
+_cases = \recurse \s \v \rest _all
+  (Pair.match $ \shape \atoms recurse (List.concat atoms rest) (Quoted.instantiate_eq v shape s))
+_split = \recurse \e \s \v Option.match
+  (\recurse Option.match (\_ false)
+    (\rest \recurse _cases recurse s v rest $ _shapes v false) (_remove (_val v) e) recurse)
+  (\rest \recurse _cases recurse s v rest $ _shapes v true)
+  (_remove (_sz v) e) recurse
+
+# The prover. Every branch that can recurse is handed `self` only once it is
+# taken: under eager reduction a recursive call fires as soon as its arguments
+# are bound, whether or not its branch was selected, so an unguarded `self` here
+# would unfold the whole search space rather than the path the proof takes.
+_depth = Snat.from_nat 6
+_prove = fix $ \self \depth \g \asms \e \q
+  Pair.let (_nf q) (\s \blocked \self                           # NORMALIZE
+    # SPLIT, held back until a branch below asks for it. The goal being split
+    # is what enters `asms`, so it is available as a hypothesis from here down.
+    let (\self Snat.match (\_ false) (\d \_ Option.match (\_ false)
+          (\v \_ _split (self d g $ △ (△ s (△ e v)) asms) e s v) blocked self) depth self) $ \split
+    Bool.match                                                  # FOLD, else …
+      (\self Option.match                                       # … GENERALIZE, else read s off:
+        (\self triage
+          (\_ List.is_empty e)                                  # a leaf is zero
+          (\v \_ _spec_eq e [_val v])                           # a bare Snat variable
+          (\f \x \self triage
+            (\self Option.match (\self split self)              # [△ x] is a successor: PEEL a 1
+              (\e2 \self self depth g asms e2 x) (_remove _one e) self)
+            (\_ \self split self)                               # stuck under a variable
+            (\ff \_ \self triage (\_ false) (\_ \self split self) (\_ \_ \self split self) ff self)
+            f self)                                             # …a fork is not an Snat; else stuck
+          s self)
+        (\gen \self Pair.let gen $ \s2 \e2 self depth (Snat.succ g) asms e2 s2)
+        (_generalize (_fresh g) asms e s) self)
+      (\_ true)
+      (List.any (\a Option.match false (_spec_eq e) $ _fold a s) asms)
+      self)
+  self
+
+# computes_size p — true only if p returns the node count of its argument, as an
+# Snat, for every tree. False means "not certifiable here", not "not size".
+computes_size = \p _prove _depth Snat.one [] [_sz _input] $ _app (Reflect.quote p) (_var _input)
+
+# The library's own size programs.
+_to_string = Bool.to_source
+computes_size Snat.size
+# = true
+computes_size Snat.size__smallest
+# = true
+computes_size Snat.size__fastest
+# = true
+computes_size Snat.size__smallest3
+# = true
+
+# Size written in styles that reduce differently.
+# Direct structural recursion: 1 + (|a| + |b|).
+_naive = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ (Snat.add (self a) (self b)))
+# Same, with the two subtree counts added the other way round.
+_swapped = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ (Snat.add (self b) (self a)))
+# Same, with the successor pushed inside the addition: |a| + (1 + |b|).
+_shifted = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.add (self a) (Snat.succ (self b)))
+# Accumulator passing: no addition at all, the count is threaded through.
+_accumulating = \x (fix $ \self \x \n triage
+  (Snat.succ n) (\a Snat.succ (self a n)) (\a \b Snat.succ (self b (self a n))) x) x Snat.zero
+
+computes_size _naive
+# = true
+computes_size _swapped
+# = true
+computes_size _shifted
+# = true
+computes_size _accumulating
+# = true
+
+# Programs that are not size, and are rejected.
+_leaves = fix $ \self triage Snat.one (\a self a) (\a \b Snat.add (self a) (self b))
+_left_spine = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ (self a))
+_off_by_one = compose Snat.succ Snat.size
+# `size`, except a fork's right child counts one too many when it is a stem. It
+# agrees with `size` on all four trees of up to three nodes, and the smallest
+# input that separates them is [△ △ (△ △)] — so sampling small inputs accepts
+# it, while reading it under an arbitrary tree does not.
+_deep_bug = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ $ Snat.add (self a) $
+  triage Snat.one (\c Snat.succ $ Snat.succ (self c)) (\c \d Snat.succ $ Snat.add (self c) (self d)) b)
+
+computes_size _leaves
+# = false
+computes_size _left_spine
+# = false
+computes_size _off_by_one
+# = false
+computes_size _deep_bug
+# = false
+# The disagreement, from four nodes up:
+_to_string = Snat.to_string
+_deep_bug (△ △ △)
+# = 3
+Snat.size (△ △ △)
+# = 3
+_deep_bug (△ △ (△ △))
+# = 5
+Snat.size (△ △ (△ △))
+# = 4
+
+_to_string = Bool.to_source
+computes_size id
+# = false
+computes_size Snat.add
+# = false
+
+# Conservative, not wrong: this is size, but it counts in binary Nat and
+# converts only at the end, so the induction never closes over the unary spec.
+computes_size (compose Snat.from_nat size)
+# = false

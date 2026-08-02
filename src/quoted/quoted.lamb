@@ -1,0 +1,69 @@
+# Operations on quoted terms: rendering, abstraction, substitution.
+#
+# The encoding is Reflect's (src/reflect/quote.lamb), in which an opaque stem
+# [△ 'x] is a free variable: nothing reduces it, so it survives evaluation
+# unchanged. Every operation here is therefore a walk over the quoted tree,
+# with the stems as its leaves.
+
+# Render a tree as a human-readable string.
+# [stem_to_str] controls how stems (opaque data) are displayed.
+render = \stem_to_str
+  let (\q \x \y \r q x false $ △ ' ' $ q y true $ r) $ \_app
+  let (\q \x \y \r △ '(' $ _app q x y $ △ ')' r) $ \_appp
+  \x (fix $ \self \x \np triage (△ '△') stem_to_str (Bool.match _app _appp np self) x) x false △
+
+# Render a tree, displaying stems as string literals.
+to_string = render List.concat
+
+# Abstract over a variable in a quoted term: [abs v q] quotes a function whose
+# argument is substituted for v in q. Classic bracket abstraction — a leaf and a
+# non-matching variable become the constant function returning them (K), the
+# matching variable becomes I, and a fork becomes S over its abstracted halves.
+abs = \var fix $ \self triage
+  (Reflect.quote $ \_ △)
+  (\a Bool.match (Reflect.quote $ \_ △ a) (Reflect.quote id) $ equal var a)
+  (\x \y Reflect.qapp (Reflect.quote (\a \b \c a c $ b c)) [self x; self y])
+
+# Substitute [asub] for every variable [eq_a] accepts. Only variables are
+# candidates: the walk descends through forks and stops at the leaf.
+instantiate = \eq_a \asub fix $ \self triage
+  △
+  (\b Bool.match (△ b) asub $ eq_a b)
+  (\a \b △ (self a) (self b))
+
+# Substitute using structural equality.
+instantiate_eq = \a instantiate $ equal a
+
+# Apply a record of substitutions to a quoted term.
+apply_record = \record \x List.foldr (Pair.match instantiate_eq) x record
+
+# Tests: rendering
+_to_string = to_string
+Reflect.quote △
+# = △
+Reflect.quote (△ △)
+# = △ △
+Reflect.quote (\_ △)
+# = △ △ △
+
+# Tests: abs produces working lambdas
+_to_string = Serialize.to_source
+Reflect.unsafe_unquote (abs "x" △) 42
+# = △
+Reflect.unsafe_unquote (abs "x" (△ "x"))
+# = (△ (△ (△ △)) △)
+Reflect.unsafe_unquote (abs "x" (Reflect.qfork (△ "x") (△ "x"))) (Reflect.quote △)
+# = (△ △ △)
+
+# Tests: instantiate
+_to_string = to_string
+instantiate_eq "x" (Reflect.quote 42) (Reflect.qfork (△ "x") (△ "y"))
+# = △ (△ △ (△ (△ △) (△ △ (△ (△ △) (△ △ (△ (△ △) △)))))) y
+instantiate_eq "x" (Reflect.quote 42) (Reflect.qfork (△ "x") (△ "x"))
+# = △ (△ △ (△ (△ △) (△ △ (△ (△ △) (△ △ (△ (△ △) △)))))) (△ △ (△ (△ △) (△ △ (△ (△ △) (△ △ (△ (△ △) △))))))
+instantiate_eq "x" (Reflect.quote △) △
+# = △
+
+# Tests: apply_record
+apply_record [△ "a" (Reflect.quote 1); △ "b" (Reflect.quote 2)] (Reflect.qfork (△ "a") (△ "b"))
+# = △ (△ (△ △) △) (△ △ (△ (△ △) △))
