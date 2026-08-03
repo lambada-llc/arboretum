@@ -1,0 +1,21 @@
+Verdicts of the prototype prover, all rules enabled (spec-split, abstract,
+cut, borrow validation), split depth 5-6, on the trees in ../trees.
+
+Eager positives (must be true, and are):
+  size fastest smallest smallest2 smallest3 smallest4 smallest5 smallest6
+  naive swapped shifted accumulating                      -- all TRUE
+
+Non-size negatives (must stay false, and do):
+  leaves left_spine off_by_one deep_bug id add conv counts_forever
+
+The __lazy family (the point of the prototype):
+  lazy100    TRUE   depth 5   ~25s    proof: lazy100.txt
+  lazy104    TRUE   depth 5   ~27s    proof: lazy104.txt
+  lazy103    false  (fails fast: the architecture written out whole in
+  lazy106    false   snat/size.lamb; its phase structure defeats the
+                     abstraction heuristics -- not yet diagnosed)
+  lazy108    false  (search exhausts at depth 6; shares _lazy_body with
+  lazy113    false   size__smallest -- likely needs a better abstraction
+                     reference or one more rule refinement)
+
+false = no proof within bounds, never a counterexample.

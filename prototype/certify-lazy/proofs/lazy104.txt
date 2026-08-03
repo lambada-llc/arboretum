@@ -1,0 +1,161 @@
+SPLIT t
+  =: PEEL
+  ZERO
+  s: PEEL
+  ABSTRACT n0 := #2
+  SPLIT t0
+    =: PEEL
+    ZERO
+    s: PEEL
+    FOLD hyp0 on t0
+    f: CUT phase [1,|t01|,*n3] then [|t00|]
+      PEEL
+      SPLIT t01
+        =: PEEL
+        END (state recorded)
+        s: PEEL
+        FOLD hyp0 on t01
+        f: CUT phase [1,|t011|,*n5] then [|t010|,*n3]
+          PEEL
+          ABSTRACT n3 := #3
+          SPLIT t011
+            =: PEEL
+            END (state recorded)
+            s: PEEL
+            FOLD hyp0 on t011
+            f: CUT phase [1,|t0111|,*n7] then [|t0110|,*n5]
+              PEEL
+              FOLD hyp0 on t011 (borrowed tail)
+          FOLD hyp0 on t01
+      FOLD hyp0 on t0
+  f: CUT phase [1,|t1|,*n8] then [|t0|]
+    PEEL
+    SPLIT t1
+      =: PEEL
+      END (state recorded)
+      s: PEEL
+      ABSTRACT n1 := #2
+      SPLIT t10
+        =: PEEL
+        END (state recorded)
+        s: PEEL
+        FOLD hyp0 on t10
+        f: CUT phase [1,|t101|,*n11] then [|t100|,*n8]
+          PEEL
+          ABSTRACT n3 := #3
+          SPLIT t101
+            =: PEEL
+            END (state recorded)
+            s: PEEL
+            FOLD hyp0 on t101
+            f: CUT phase [1,|t1011|,*n13] then [|t1010|,*n11]
+              PEEL
+              FOLD hyp0 on t101 (borrowed tail)
+          FOLD hyp0 on t10
+      f: CUT phase [1,|t11|,*n14] then [|t10|,*n8]
+        PEEL
+        ABSTRACT n2 := #3, n3 := #3
+        SPLIT t11
+          =: PEEL
+          END (state recorded)
+          s: PEEL
+          FOLD hyp0 on t11
+          f: CUT phase [1,|t111|,*n16] then [|t110|,*n14]
+            PEEL
+            FOLD hyp0 on t11 (borrowed tail)
+        ABSTRACT n2 := #3
+        SPLIT t10
+          =: PEEL
+          END (state recorded)
+          s: PEEL
+          FOLD hyp0 on t10
+          f: CUT phase [1,|t101|,*n18] then [|t100|,*n8]
+            PEEL
+            ABSTRACT n4 := #3
+            SPLIT t101
+              =: PEEL
+              END (state recorded)
+              s: PEEL
+              FOLD hyp0 on t101
+              f: CUT phase [1,|t1011|,*n20] then [|t1010|,*n18]
+                PEEL
+                FOLD hyp0 on t101 (borrowed tail)
+            FOLD hyp0 on t10
+    ABSTRACT n1 := #3
+    SPLIT t0
+      =: PEEL
+      ZERO
+      s: PEEL
+      FOLD hyp0 on t0
+      f: CUT phase [1,|t01|,*n22] then [|t00|]
+        PEEL
+        SPLIT t01
+          =: PEEL
+          END (state recorded)
+          s: PEEL
+          FOLD hyp0 on t01
+          f: CUT phase [1,|t011|,*n24] then [|t010|,*n22]
+            PEEL
+            ABSTRACT n4 := #3
+            SPLIT t011
+              =: PEEL
+              END (state recorded)
+              s: PEEL
+              FOLD hyp0 on t011
+              f: CUT phase [1,|t0111|,*n26] then [|t0110|,*n24]
+                PEEL
+                FOLD hyp0 on t011 (borrowed tail)
+            FOLD hyp0 on t01
+        FOLD hyp0 on t0
+    ABSTRACT n1 := #4
+    SPLIT t0
+      =: PEEL
+      ZERO
+      s: PEEL
+      FOLD hyp0 on t0
+      f: CUT phase [1,|t01|,*n22] then [|t00|]
+        PEEL
+        SPLIT t01
+          =: PEEL
+          END (state recorded)
+          s: PEEL
+          FOLD hyp0 on t01
+          f: CUT phase [1,|t011|,*n24] then [|t010|,*n22]
+            PEEL
+            ABSTRACT n4 := #3
+            SPLIT t011
+              =: PEEL
+              END (state recorded)
+              s: PEEL
+              FOLD hyp0 on t011
+              f: CUT phase [1,|t0111|,*n26] then [|t0110|,*n24]
+                PEEL
+                FOLD hyp0 on t011 (borrowed tail)
+            FOLD hyp0 on t01
+        FOLD hyp0 on t0
+    ABSTRACT n1 := #5
+    SPLIT t0
+      =: PEEL
+      ZERO
+      s: PEEL
+      FOLD hyp0 on t0
+      f: CUT phase [1,|t01|,*n22] then [|t00|]
+        PEEL
+        SPLIT t01
+          =: PEEL
+          END (state recorded)
+          s: PEEL
+          FOLD hyp0 on t01
+          f: CUT phase [1,|t011|,*n24] then [|t010|,*n22]
+            PEEL
+            ABSTRACT n4 := #3
+            SPLIT t011
+              =: PEEL
+              END (state recorded)
+              s: PEEL
+              FOLD hyp0 on t011
+              f: CUT phase [1,|t0111|,*n26] then [|t0110|,*n24]
+                PEEL
+                FOLD hyp0 on t011 (borrowed tail)
+            FOLD hyp0 on t01
+        FOLD hyp0 on t0
