@@ -1,0 +1,93 @@
+# WAV audio (PCM, 8-bit unsigned, mono). Turns a list of sample bytes
+# (0..255, 128 = silence) into a valid RIFF/WAVE file. There is no compression
+# — samples are written verbatim after a 44-byte header — so the whole encoder
+# is just Nat byte twiddling, and the waveforms are cheap integer functions of
+# the sample index: a mul/mod (plus maybe a div) per sample, no trigonometry.
+# Bytes are little-endian bit-list Nats, so List.take 8 keeps a value's low 8
+# bits and Nat.shr shifts a wider field down a byte.
+
+_byte  = List.take 8
+_u16le = \n [_byte n; _byte (Nat.shr 8 n)]
+_u32le = \n [_byte n; _byte (Nat.shr 8 n); _byte (Nat.shr 16 n); _byte (Nat.shr 24 n)]
+
+# encode sr samples -> WAV byte list. sr = sample rate in Hz, samples = the raw
+# 8-bit PCM bytes. Mono 8-bit: byte rate = sr, block align = 1, bits/sample = 8.
+# The ASCII tags "RIFF"/"WAVE"/"fmt "/"data" are strings, i.e. already byte
+# lists, so they drop straight into the stream.
+encode = \sr \samples let (List.length samples) $ \len List.concat_list
+  ["RIFF"; _u32le (Nat.add 36 len); "WAVE";
+   "fmt "; _u32le 16; _u16le 1; _u16le 1; _u32le sr; _u32le sr; _u16le 1; _u16le 8;
+   "data"; _u32le len; samples]
+
+# Pitch is a fixed-point phase increment, not an integer sample period. Phase runs
+# on a 65536-unit cycle, and a note advances `step` units per sample, so its
+# frequency is step * sr / 65536. This sidesteps the coarse tuning of small
+# integer periods (a period of 15 vs 16 samples is a ~60-cent jump) — every note
+# lands within ~0.25 cents of equal temperament.
+_phase_size    = 65536
+_phase_half    = 32768
+_phase_quarter = 16384
+_phase = \step \i Nat.mod (Nat.mul step i) _phase_size
+
+# A frequency in millihertz (440000 = A4) becomes the phase increment that
+# advances a full cycle in sr/f samples: round(f * _phase_size / sr), the
+# rounding done by adding half the divisor. Millihertz is fine enough that the
+# quantization to whole phase units dominates, i.e. every note lands within
+# ~0.4 cents of its frequency even at the bottom of the range.
+step = \sr \mhz let (Nat.mul 1000 sr) $ \d
+  Nat.div (Nat.add (Nat.div d 2) (Nat.mul _phase_size mhz)) d
+
+# Waveforms: phase increment `step` and sample index `i` -> byte, swinging
+# between 48 and 208 (amplitude 80 around the 128 midpoint). Triangle and sawtooth
+# are phase-shifted to *start at the midpoint*, so a note opens without a jump
+# from the preceding silence — no onset click. Square unavoidably starts at a rail.
+# Square: flips level each half cycle — hollow, chiptune-like.
+square = \step \i Bool.match 48 208 (Nat.is_lt (_phase step i) _phase_half)
+# Sawtooth: a rising ramp, started half a cycle in so it opens at the midpoint —
+# bright/buzzy (its strong high harmonics alias somewhat at 8 kHz).
+sawtooth = \step \i let (Nat.mod (Nat.add _phase_half (Nat.mul step i)) _phase_size) $ \ph
+  Nat.add 48 (Nat.div (Nat.mul 160 ph) _phase_size)
+# Triangle: up then down, started a quarter cycle in so it opens at the midpoint.
+# `d` is the distance to the nearer end of the cycle; dividing by _phase_half (an
+# exact power of two) keeps the peak at exactly 208, no odd-period overshoot.
+# Softest of the three and the least aliased.
+triangle = \step \i let (Nat.mod (Nat.add _phase_quarter (Nat.mul step i)) _phase_size) $ \ph
+  let (Bool.match (Nat.sub _phase_size ph) ph (Nat.is_lt ph _phase_half)) $ \d
+  Nat.add 48 (Nat.div (Nat.mul 160 d) _phase_half)
+
+# Silence is the 8-bit midpoint held flat.
+_silence = \n List.repeat n 128
+
+# A tune is a list of notes, each a pair (step, tone-samples). Render each note as
+# its waveform for `n` samples then `gap` samples of silence, and concatenate. The
+# gap articulates the notes — without it two consecutive notes of the same pitch
+# merge into one long tone — and lands each note's boundary in silence.
+render = \wave \gap \notes List.concat_map
+  (\note Pair.match (\step \n List.concat
+    (List.map (wave step) (List.range n)) (_silence gap)) note)
+  notes
+
+# Tests. Sample rate 8000 Hz, pitches as frequencies in millihertz:
+#   C4 261626  D4 293665  E4 329628  F4 349228
+#   G4 391995  A4 440000  B4 493883  C5 523251
+# This module sits below the music layer, so its demos spell frequencies out;
+# `Music.pitch` names them.
+_sr = 8000
+_step = step _sr
+_wav = \name \samples △ (△ name "audio/wav") (encode _sr samples)
+
+# 0.5 s steady square-wave A4.
+_wav "tone.wav" (List.map (square (_step 440000)) (List.range 4000))
+# = tone.wav sha256:a0684b40abb5fefdc60adf3fcbe22d8efe01a6c7e3d07e1d934dcc8fba9d2099
+# C-major triangle arpeggio C4 E4 G4 C5.
+_wav "arpeggio.wav" (render triangle 400
+  [△ (_step 261626) 2000; △ (_step 329628) 2000;
+   △ (_step 391995) 2000; △ (_step 523251) 2000])
+# = arpeggio.wav sha256:e7935e6674d5f2acccf1b7688765831316ef5b711ef81104200a5d401f751971
+# Ascending C-major sawtooth scale C4..C5.
+_wav "scale.wav" (render sawtooth 320 (List.map (\mhz △ (_step mhz) 1600)
+  [261626; 293665; 329628; 349228; 391995; 440000; 493883; 523251]))
+# = scale.wav sha256:f5d2cd9670939b4af2047908d28b5227095044d46ab12f6c78ff893656552394
+
+# A tune is not written as phase increments and sample counts — see
+# src/music/melody.lamb, which notates one and renders it through this module.
