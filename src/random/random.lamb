@@ -1,0 +1,313 @@
+# Mersenne Twister MT19937, bit-compatible with CPython's `random` module.
+#
+# Seeded with the same integer, this draws the same 32-bit values as
+# `random.seed(n)` followed by `random.getrandbits(32)`, and shuffles into the
+# same permutations as `random.shuffle`. src/random/test.lamb holds the vectors
+# that hold it to that, with the CPython call each one has to match.
+#
+# Representation:
+# - A "u32" is a Nat (LSB-first bit list) constrained to <= 32 bits.
+# - State is `Pair mt mti`, where `mt` is a List of 624 u32 values and `mti`
+#   is the next index to draw from. `mti = 624` triggers a `_twist` on the
+#   next draw, which is CPython's lazy refill.
+#
+# Cost: `mt` is a list, so an update walks to its index and rebuilds the way
+# back — quadratic where the published algorithm indexes an array. Seeding and
+# each twist pay that 624 times over, and they are the only expensive things
+# here; a draw between twists is cheap. The tests at the bottom of this file
+# are the cheap ones (bit ops, tempering, chunking), and test.lamb threads a
+# whole session through each seed so that the expensive part is paid once.
+#
+# Recursion discipline: every recursive helper destructures a value to gate its
+# own recursion, so that nothing unfolds until the argument it consumes is
+# there — see the eager termination rule in README.md. In particular, we never
+# branch via `Bool.match` on a derived predicate when the chosen branch
+# contains an unguarded `self …` call: both branches are arguments, so both are
+# evaluated before either is chosen.
+
+# === u32 helpers ===
+
+# Truncate a Nat to 32 bits.
+_u32 = \n Nat.canonicalize (List.take 32 n)
+
+_u32_add = \a \b _u32 (Nat.add a b)
+_u32_mul = \a \b _u32 (Nat.mul a b)
+# (a - b) mod 2^32 = (a + 2^32 - b) mod 2^32. Works whether a >= b or not.
+_u32_sub = \a \b _u32 (Nat.add a (Nat.sub (Nat.pow2 32) b))
+
+# Bitwise ops on bit lists: Nat.xor/bit_and/bit_or zero-pad the shorter operand
+# and canonicalize, which is exactly what these need — xor/and/or of two <=32-bit
+# values stays <=32 bits, so no extra masking past canonicalization is required.
+_u32_xor = Nat.xor
+_u32_and = Nat.bit_and
+_u32_or  = Nat.bit_or
+
+# Left shift, truncated to 32 bits (right shift is Nat.shr, which never overflows).
+_u32_shl = \k \n _u32 (Nat.shl k n)
+
+# === MT19937 constants ===
+
+_N = 624
+_M = 397
+_MATRIX_A   = 2567483615  # 0x9908b0df
+_UPPER_MASK = 2147483648  # 0x80000000
+_LOWER_MASK = 2147483647  # 0x7fffffff
+_TEMPER_B   = 2636928640  # 0x9d2c5680
+_TEMPER_C   = 4022730752  # 0xefc60000
+
+# === Indexed list access / update ===
+_get_at = List.nth_or 0
+# i must be < length of l (true by construction throughout MT19937).
+_set_at = List.set_nth
+
+# Build a list by iterating a step function `f : i acc -> Pair elem next_acc`,
+# starting from `start` and `acc`, for `count` steps. Recursion gated by
+# Nat.match on `count`.
+_iter = fix $ \self \count \i \acc \f
+  Nat.match
+    []
+    (\pred Pair.match (\e \a △ e (self pred (Nat.succ i) a f)) (f i acc))
+    count
+
+# === init_genrand: seed with a single u32 ===
+# mt[0] = s & 0xffffffff
+# for i = 1..N-1:
+#   mt[i] = (1812433253 * (mt[i-1] ^ (mt[i-1] >> 30)) + i) & 0xffffffff
+_init_genrand = \s
+  let (_u32 s) $ \s0
+  _iter _N 0 s0 (\i \prev
+    Nat.match
+      (Pair.create prev prev)
+      (\_
+        let (_u32_add (_u32_mul 1812433253 (_u32_xor prev (Nat.shr 30 prev))) i) $ \cur
+        Pair.create cur cur)
+      i)
+
+# === init_by_array: CPython's seed-from-int path ===
+# Iterate each phase `count` times over its state machine via Fn.pow.
+
+_phase1_step = \key \klen \state
+  Pair.match (\mt \ij Pair.match (\i \j
+    let (_get_at i mt) $ \mti
+    let (_get_at (Nat.pred i) mt) $ \mtim1
+    let (_u32_mul (_u32_xor mtim1 (Nat.shr 30 mtim1)) 1664525) $ \scaled
+    let (_u32_add (_u32_add (_u32_xor mti scaled) (_get_at j key)) j) $ \new_mti
+    let (_set_at i new_mti mt) $ \mt2
+    let (Nat.succ i) $ \i_next
+    let (Nat.succ j) $ \j_next
+    let (Nat.is_gte i_next _N) $ \i_at_max
+    let (Bool.match mt2 (_set_at 0 (_get_at (Nat.pred _N) mt2) mt2) i_at_max) $ \mt3
+    let (Bool.match i_next 1 i_at_max) $ \i_final
+    let (Nat.is_gte j_next klen) $ \j_at_max
+    let (Bool.match j_next 0 j_at_max) $ \j_final
+    Pair.create mt3 (Pair.create i_final j_final)
+  ) ij) state
+
+_phase2_step = \state
+  Pair.match (\mt \i
+    let (_get_at i mt) $ \mti
+    let (_get_at (Nat.pred i) mt) $ \mtim1
+    let (_u32_mul (_u32_xor mtim1 (Nat.shr 30 mtim1)) 1566083941) $ \scaled
+    let (_u32_sub (_u32_xor mti scaled) i) $ \new_mti
+    let (_set_at i new_mti mt) $ \mt2
+    let (Nat.succ i) $ \i_next
+    let (Nat.is_gte i_next _N) $ \i_at_max
+    let (Bool.match mt2 (_set_at 0 (_get_at (Nat.pred _N) mt2) mt2) i_at_max) $ \mt3
+    let (Bool.match i_next 1 i_at_max) $ \i_final
+    Pair.create mt3 i_final
+  ) state
+
+_init_by_array = \key
+  let (List.length key) $ \klen
+  let (stage _init_genrand 19650218 key) $ \mt0
+  let (Nat.max _N klen) $ \k1
+  Pair.match (\mt1 \ij1
+    let (Pair.fst ij1) $ \i1
+    Pair.match (\mt2 \_
+      _set_at 0 _UPPER_MASK mt2
+    ) (Fn.pow (Nat.pred _N) _phase2_step (Pair.create mt1 i1))
+  ) (Fn.pow k1 (_phase1_step key klen) (Pair.create mt0 (Pair.create 1 0)))
+
+# === Public seed: from a non-negative integer (Python-compatible) ===
+# CPython splits |n| into 32-bit little-endian chunks; key has at least one chunk.
+_to_u32_chunks = fix $ \self \n
+  List.match
+    []
+    (\h \t △ (_u32 (△ h t)) (self (Nat.shr 32 (△ h t))))
+    n
+
+seed = \n
+  let (_to_u32_chunks n) $ \chunks
+  let (List.match [0] (\_ \_ chunks) chunks) $ \key
+  Pair.create (_init_by_array key) _N
+
+# === The twist: regenerate all 624 mt entries ===
+# for i in 0..N:
+#   y = (mt[i] & UPPER_MASK) | (mt[(i+1) % N] & LOWER_MASK)
+#   mt[i] = mt[(i+M) % N] ^ (y >> 1) ^ (MATRIX_A if y & 1 else 0)
+_twist_step = \mt \i
+  let (_get_at i mt) $ \mi
+  let (_get_at (Nat.mod (Nat.succ i) _N) mt) $ \mi1
+  let (_u32_or (_u32_and mi _UPPER_MASK) (_u32_and mi1 _LOWER_MASK)) $ \y
+  let (_get_at (Nat.mod (Nat.add i _M) _N) mt) $ \mim
+  let (Nat.match 0 (\_ _MATRIX_A) (_u32_and y 1)) $ \mag
+  _u32_xor (_u32_xor mim (Nat.shr 1 y)) mag
+
+# Update mt entries in place: at iteration i, mt[i] is recomputed from
+# the *current* mt (which already reflects updates 0..i-1). CPython's twist
+# is an in-place loop, and from i = _N - _M onward the (i + _M) % _N index
+# wraps back into the already-updated prefix — so a "compute everything from
+# old mt" version produces a different sequence.
+_twist = \mt0
+  Pair.fst (Fn.pow _N
+    (\state Pair.match (\mt \i
+      let (_twist_step mt i) $ \v
+      Pair.create (_set_at i v mt) (Nat.succ i)) state)
+    (Pair.create mt0 0))
+
+# === Tempering of a single u32 ===
+# y ^= y >> 11
+# y ^= (y << 7) & 0x9d2c5680
+# y ^= (y << 15) & 0xefc60000
+# y ^= y >> 18
+_temper = \y
+  let (_u32_xor y (Nat.shr 11 y)) $ \y1
+  let (_u32_xor y1 (_u32_and (_u32_shl 7 y1) _TEMPER_B)) $ \y2
+  let (_u32_xor y2 (_u32_and (_u32_shl 15 y2) _TEMPER_C)) $ \y3
+  _u32_xor y3 (Nat.shr 18 y3)
+
+# === genrand_uint32: returns Pair value new_state ===
+genrand_uint32 = Pair.match $ \mt \mti
+  let (Nat.is_gte mti _N) $ \needs_twist
+  let (Bool.match mt (_twist mt) needs_twist) $ \mt2
+  let (Bool.match mti 0 needs_twist) $ \i
+  Pair.create (_temper (_get_at i mt2)) (Pair.create mt2 (Nat.succ i))
+
+# Generate a list of n u32 values; returns Pair values new_state.
+gen_n = fix $ \self \n \state
+  Nat.match
+    (Pair.create [] state)
+    (\pred Pair.match (\v \st2 Pair.match (\rest \st3 Pair.create (△ v rest) st3) (self pred st2)) (genrand_uint32 state))
+    n
+
+# === Higher-level Python-compatible primitives ===
+#
+# `getrandbits k state`     — Python's random.getrandbits(k) for k <= 32:
+#                              top k bits of one genrand_uint32().
+# `randbelow n state`       — Python's random._randbelow(n) — uniform int in
+#                              [0, n) via getrandbits(n.bit_length()) with
+#                              rejection. n must be >= 1.
+# `shuffle xs state`        — Python's random.shuffle(xs) — Fisher-Yates over
+#                              the supplied list, returning the shuffled list
+#                              and the consumed RNG state.
+
+# k must be in [1, 32]. Returns Pair value new_state.
+getrandbits = \k \state
+  Pair.match (\v \ns Pair.create (Nat.shr (Nat.sub 32 k) v) ns) (genrand_uint32 state)
+
+# _bit_length n is the number of bits required to represent n as Nat.
+# Nats are LSB-first canonical (no trailing zero), so this is the list length.
+_bit_length = List.length
+
+# Reject-and-retry: keeps drawing k-bit values until one is < n.
+#
+# How often that retries is up to the draw, so the recursion is not structural
+# and there is no argument to destructure to gate it. `wait self n` is the gate
+# instead: it holds the retry as a value, and only the branch `Bool.match`
+# picks is applied to the state. Written the direct way — `Bool.match pair
+# (self n ns) …` — both branches are arguments, so the retry is evaluated
+# before the draw it exists to replace, and nothing converges.
+randbelow = fix $ \self \n \state
+  let (_bit_length n) $ \k
+  let (getrandbits k state) $ \pair
+  Pair.match (\r \ns
+    Bool.match
+      (const (Pair.create r ns))
+      (wait self n)
+      (Nat.is_gte r n)
+      ns)
+    pair
+
+# Swap elements i and j of a list (no-op if i == j).
+_swap = \i \j \xs
+  let (_get_at i xs) $ \xi
+  let (_get_at j xs) $ \xj
+  _set_at i xj (_set_at j xi xs)
+
+# Fisher-Yates shuffle (matches CPython's `random.shuffle`):
+#   for i = len-1 down to 1:  j = randbelow(i+1); swap a[i], a[j]
+# Returns Pair shuffled_list new_state.
+shuffle = \xs \state
+  let (List.length xs) $ \len
+  Bool.match
+    # 0 or 1 element: nothing to permute.
+    (Pair.create xs state)
+    (Pair.match (\arr_i \final_state
+      Pair.match (\arr \_ Pair.create arr final_state) arr_i
+    ) (Fn.pow (Nat.pred len)
+       (\st Pair.match (\arr_i \rng
+         Pair.match (\arr \i
+           Pair.match (\j \rng2
+             Pair.create (Pair.create (_swap i j arr) (Nat.pred i)) rng2
+           ) (randbelow (Nat.succ i) rng)
+         ) arr_i) st)
+       (Pair.create (Pair.create xs (Nat.pred len)) state)))
+    (Nat.is_gte len 2)
+
+# === Tests ===
+# The pieces, at the size they can be read at. Whether they add up to MT19937
+# is what the conformance vectors in test.lamb answer.
+
+_to_string = Nat.to_source
+
+# u32 ops sanity
+_u32_add 1 2
+# = 3
+_u32_add 4294967295 1
+# = 0
+_u32_mul 2 3
+# = 6
+_u32_mul 65536 65536
+# = 0
+_u32_sub 5 3
+# = 2
+_u32_sub 0 1
+# = 4294967295
+_u32_xor 5 3
+# = 6
+_u32_xor 12 10
+# = 6
+_u32_and 12 10
+# = 8
+_u32_or 12 10
+# = 14
+_u32_shl 1 3
+# = 6
+_u32_shl 31 1
+# = 2147483648
+
+# get_at / set_at
+_get_at 0 [10; 20; 30]
+# = 10
+_get_at 1 [10; 20; 30]
+# = 20
+_get_at 2 [10; 20; 30]
+# = 30
+_get_at 1 (_set_at 1 99 [10; 20; 30])
+# = 99
+_get_at 0 (_set_at 1 99 [10; 20; 30])
+# = 10
+
+# Tempering
+_temper 0
+# = 0
+_temper 1
+# = 4194449
+
+# _to_u32_chunks
+List.length (_to_u32_chunks 0)
+# = 0
+List.length (_to_u32_chunks 42)
+# = 1
+_get_at 0 (_to_u32_chunks 42)
+# = 42
