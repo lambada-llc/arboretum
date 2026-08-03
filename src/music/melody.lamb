@@ -1,0 +1,72 @@
+# Sheet music as data. A note is a duration and a pitch, a bar is a list of
+# notes, a melody is a list of bars — nothing in it mentions samples, waveforms
+# or a sample rate. A tune is therefore written once and read twice: `to_string`
+# reads it as notation, `to_samples` reads it as sound (through Audio), so the
+# printed and the played tune cannot drift apart.
+
+# Durations count sixteenths, the shortest note written here, so a 4/4 bar is 16.
+sixteenth = 1
+eighth    = 2
+quarter   = 4
+half      = 8
+whole     = 16
+# A dot adds half of the note's length again.
+dotted = \d Nat.div (Nat.mul 3 d) 2
+
+# A pitch is a semitone count above C0, so an octave is 12 and A4 is 4*12+9.
+# Pitches are written by name — `pitch "C♯5"` — against the table below, which
+# the printer reads back the other way, so a name and what it sounds like are
+# one fact. Frequencies are for octave 0 in millihertz (equal temperament,
+# A4 = 440 Hz); an octave up doubles the frequency, so it is a shift.
+_classes = ["C"; "C♯"; "D"; "D♯"; "E"; "F"; "F♯"; "G"; "G♯"; "A"; "A♯"; "B"]
+_class_mhz = [16352; 17324; 18354; 19445; 20602; 21827;
+              23125; 24500; 25957; 27500; 29135; 30868]
+
+# Name -> pitch: the last character is the octave, what precedes it the class.
+pitch = \name let (Nat.pred (List.length name)) $ \k
+  Nat.add (Nat.mul 12 (Nat.from_string (List.drop k name)))
+          (List.length (List.take_while (\c Bool.not (equal c (List.take k name))) _classes))
+# Pitch -> name, and pitch -> frequency in millihertz.
+_name = \p List.concat (List.nth_or "?" (Nat.mod p 12) _classes) (Nat.to_string (Nat.div p 12))
+_mhz = \p Nat.shl (Nat.div p 12) (List.nth_or 0 (Nat.mod p 12) _class_mhz)
+
+note = \duration \name △ duration (pitch name)
+
+# Notation: a note prints as its duration symbol followed by its pitch, a bar as
+# a line. A dotted duration has no symbol of its own, it is the undotted one
+# with a dot after it, which is exactly how the table below spells it.
+_symbols = [△ 16 "𝅝"; △ 12 "𝅗𝅥."; △ 8 "𝅗𝅥"; △ 6 "♩."; △ 4 "♩"; △ 3 "♪."; △ 2 "♪"; △ 1 "𝅘𝅥𝅯"]
+_note_string = Pair.match \d \p List.concat (List.lookup_or "?" d _symbols) (_name p)
+to_string = \melody List.join [10] (List.map (List.concat_map _note_string) melody)
+
+# Sound: at `bpm` quarter notes per minute a sixteenth lasts sr*60/(4*bpm)
+# samples. Each note sounds for its slot minus a gap that articulates it (see
+# Audio.render); an eighth of the unit is short enough to stay unheard as a
+# rest and long enough to keep two notes of the same pitch from merging.
+to_samples = \wave \sr \bpm \melody
+  let (Nat.div (Nat.mul 15 sr) bpm) $ \unit
+  let (Nat.div unit 8) $ \gap
+  Audio.render wave gap (List.map
+    (Pair.match \d \p △ (Audio.step sr (_mhz p)) (Nat.sub (Nat.mul d unit) gap))
+    (List.concat_list melody))
+
+# The opening hook of Kaoma's "Lambada" (fittingly): a quarter-note pickup, two
+# full bars, and a half note to end on.
+_e  = note eighth
+_q  = note quarter
+_dq = note (dotted quarter)
+_h  = note half
+_lambada =
+  [[_q "E4"];
+   [_dq "E5"; _e "D5"; _e "C5"; _e "B4"; _q "A4"];
+   [_e "A4"; _e "C5"; _e "B4"; _e "A4"; _e "G4"; _e "A4"; _e "E4"; _e "D4"];
+   [_h "E4"]]
+
+_sr = 8000
+to_string _lambada
+# = ♩E4
+#   ♩.E5♪D5♪C5♪B4♩A4
+#   ♪A4♪C5♪B4♪A4♪G4♪A4♪E4♪D4
+#   𝅗𝅥E4
+△ (△ "lambada.wav" "audio/wav") $ Audio.encode _sr (to_samples Audio.triangle _sr 120 _lambada)
+# = lambada.wav sha256:a98bb566ec9be1fc8abea8d2ed7b36bc4214b362a394e50745d726ec18f7844c
