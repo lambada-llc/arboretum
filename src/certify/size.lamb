@@ -667,12 +667,13 @@ _validate = \proof
     (_walk_borrows proof)
 
 # ── Rendering ────────────────────────────────────────────────────────────────
-# A certificate as one line of nested rules. A tree variable prints as its
-# position in the input — t is the input, t01 the right part of its left
-# part — because that is what its name is. A generated name — g for a
-# generalized count, j for abstracted junk, k for a tail's continuation —
-# is unique by carrying its proof path, which reads as digit noise, so the
-# renderer numbers them by first appearance instead: g1, j2, k3.
+# A certificate as one rule per line, children indented under their rule. A
+# tree variable prints as its position in the input — t is the input, t01
+# the right part of its left part — because that is what its name is. A
+# generated name — g for a generalized count, j for abstracted junk, k for
+# a tail's continuation — is unique by carrying its proof path, which reads
+# as digit noise, so the renderer numbers them by first appearance instead:
+# g1, j2, k3.
 
 # The names a proof mentions, in the order the renderer prints them.
 _names_in = fix $ \self \p _pf_case p
@@ -723,26 +724,30 @@ _render_atom = \env _atomx "1"
 _render_spec = \env \e List.concat "["
   (List.concat (List.join "," (List.map (_render_atom env) e)) "]")
 
-# render pf — the proof tree, rule by rule, as an s-expression.
-render = \pf let (_number_names (_names_in pf)) $ \env (fix $ \self \p _pf_case p
-  (\_ "ZERO")
-  (\n List.concat "(VALUE " (List.concat (_render_name env n) ")"))
-  (\sub List.concat "(PEEL " (List.concat (self sub) ")"))
+# render pf — the proof tree, one rule per line, indented by depth. Each node
+# contributes its list of lines, prefixed by the indentation it was handed;
+# a child gets two more spaces.
+render = \pf let (_number_names (_names_in pf)) $ \env
+  List.join [10] $ (fix $ \self \ind \p
+  let (List.concat "  " ind) $ \ind2
+  _pf_case p
+  (\_ [List.concat ind "ZERO"])
+  (\n [List.concat ind (List.concat "VALUE " (_render_name env n))])
+  (\sub △ (List.concat ind "PEEL") (self ind2 sub))
   (Pair.match $ \vp \kids Pair.let vp $ \v \_
-    List.concat "(SPLIT " (List.concat (_render_name env v)
-      (List.concat (List.concat_list (List.map (\k List.concat " " (self k)) kids)) ")")))
-  (Option.match "FOLD" (\_ "FOLD*"))
+    △ (List.concat ind (List.concat "SPLIT " (_render_name env v)))
+      (List.concat_list (List.map (self ind2) kids)))
+  (Option.match [List.concat ind "FOLD"] (\_ [List.concat ind "FOLD*"]))
   (Pair.match $ \nc \sub Pair.let nc $ \nm \_
-    List.concat "(GEN " (List.concat (_render_name env nm)
-      (List.concat " " (List.concat (self sub) ")"))))
+    △ (List.concat ind (List.concat "GEN " (_render_name env nm))) (self ind2 sub))
   (Pair.match $ \subst \sub
-    List.concat "(ABSTRACT " (List.concat (List.join "," (List.map (Pair.match $ \nm \_ _render_name env nm) subst))
-      (List.concat " " (List.concat (self sub) ")"))))
+    △ (List.concat ind (List.concat "ABSTRACT "
+        (List.join "," (List.map (Pair.match $ \nm \_ _render_name env nm) subst))))
+      (self ind2 sub))
   (Pair.match $ \info Pair.match $ \phase \obls Pair.let info $ \st \r
-    List.concat "(CUT " (List.concat (_render_spec env (Pair.fst r))
-      (List.concat " " (List.concat (self phase)
-        (List.concat (List.concat_list (List.map (\o List.concat " " (self o)) obls)) ")")))))
-  (Pair.match $ \st \state "END")) pf
+    △ (List.concat ind (List.concat "CUT " (_render_spec env (Pair.fst r))))
+      (List.concat (self ind2 phase) (List.concat_list (List.map (self ind2) obls))))
+  (Pair.match $ \st \state [List.concat ind "END"])) "" pf
 
 # certify_size p — the proof that p returns its argument's node count, as an
 # Snat, for every tree, under normal-order evaluation; or none.
