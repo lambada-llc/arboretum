@@ -34,7 +34,7 @@ Certify.computes_size _accumulating
 # closing an instance of an induction hypothesis.
 _to_string = Option.to_source id
 Option.map Certify.render (Certify.certify_size _naive)
-# = (some (SPLIT t0 (PEEL ZERO) (GEN g11 (PEEL (VALUE g11))) (GEN g12 (GEN g125 (CUT [g12] (PEEL (SPLIT g125 END (PEEL FOLD))) (VALUE g12))))))
+# = (some (SPLIT t (PEEL ZERO) (GEN g1 (PEEL (VALUE g1))) (GEN g2 (GEN g3 (CUT [g2] (PEEL (SPLIT g3 END (PEEL FOLD))) (VALUE g2))))))
 _to_string = Bool.to_source
 
 # The same four in the stronger reading: `size` whatever the reduction order,

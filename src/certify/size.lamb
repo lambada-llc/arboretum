@@ -667,45 +667,82 @@ _validate = \proof
     (_walk_borrows proof)
 
 # ── Rendering ────────────────────────────────────────────────────────────────
-# A certificate as one line of nested rules. Variables print as their names
-# read: t and the split steps that made them (t01 is the left part of the
-# right part of the input), g for a generalized Snat, j for abstracted junk,
-# k for a tail's continuation.
-_render_name = \n List.match "?" (\hd \tl
+# A certificate as one line of nested rules. A tree variable prints as its
+# position in the input — t is the input, t01 the right part of its left
+# part — because that is what its name is. A generated name — g for a
+# generalized count, j for abstracted junk, k for a tail's continuation —
+# is unique by carrying its proof path, which reads as digit noise, so the
+# renderer numbers them by first appearance instead: g1, j2, k3.
+
+# The names a proof mentions, in the order the renderer prints them.
+_names_in = fix $ \self \p _pf_case p
+  (\_ [])
+  (\n [n])
+  self
+  (Pair.match $ \_ \kids List.concat_list (List.map self kids))
+  (\_ [])
+  (Pair.match $ \nc \sub Pair.let nc $ \nm \_ △ nm (self sub))
+  (Pair.match $ \subst \sub List.concat (List.map Pair.fst subst) (self sub))
+  (Pair.match $ \info Pair.match $ \phase \obls Pair.let info $ \st \r
+    List.concat
+      (List.foldr (\a \acc Option.match acc (\w △ w acc) (Option.alt (_atom_var a) (_star_name a)))
+        [] (Pair.fst r))
+      (List.concat (self phase) (List.concat_list (List.map self obls))))
+  (\_ [])
+
+# Assign the generated names their display names, a counter per kind.
+_num_step = \env \cg \cj \ck \n List.match (△ env (△ cg (△ cj ck))) (\hd \tl
   (Bool.match
-    (\_ List.concat
-      (Snat.match "?" (\h2 Snat.match "?" (\h3 Snat.match "g"
-        (\h4 Snat.match "j" (\_ "k") h4) h3) h2) hd)
-      (List.concat_list (List.map Snat.to_string (List.reverse tl))))
-    (\_ List.concat "t" (List.concat_list (List.map Snat.to_string (List.reverse n))))
-    (Snat.is_lt hd Snat.two)) n) n
-_render_atom = _atomx "1"
-  (\v List.concat "|" (List.concat (_render_name v) "|"))
-  _render_name
-  (\k List.concat "*" (_render_name k))
-_render_spec = \e List.concat "["
-  (List.concat (List.join "," (List.map _render_atom e)) "]")
+    (\_ Snat.match (△ env (△ cg (△ cj ck))) (\h2 Snat.match (△ env (△ cg (△ cj ck))) (\h3
+      Snat.match (△ (△ (△ n (List.concat "g" (Nat.to_source cg))) env) (△ (Nat.add cg 1) (△ cj ck)))
+      (\h4 Snat.match (△ (△ (△ n (List.concat "j" (Nat.to_source cj))) env) (△ cg (△ (Nat.add cj 1) ck)))
+        (\_ △ (△ (△ n (List.concat "k" (Nat.to_source ck))) env) (△ cg (△ cj (Nat.add ck 1)))) h4) h3) h2) hd)
+    (\_ △ env (△ cg (△ cj ck)))
+    (Snat.is_lt hd Snat.two)) △) n
+_number_names = \names Pair.fst $ List.foldl (\acc \n Pair.let acc $ \env \cnt
+    Pair.let cnt $ \cg \r2 Pair.let r2 $ \cj \ck
+    Option.match (_num_step env cg cj ck n) (\_ acc) (List.lookup n env))
+  (△ [] (△ 1 (△ 1 1))) names
+
+_render_name = \env \n Option.match
+  (List.match "t" (\hd \tl
+    (Bool.match
+      (\_ List.concat
+        (Snat.match "?" (\h2 Snat.match "?" (\h3 Snat.match "g"
+          (\h4 Snat.match "j" (\_ "k") h4) h3) h2) hd)
+        (List.concat_list (List.map Snat.to_string (List.reverse tl))))
+      (\_ List.concat "t" (List.concat_list (List.map Snat.to_string
+        (List.match [] (\h2 \t2 t2) (List.reverse n)))))
+      (Snat.is_lt hd Snat.two)) n) n)
+  id
+  (List.lookup n env)
+_render_atom = \env _atomx "1"
+  (\v List.concat "|" (List.concat (_render_name env v) "|"))
+  (_render_name env)
+  (\k List.concat "*" (_render_name env k))
+_render_spec = \env \e List.concat "["
+  (List.concat (List.join "," (List.map (_render_atom env) e)) "]")
 
 # render pf — the proof tree, rule by rule, as an s-expression.
-render = fix $ \self \p _pf_case p
+render = \pf let (_number_names (_names_in pf)) $ \env (fix $ \self \p _pf_case p
   (\_ "ZERO")
-  (\n List.concat "(VALUE " (List.concat (_render_name n) ")"))
+  (\n List.concat "(VALUE " (List.concat (_render_name env n) ")"))
   (\sub List.concat "(PEEL " (List.concat (self sub) ")"))
   (Pair.match $ \vp \kids Pair.let vp $ \v \_
-    List.concat "(SPLIT " (List.concat (_render_name v)
+    List.concat "(SPLIT " (List.concat (_render_name env v)
       (List.concat (List.concat_list (List.map (\k List.concat " " (self k)) kids)) ")")))
   (Option.match "FOLD" (\_ "FOLD*"))
   (Pair.match $ \nc \sub Pair.let nc $ \nm \_
-    List.concat "(GEN " (List.concat (_render_name nm)
+    List.concat "(GEN " (List.concat (_render_name env nm)
       (List.concat " " (List.concat (self sub) ")"))))
   (Pair.match $ \subst \sub
-    List.concat "(ABSTRACT " (List.concat (List.join "," (List.map (Pair.match $ \nm \_ _render_name nm) subst))
+    List.concat "(ABSTRACT " (List.concat (List.join "," (List.map (Pair.match $ \nm \_ _render_name env nm) subst))
       (List.concat " " (List.concat (self sub) ")"))))
   (Pair.match $ \info Pair.match $ \phase \obls Pair.let info $ \st \r
-    List.concat "(CUT " (List.concat (_render_spec (Pair.fst r))
+    List.concat "(CUT " (List.concat (_render_spec env (Pair.fst r))
       (List.concat " " (List.concat (self phase)
         (List.concat (List.concat_list (List.map (\o List.concat " " (self o)) obls)) ")")))))
-  (Pair.match $ \st \state "END")
+  (Pair.match $ \st \state "END")) pf
 
 # certify_size p — the proof that p returns its argument's node count, as an
 # Snat, for every tree, under normal-order evaluation; or none.
