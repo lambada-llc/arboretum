@@ -28,6 +28,15 @@ Certify.computes_size _shifted
 Certify.computes_size _accumulating
 # = true
 
+# A true is backed by a proof tree that can be looked at: SPLIT with a case
+# per shape of the split variable, PEEL per emitted successor, GEN naming a
+# subterm's count, CUT opening a phase against a tail that END closes, FOLD
+# closing an instance of an induction hypothesis.
+_to_string = Option.to_source id
+Option.map Certify.render (Certify.certify_size _naive)
+# = (some (SPLIT t0 (PEEL ZERO) (GEN g11 (PEEL (VALUE g11))) (GEN g12 (GEN g125 (CUT [g12] (PEEL (SPLIT g125 END (PEEL FOLD))) (VALUE g12))))))
+_to_string = Bool.to_source
+
 # The same four in the stronger reading: `size` whatever the reduction order,
 # so none of them leans on a rule discarding a subterm before it is reduced.
 Certify.computes_size_eagerly _naive

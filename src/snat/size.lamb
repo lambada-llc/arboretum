@@ -119,18 +119,19 @@ Certify.computes_size_eagerly size__lazy_108
 Certify.computes_size_eagerly size__lazy_113
 # = false
 
-# Certify.computes_size, which asks only for the count, is not a true for them
-# either. Their residual under a variable input has no normal form — the
-# recursion unfolds under a constructor that reduction would have discarded, and
-# normalizing that is what outruns the budget — so the verdict is the same "not
-# certifiable" for the same reason the certificate exists to give: no proof,
-# rather than a counterexample.
+# Certify.computes_size asks only for the count, in normal order, and its
+# extended rule system (src/certify/size.lamb) closes over two of them: the
+# induction abstracts away the input copies their states drag one constructor
+# behind the live one, and a tail atom caps the spec their left-nested forks
+# would otherwise grow without bound. A true is a proof that the program
+# returns its argument's node count on every tree — which is more than any
+# run of it below can say.
 Certify.computes_size size__lazy_100
-# = false
+# = true
 Certify.computes_size size__lazy_103
 # = false
 Certify.computes_size size__lazy_104
-# = false
+# = true
 Certify.computes_size size__lazy_106
 # = false
 Certify.computes_size size__lazy_108
@@ -138,14 +139,19 @@ Certify.computes_size size__lazy_108
 Certify.computes_size size__lazy_113
 # = false
 
-# All six are on that list only because the certifier reduces over spines now
-# (src/quoted/spine.lamb). Reading the 103 and the 106 through the term-rebuilding
-# evaluator did not come back under this build's eager runner, which made the
-# analysis a program this repository could not run on its own subject matter.
+# The remaining falses are the certifier being conservative, not a finding:
+# false has always meant "no proof within bounds" here, and the 103, 106, 108
+# and 113 defeat its junk and continuation heuristics within its depth. All
+# six run at all only because the certifier reduces over spines
+# (src/quoted/spine.lamb): reading the 103 and the 106 through the
+# term-rebuilding evaluator did not come back under this build's eager
+# runner, which made the analysis a program this repository could not run on
+# its own subject matter.
 #
-# What none of this establishes is that these are `size`. What is left of that
-# claim is one input apiece below, which is a smoke test and not much more —
-# `_deep_bug` in src/certify/test.lamb is not `size`, and returns 5 on it too.
+# For the 100 and the 104 the count claim is proven above. For the other four
+# nothing here establishes they are `size`; what is left of that claim is one
+# input apiece below, which is a smoke test and not much more — `_deep_bug`
+# in src/certify/test.lamb is not `size`, and returns 5 on it too.
 _to_string = Snat.to_string
 Reflect.lazy_eval size__smallest__lazy id
 # = 5
