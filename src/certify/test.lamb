@@ -32,8 +32,8 @@ Certify.computes_size _accumulating
 # per shape of the split variable, PEEL per emitted successor, GEN naming a
 # subterm's count, CUT opening a phase against a tail that END closes, FOLD
 # closing an instance of an induction hypothesis.
-_to_string = id
-Option.match "no proof" Certify.render (Certify.certify_size _naive)
+_to_string = Option.match "no proof" Certify.render
+Certify.certify_size _naive
 # = SPLIT t
 #     PEEL
 #       ZERO
