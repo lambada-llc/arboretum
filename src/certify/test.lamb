@@ -28,6 +28,40 @@ Certify.computes_size _shifted
 Certify.computes_size _accumulating
 # = true
 
+# A true is backed by a proof tree that can be looked at: SPLIT with a case
+# per shape of the split variable, PEEL per emitted successor, GEN naming a
+# subterm's count, CUT opening a phase against a tail that END closes, FOLD
+# closing an instance of an induction hypothesis.
+_to_string = Option.match "no proof" Certify.render
+Certify.certify_size _naive
+# = SPLIT t
+#     PEEL
+#       ZERO
+#     GEN g1
+#       PEEL
+#         VALUE g1
+#     GEN g2
+#       GEN g3
+#         CUT [g2]
+#           PEEL
+#             SPLIT g3
+#               END
+#               PEEL
+#                 FOLD
+#           VALUE g2
+_to_string = Bool.to_source
+
+# The same four in the stronger reading: `size` whatever the reduction order,
+# so none of them leans on a rule discarding a subterm before it is reduced.
+Certify.computes_size_eagerly _naive
+# = true
+Certify.computes_size_eagerly _swapped
+# = true
+Certify.computes_size_eagerly _shifted
+# = true
+Certify.computes_size_eagerly _accumulating
+# = true
+
 # Programs that are not size, and are rejected.
 _leaves = fix $ \self triage Snat.one (\a self a) (\a \b Snat.add (self a) (self b))
 _left_spine = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ (self a))
@@ -67,4 +101,15 @@ Certify.computes_size Snat.add
 # Conservative, not wrong: this is size, but it counts in binary Nat and
 # converts only at the end, so the induction never closes over the unary spec.
 Certify.computes_size (compose Snat.from_nat size)
+# = false
+
+# The eager reading adds a way to fail and takes none away, so everything above
+# is rejected here too — and a false still means "not certifiable" rather than
+# "diverges": the binary-counting one terminates in every order and is rejected
+# for the reason it always was.
+Certify.computes_size_eagerly _leaves
+# = false
+Certify.computes_size_eagerly _deep_bug
+# = false
+Certify.computes_size_eagerly (compose Snat.from_nat size)
 # = false

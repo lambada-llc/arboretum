@@ -79,9 +79,275 @@ Certify.computes_size size__smallest5
 Certify.computes_size size__smallest6
 # = true
 
-# The __lazy ones are sampled instead of certified: certifying means normalizing
-# the program, and the certifier's symbolic reduction forces argument positions,
-# so these hang it exactly as they hang an eager evaluator.
+# A true stands on a proof, and the proof is an induction tree that can be
+# looked at: Certify.certify_size returns it, Certify.render draws it. For
+# the minimal program — SPLIT with a case per shape of the split variable,
+# PEEL per emitted successor, GEN naming a subterm's count, FOLD closing an
+# instance of an induction hypothesis.
+_to_string = Option.match "no proof" Certify.render
+Certify.certify_size size__smallest
+# = SPLIT t
+#     PEEL
+#       ZERO
+#     GEN g1
+#       PEEL
+#         VALUE g1
+#     GEN g2
+#       CUT [g2]
+#         PEEL
+#           SPLIT t1
+#             PEEL
+#               END
+#             PEEL
+#               FOLD
+#             CUT [|t10|,*k1]
+#               PEEL
+#                 FOLD*
+#         VALUE g2
+_to_string = Bool.to_source
+
+# Certify.computes_size_eagerly proves that and more: that reduction terminates
+# in every order, so these are `size` for an evaluator that reduces arguments
+# before it uses them, which is what this repository's rule asks of them. The
+# eight above are written to that rule and pass.
+Certify.computes_size_eagerly size
+# = true
+Certify.computes_size_eagerly size__fastest
+# = true
+Certify.computes_size_eagerly size__smallest
+# = true
+Certify.computes_size_eagerly size__smallest2
+# = true
+Certify.computes_size_eagerly size__smallest3
+# = true
+Certify.computes_size_eagerly size__smallest4
+# = true
+Certify.computes_size_eagerly size__smallest5
+# = true
+Certify.computes_size_eagerly size__smallest6
+# = true
+
+# And it is what the __lazy ones fail, on the very first state: reducing them
+# eagerly under a variable input spends the whole budget without reaching a
+# normal form, which is the same wall an eager evaluator hits on a real one.
+# That is what separates the two families here, read off the programs rather
+# than taken on faith — and what the naming, the lazy_eval below and the node
+# counts at the bottom are all about.
+Certify.computes_size_eagerly size__lazy_100
+# = false
+Certify.computes_size_eagerly size__lazy_103
+# = false
+Certify.computes_size_eagerly size__lazy_104
+# = false
+Certify.computes_size_eagerly size__lazy_106
+# = false
+Certify.computes_size_eagerly size__lazy_108
+# = false
+Certify.computes_size_eagerly size__lazy_113
+# = false
+
+# Certify.computes_size asks only for the count, in normal order, and its
+# extended rule system (src/certify/size.lamb) closes over two of them: the
+# induction abstracts away the input copies their states drag one constructor
+# behind the live one, and a tail atom caps the spec their left-nested forks
+# would otherwise grow without bound. A true is a proof that the program
+# returns its argument's node count on every tree — which is more than any
+# run of it below can say.
+Certify.computes_size size__lazy_100
+# = true
+Certify.computes_size size__lazy_103
+# = false
+Certify.computes_size size__lazy_104
+# = true
+Certify.computes_size size__lazy_106
+# = false
+Certify.computes_size size__lazy_108
+# = false
+Certify.computes_size size__lazy_113
+# = false
+
+# The 100's certificate, drawn. This is what the extended rules exist for —
+# no eager program's proof tree has a CUT against a ⟨★k⟩ tail, an END
+# recording where a phase stopped, an ABSTRACT stripping lag junk, or a
+# FOLD* whose borrowed tail the second pass re-checked.
+_to_string = Option.match "no proof" Certify.render
+Certify.certify_size size__lazy_100
+# = SPLIT t
+#     PEEL
+#       ZERO
+#     PEEL
+#       ABSTRACT j1
+#         SPLIT t0
+#           PEEL
+#             ZERO
+#           PEEL
+#             FOLD
+#           CUT [|t00|]
+#             PEEL
+#               SPLIT t01
+#                 PEEL
+#                   END
+#                 PEEL
+#                   FOLD
+#                 CUT [|t010|,*k1]
+#                   PEEL
+#                     ABSTRACT j2
+#                       SPLIT t011
+#                         PEEL
+#                           END
+#                         PEEL
+#                           FOLD
+#                         CUT [|t0110|,*k2]
+#                           PEEL
+#                             FOLD*
+#                   FOLD
+#             FOLD
+#     CUT [|t0|]
+#       PEEL
+#         SPLIT t1
+#           PEEL
+#             END
+#           PEEL
+#             ABSTRACT j3
+#               SPLIT t10
+#                 PEEL
+#                   END
+#                 PEEL
+#                   FOLD
+#                 CUT [|t100|,*k3]
+#                   PEEL
+#                     ABSTRACT j4
+#                       SPLIT t101
+#                         PEEL
+#                           END
+#                         PEEL
+#                           FOLD
+#                         CUT [|t1010|,*k4]
+#                           PEEL
+#                             FOLD*
+#                   FOLD
+#           CUT [|t10|,*k3]
+#             PEEL
+#               ABSTRACT j5,j6
+#                 SPLIT t11
+#                   PEEL
+#                     END
+#                   PEEL
+#                     FOLD
+#                   CUT [|t110|,*k5]
+#                     PEEL
+#                       FOLD*
+#             ABSTRACT j7
+#               SPLIT t10
+#                 PEEL
+#                   END
+#                 PEEL
+#                   FOLD
+#                 CUT [|t100|,*k3]
+#                   PEEL
+#                     ABSTRACT j8
+#                       SPLIT t101
+#                         PEEL
+#                           END
+#                         PEEL
+#                           FOLD
+#                         CUT [|t1010|,*k6]
+#                           PEEL
+#                             FOLD*
+#                   FOLD
+#       ABSTRACT j9
+#         SPLIT t0
+#           PEEL
+#             ZERO
+#           PEEL
+#             FOLD
+#           CUT [|t00|]
+#             PEEL
+#               SPLIT t01
+#                 PEEL
+#                   END
+#                 PEEL
+#                   FOLD
+#                 CUT [|t010|,*k7]
+#                   PEEL
+#                     ABSTRACT j10
+#                       SPLIT t011
+#                         PEEL
+#                           END
+#                         PEEL
+#                           FOLD
+#                         CUT [|t0110|,*k8]
+#                           PEEL
+#                             FOLD*
+#                   FOLD
+#             FOLD
+#       ABSTRACT j11
+#         SPLIT t0
+#           PEEL
+#             ZERO
+#           PEEL
+#             FOLD
+#           CUT [|t00|]
+#             PEEL
+#               SPLIT t01
+#                 PEEL
+#                   END
+#                 PEEL
+#                   FOLD
+#                 CUT [|t010|,*k9]
+#                   PEEL
+#                     ABSTRACT j12
+#                       SPLIT t011
+#                         PEEL
+#                           END
+#                         PEEL
+#                           FOLD
+#                         CUT [|t0110|,*k10]
+#                           PEEL
+#                             FOLD*
+#                   FOLD
+#             FOLD
+#       ABSTRACT j13
+#         SPLIT t0
+#           PEEL
+#             ZERO
+#           PEEL
+#             FOLD
+#           CUT [|t00|]
+#             PEEL
+#               SPLIT t01
+#                 PEEL
+#                   END
+#                 PEEL
+#                   FOLD
+#                 CUT [|t010|,*k11]
+#                   PEEL
+#                     ABSTRACT j14
+#                       SPLIT t011
+#                         PEEL
+#                           END
+#                         PEEL
+#                           FOLD
+#                         CUT [|t0110|,*k12]
+#                           PEEL
+#                             FOLD*
+#                   FOLD
+#             FOLD
+_to_string = Bool.to_source
+
+# The remaining falses are the certifier being conservative, not a finding:
+# false has always meant "no proof within bounds" here, and the 103, 106, 108
+# and 113 defeat its junk and continuation heuristics within its depth. All
+# six run at all only because the certifier reduces over spines
+# (src/quoted/spine.lamb): reading the 103 and the 106 through the
+# term-rebuilding evaluator did not come back under this build's eager
+# runner, which made the analysis a program this repository could not run on
+# its own subject matter.
+#
+# For the 100 and the 104 the count claim is proven above. For the other four
+# nothing here establishes they are `size`; what is left of that claim is one
+# input apiece below, which is a smoke test and not much more — `_deep_bug`
+# in src/certify/test.lamb is not `size`, and returns 5 on it too.
 _to_string = Snat.to_string
 Reflect.lazy_eval size__smallest__lazy id
 # = 5

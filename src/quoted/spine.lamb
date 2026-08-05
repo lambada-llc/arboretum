@@ -1,0 +1,104 @@
+# Reduction over spines, on a budget: eval.lamb's terms and rules, in the shape
+# src/reflect/eval.lamb reduces them.
+#
+# A term here is its head and the arguments applied to it — [△ head args], head
+# being △ or an opaque variable [△ n] — so a rule rewrites the front of a list
+# and touches nothing else. Reducing [a b] never builds a residual for [a] along
+# the way, and what a rule drops it drops as a list element, which an eager host
+# is happy to never look inside. That is what [apply] cannot do: it classifies
+# by rebuilding, so an eager host pays for every term the reduction walks past,
+# including the ones only a program that reduces in normal order ever produces.
+#
+# The budget is one unit per rule application, and running out is [none].
+
+_mk = Pair.create
+_push = \t \more Pair.match (\h \as _mk h $ List.concat as more) t
+_ok = \fuel \t \b Option.some $ △ fuel (△ t b)
+
+of_quoted = fix $ \self \q triage
+  (_mk △ [])
+  (\n _mk (△ n) [])
+  (\f \x _push (self f) [self x])
+  q
+to_quoted = fix $ \self Pair.match $ \h \as List.foldl (\acc \a △ acc (self a)) h as
+
+# [_whnf fuel t] — rewrite the root until fewer than three arguments are left,
+# or an unknown stands where a rule needs a shape. The three arguments a rule
+# reads are [a], which picks it, and for rule 3 also [c]; everything past them
+# rides along in [rest] untouched.
+_whnf = fix $ \self \fuel \t
+  Pair.let t $ \h \as
+  triage
+    (\self List.match (\_ _ok fuel t Option.none) (\a \as1 \self
+      List.match (\_ _ok fuel t Option.none) (\b \as2 \self
+      List.match (\_ _ok fuel t Option.none) (\c \rest \self
+        Snat.match Option.none (\fuel
+          Option.bind (Pair.match $ \fuel Pair.match $ \a2 \ba
+            let (\c2 _mk h $ △ a2 (△ b (△ c2 rest))) $ \stuck
+            Option.match
+              (Pair.let a2 $ \ah \aas
+               triage
+                 (\self List.match
+                   (\self self fuel $ _push b rest)                    # rule 1
+                   (\x \aas1 \self List.match
+                     (\self self fuel $ _push x (△ c (△ (_push b [c]) rest)))   # rule 2
+                     (\y \_ \self                                      # rule 3, on c
+                       Option.bind (Pair.match $ \fuel Pair.match $ \c2 \bc
+                         Option.match
+                           (Pair.let c2 $ \ch \cas
+                            triage
+                              (\self List.match
+                                (\self self fuel $ _push x rest)       # c = △
+                                (\u \cas1 \self List.match
+                                  (\self self fuel $ _push y (△ u rest))          # c = △ u
+                                  (\v \_ \self self fuel $ _push b (△ u (△ v rest)))  # c = △ u v
+                                  cas1 self)
+                                cas self)
+                              (\_ \_ _ok fuel (stuck c2) Option.none)
+                              (\_ \_ \_ _ok fuel (stuck c2) Option.none)
+                              ch self)
+                           (\v _ok fuel (stuck c2) (Option.some v))
+                           bc)
+                         (self fuel c))
+                     aas1 self)
+                   aas self)
+                 (\_ \_ _ok fuel (stuck c) Option.none)
+                 (\_ \_ \_ _ok fuel (stuck c) Option.none)
+                 ah self)
+              (\v _ok fuel (stuck c) (Option.some v))
+              ba)
+            (self fuel a))
+          fuel)
+        as2 self) as1 self) as self)
+    (\n \_ _ok fuel t (Option.some n))
+    (\_ \_ \_ _ok fuel t Option.none)
+    h self
+
+# Normalize the arguments of a head normal form, left to right, and keep the
+# first variable any of them is waiting on.
+_nf_args = \nf fix $ \self \fuel \as
+  List.match (\_ Option.some $ △ fuel (△ [] Option.none))
+    (\a \tl \self Option.bind (Pair.match $ \fuel Pair.match $ \a2 \ba
+       Option.bind (Pair.match $ \fuel Pair.match $ \tl2 \btl
+         Option.some $ △ fuel (△ (△ a2 tl2) (Option.alt ba btl)))
+         (self fuel tl))
+       (nf fuel a))
+    as self
+
+_nf = fix $ \self \fuel \t
+  Option.bind (Pair.match $ \fuel Pair.match $ \t2 \b
+    Pair.let t2 $ \h \as
+    Option.bind (Pair.match $ \fuel Pair.match $ \as2 \bas
+      _ok fuel (_mk h as2) (Option.alt b bas))
+      (_nf_args self fuel as))
+    (_whnf fuel t)
+
+_run = \f \budget \q Option.map (Pair.match $ \_ Pair.match $ \t \b △ (to_quoted t) b) $ f budget (of_quoted q)
+
+# [head_normalize budget q] — q's head normal form, paired with the variable
+# reduction is waiting on, or none if the budget ran out.
+head_normalize = _run _whnf
+
+# [normalize_lazy budget q] — the same, run on down through the arguments, so
+# the result is a normal form.
+normalize_lazy = _run _nf

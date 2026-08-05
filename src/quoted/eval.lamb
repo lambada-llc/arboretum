@@ -39,6 +39,13 @@ _qtriage = \apply \ounk \ot \os \of fix $ \self \x
 # fork fires a rule, chosen by its left child (leaf = rule 1, stem = rule 2,
 # fork = rule 3), and rule 3 alone goes on to classify qx — that is its triage.
 # A block at any of those points leaves the term unreduced and propagates out.
+#
+# What a rule builds is built, not reduced: rules 2 and 3c each hand back one
+# application whose head this has to reduce to classify it, and the operand next
+# to it stays an unreduced [△ f x] until something asks for its shape. Reducing
+# it here instead would make this strict in a position the calculus is not, and
+# a program whose operand is a self-application it never looks at — which is how
+# the __lazy size programs in src/snat/size.lamb are built — would not come back.
 apply = fix $ \self \a \b
   _qtriage self
     (\a \blocker \b △ (△ a b) $ △ blocker)
@@ -48,7 +55,7 @@ apply = fix $ \self \a \b
       _qtriage self
         (\a1 \blocker \a2 \b △ (△ (Reflect.qfork a1 a2) b) $ △ blocker)
         (\a2 \b △ a2 △)
-        (\a1 \a2 \b self (Pair.fst $ self a1 b) (Pair.fst $ self a2 b))
+        (\a1 \a2 \b self (Pair.fst $ self a1 b) (△ a2 b))
         (\a0 \a1 \a2 \b
           _qtriage self
             (\b \blocker △ (△ (Reflect.qfork (Reflect.qfork a0 a1) a2) b) $ △ blocker)
@@ -66,6 +73,71 @@ qtriage = _qtriage apply
 
 # Head-reduce a quoted term, pairing the residual with the blocker (△ if none).
 eval = \x qtriage (\x \blocker △ x $ △ blocker) (△ △ △) (\a △ (Reflect.qstem a) △) (\a \b △ (Reflect.qfork a b) △) x
+
+# The same reduction in eager order, run all the way to a normal form, on a
+# budget.
+#
+# [eval] discards what a rule discards without ever looking at it, which is why
+# it returns on terms that only converge in normal order. [normalize_eager] is
+# the other order: both halves of an application are normalized before any rule
+# fires, so whatever a rule discards is a normal form by the time it goes. That
+# is the order this repository is written for, and the one that can fail to
+# return where the other does not — hence the budget: [normalize_eager n q]
+# spends a unit per rule application and reports [none] once n of them are gone,
+# so it answers on every term, including those with no normal form.
+#
+# Reduction is confluent, so where both orders return they return the same term.
+# The result carries no blocker; a normal form is what [eval] reads one off of.
+
+# Classify a term that is already in normal form. Nothing here reduces: a normal
+# form is a leaf, a variable, [△ a], [△ a b], or an application whose head is a
+# variable — and only the last reaches [apply], so the one passed here reports
+# every application it is handed as blocked, which is what that case is.
+_blocked = \a \b △ (△ a b) (△ △)
+_classify = _qtriage _blocked
+
+# What is left of the budget travels with the term: [some (△ budget q)], and
+# [none] once there is none left to travel with.
+_ok = \fuel \q Option.some $ △ fuel q
+
+# [_apply_nf fuel a b] — the normal form of [a b], for a and b already in normal
+# form. The rules are [apply]'s, and choosing between them needs no reduction
+# here; what is left to normalize is what the chosen rule builds, which is rule
+# 2's two applications and rule 3's one. Reaching those is what spends budget.
+_apply_nf = fix $ \self \fuel \a \b
+  _classify
+    (\_ \_ \_ _ok fuel $ △ a b)                              # a's head is unknown
+    (\_ _ok fuel $ Reflect.qstem b)                          # a = △, so a b = △ b
+    (\a1 \_ _ok fuel $ Reflect.qfork a1 b)                   # a = △ a1, so a b = △ a1 b
+    (\a1 \a2 \self Snat.match Option.none (\fuel
+      _classify
+        (\_ \_ \_ _ok fuel $ △ a b)                          # which rule fires needs a1
+        (\_ _ok fuel a2)                                     # rule 1: a2
+        (\x \self Option.bind (Pair.match $ \fuel \r1
+                   Option.bind (Pair.match $ \fuel \r2 self fuel r1 r2)
+                   (self fuel a2 b))
+                   (self fuel x b))                          # rule 2: (x b) (a2 b)
+        (\w \x \self _classify                               # rule 3 needs b as well
+          (\_ \_ \_ _ok fuel $ △ a b)
+          (\_ _ok fuel w)                                    #   b = △    : w
+          (\u \self self fuel x u)                           #   b = △ u  : x u
+          (\u \v \self Option.bind (Pair.match $ \fuel \r self fuel r v) (self fuel a2 u))
+          b self)                                            #   b = △ u v: a2 u v
+        a1 self) fuel)
+    a self
+
+# Normalize any term: both halves of an application first, then the application.
+_normalize = fix $ \self \fuel \q
+  triage
+    (\_ _ok fuel q)
+    (\_ \_ _ok fuel q)
+    (\f \x \self Option.bind (Pair.match $ \fuel \f2
+                 Option.bind (Pair.match $ \fuel \x2 _apply_nf fuel f2 x2) (self fuel x))
+                 (self fuel f))
+    q self
+
+# [normalize_eager budget q] — q's normal form, or none if the budget ran out.
+normalize_eager = \budget \q Option.map Pair.snd $ _normalize budget q
 
 _render = Pair.match $ \res \blocker
   List.concat (Quoted.to_string res) $
@@ -89,3 +161,64 @@ apply (Reflect.quote Bool.not) (Reflect.quote false)
 # = △ △
 apply (Reflect.quote Bool.not) (Reflect.quote true)
 # = △
+
+# Tests: eager reduction
+_budget = Snat.from_nat 1000
+_to_string = Option.to_source Quoted.to_string
+normalize_eager _budget (Reflect.quote △)
+# = (some △)
+normalize_eager _budget (△ "x")
+# = (some x)
+normalize_eager _budget (Reflect.qapp (Reflect.quote id) [△ "x"])
+# = (some x)
+normalize_eager _budget (Reflect.qapp (Reflect.quote (\a \b a)) [△ "x"; △ "y"])
+# = (some x)
+normalize_eager _budget (Reflect.qapp (Reflect.quote Bool.not) [Reflect.quote true])
+# = (some △)
+
+# A term with no unknowns in it runs all the way to a value, which
+# [unsafe_unquote] reads back.
+_sum = Reflect.qapp (Reflect.quote (Nat.add 1)) [Reflect.quote 2]
+_to_string = Option.to_source Nat.to_source
+Option.map Reflect.unsafe_unquote $ normalize_eager _budget _sum
+# = (some 3)
+# Out of budget is a [none], not a wrong answer.
+Option.map Reflect.unsafe_unquote $ normalize_eager (Snat.from_nat 10) _sum
+# = none
+
+# Reduction goes on under a constructor, where [eval] stops.
+_stem_of_a_redex = Reflect.qstem (Reflect.qapp (Reflect.quote Bool.not) [Reflect.quote true])
+_to_string = _render
+eval _stem_of_a_redex
+# = △ (△ (△ (△ △) (△ △ △)) △ (△ △))
+_to_string = Option.to_source Quoted.to_string
+normalize_eager _budget _stem_of_a_redex
+# = (some △ △)
+
+# An operand rule 2 hands back, never looked at. [_never t] has no head normal
+# form and [const] drops it, so head reduction returns — as long as rule 2 left
+# it alone rather than reducing it on the way past.
+_never = fix $ \self \x self x
+_drops_a_loop = \x const △ (_never x)
+_to_string = _render
+eval (Reflect.qapp (Reflect.quote _drops_a_loop) [△ "t"])
+# = △
+
+# Where [eval] stops matters: [_counts_forever t] head-reduces to a successor of
+# itself, so the head reduction returns and nothing below it does. Reducing on
+# down through that is spine.lamb's business, and needs a budget for it.
+_counts_forever = fix $ \self \x Snat.succ (self x)
+_to_string = Bool.to_source
+Option.match true (\_ false) $ Pair.snd $ eval (Reflect.qapp (Reflect.quote _counts_forever) [△ "t"])
+# = true
+
+# [self_apply self_apply] has no normal form, so quoting it takes qapp rather
+# than quote. Discarding it is a value in one order and a divergence in the other.
+_omega = Reflect.qapp (Reflect.quote self_apply) [Reflect.quote self_apply]
+_discarding_omega = Reflect.qapp (Reflect.quote (\a \b a)) [Reflect.quote △; _omega]
+_to_string = _render
+eval _discarding_omega
+# = △
+_to_string = Option.to_source Quoted.to_string
+normalize_eager _budget _discarding_omega
+# = none

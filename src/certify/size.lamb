@@ -10,9 +10,11 @@
 # A goal pairs a symbolic term with what it must evaluate to, written in an
 # abstract Snat: a multiset of `1`s, `|t|`s (the size of tree variable t) and
 # `n`s (the value of an Snat variable). The top goal is `p t ⊨ |t|`. Five rules
-# close it, each either a fact about trees or a step of the induction:
-#   • NORMALIZE  reduce the term symbolically; opaque variables block reduction
-#                and the evaluator reports the one it is waiting on
+# close it, each either a fact about trees or a step of the induction — the
+# lazy certifier further down extends them with three more, rendered at its
+# own header:
+#   • NORMALIZE  reduce the term symbolically, on a budget; opaque variables
+#                block reduction and the evaluator reports the one it waits on
 #   • PEEL       a term that reduced to `△ x` is a successor, so spend a `1`
 #                from the spec and continue with `x`
 #   • SPLIT      case on the blocking variable — every tree is △, △a or △ab and
@@ -39,10 +41,39 @@
 # bounds". The analysis is an underapproximation by design: it gives up beyond
 # `_depth` nested case splits, and when the accumulated state never folds, as in
 # `compose Snat.from_nat size` — that is `size`, but it counts in binary Nat and
-# converts at the end, so the induction never closes over the unary spec. It
-# also presumes termination: it reads through Quoted.eval, which does not return
-# on a program that diverges under symbolic evaluation — the `__lazy` size
-# programs in src/snat/size.lamb are exactly that, and are sampled there instead.
+# converts at the end, so the induction never closes over the unary spec.
+#
+# NORMALIZE runs on a budget, so a term with no normal form costs a fallback
+# rather than an answer that never comes. The `__lazy` programs in
+# src/snat/size.lamb are the ones that spend it: their recursion unfolds under
+# the constructor it emits, so their states have no normal form at all — head
+# reduction returns, normalizing what it returns does not, and the head is
+# what NORMALIZE hands the rules. The lazy certifier's three extensions are
+# what close an induction over such heads, for two of the six.
+#
+# That the budget can be spent at all is what src/quoted/spine.lamb is for. Its
+# reduction rewrites the front of an argument list, so what a rule drops is
+# dropped as a list element and an eager evaluator never looks inside it —
+# where the term-rebuilding [Quoted.eval] makes an eager host pay for every
+# term the reduction walks past, which on two of the `__lazy` programs is a
+# price this repository cannot pay. The analysis is a program here like any
+# other, and it has to hold to the same rule as its subject matter.
+#
+# Which order it diverges under is the other question a reader of a program can
+# settle, since tree calculus prescribes none and `size` can be written to
+# converge in only one of them — the `__lazy` programs in src/snat/size.lamb are
+# exactly that, and smaller for it. NORMALIZE is where the difference lives, so
+# it is the only thing [computes_size_eagerly] changes: it normalizes both
+# halves of an application before letting a rule fire on it, so a rule only ever
+# discards a term that is already a normal form. Discarding a normal form
+# discards nothing that could have diverged, and discarding is the only way one
+# order can converge where another does not, so a program that terminates under
+# this order terminates under every one: [p t] strongly normalizes.
+#
+# That one is on a budget too, of rule applications rather than head
+# reductions, and outrunning it is what an eagerly divergent program does — so
+# [computes_size_eagerly] answers on everything, which the other one still does
+# not. Neither refines the other: each is a verdict the other cannot give.
 #
 # The tests are next door in test.lamb, which is free to reach into Snat for
 # programs to judge. This file is not: Snat's size programs depend on it.
@@ -79,17 +110,13 @@ _first = \f fix $ \self List.match Option.none
   (\hd \tl Option.match self (\x \_ Option.some x) (f hd) tl)
 _all = \f fix $ \self List.match true (\hd \tl Bool.match (\_ false) self (f hd) tl)
 
-# Normalize, and report the variable reduction is waiting on.
-# Quoted.eval is head reduction with blocker tracking; recursing under the
-# result normalizes inside constructors, so equal states look equal.
-_nf = fix $ \self \q
-  Pair.let (Quoted.eval q) $ \r \blocked
-  triage
-    (△ r blocked)
-    (\_ △ r blocked)
-    (\f \x Pair.let (self f) $ \f2 \bf Pair.let (self x) $ \x2 \bx
-           △ (△ f2 x2) (Option.alt blocked $ Option.alt bf bx))
-    r
+# Delay a call until its branch is taken. Eager reduction evaluates an
+# application the moment none of its parts is an unbound variable, so a call
+# written in an untaken branch still runs while the branch is built — unless
+# some argument of every prefix mentions a variable of the branch itself.
+# [_at u f] is [f], with u woven in as that variable: [_at u f a b] costs two
+# extra rule applications and computes nothing until u is bound.
+_at = \u \f f
 
 # First-order matching: pattern variables bind to subterms of the target.
 _capture = \n \t \s Option.match
@@ -144,8 +171,8 @@ _split = \recurse \e \s \v Option.match
 # are bound, whether or not its branch was selected, so an unguarded `self` here
 # would unfold the whole search space rather than the path the proof takes.
 _depth = Snat.from_nat 6
-_prove = fix $ \self \depth \g \asms \e \q
-  Pair.let (_nf q) (\s \blocked \self                           # NORMALIZE
+_prove = \nf fix $ \self \depth \g \asms \e \q
+  Option.match (\_ false) (Pair.match $ \s \blocked \self       # NORMALIZE
     # SPLIT, held back until a branch below asks for it. The goal being split
     # is what enters `asms`, so it is available as a hypothesis from here down.
     let (\self Snat.match (\_ false) (\d \_ Option.match (\_ false)
@@ -167,8 +194,568 @@ _prove = fix $ \self \depth \g \asms \e \q
       (\_ true)
       (List.any (\a Option.match false (_spec_eq e) $ _fold a s) asms)
       self)
-  self
+  (nf q) self
 
-# computes_size p — true only if p returns the node count of its argument, as an
-# Snat, for every tree. False means "not certifiable here", not "not size".
-computes_size = \p _prove _depth Snat.one [] [_sz _input] $ _app (Reflect.quote p) (_var _input)
+# The two reduction orders, as the two normalizers the prover runs on. Both
+# normalize all the way down and both answer [none] rather than not returning,
+# so which one the prover is handed decides what a verdict means, not whether
+# there is one. Where both return they return the same normal form — reduction
+# is confluent — so running the lazy one over the eager one's result is not more
+# reduction, only the blocker read off it.
+_budget = Snat.from_nat 1000            # rule applications, eagerly
+_head_budget = Snat.from_nat 40000      # head reductions, in normal order
+_lazily = Quoted.normalize_lazy _head_budget
+_eagerly = \q Option.bind (Quoted.normalize_lazy _head_budget) $ Quoted.normalize_eager _budget q
+
+_certify = \nf \p _prove nf _depth Snat.one [] [_sz _input] $ _app (Reflect.quote p) (_var _input)
+
+# computes_size_eagerly p — [computes_size] and more: [p t] terminates in
+# every reduction order. False means "not certifiable here" as before, and now
+# covers running out of budget too, which is what makes this one total.
+computes_size_eagerly = _certify _eagerly
+
+# ── The lazy certifier ────────────────────────────────────────────────────────
+# Everything below is [computes_size]: the prover above, extended until the
+# __lazy programs in src/snat/size.lamb admit certificates, and returning a
+# proof tree that a second pass re-checks. The eager certificate keeps the
+# prover above unchanged, because one extension below is sound in normal
+# order only.
+#
+# The judgment is the same   Γ ⊢ s ⊨ E   and the base rules carry over:
+#
+#   ───────────── ZERO           ────────────── VALUE
+#   Γ ⊢ △ ⊨ ∅                   Γ ⊢ n ⊨ [n]
+#
+#   Γ ⊢ x ⊨ E                    Γ, (S,E,v) ⊢ S[v:=σᵢ] ⊨ Eᵢ   (every shape σᵢ)
+#   ────────────────── PEEL      ─────────────────────────────────────── SPLIT
+#   Γ ⊢ △x ⊨ E ⊎ [1]            Γ ⊢ S ⊨ E
+#
+#   (S,Eₕ,v) ∈ Γ   σS ≡ s   σv strictly below v   σEₕ = E
+#   ──────────────────────────────────────────────────────── FOLD
+#   Γ ⊢ s ⊨ E
+#
+#   (S,Eₕ,v) ∈ Γ   σS ≡ c ≤ s   σEₕ ⊆ E   n fresh
+#   ──────────────────────────────────────────────────────── GENERALIZE
+#   Γ ⊢ s ⊨ E   from   Γ ⊢ s[c:=n] ⊨ (E − σEₕ) ⊎ [n]
+#
+# Three additions, each forced by a measured obstruction of the __lazy
+# programs, none needed by the eager ones:
+#
+# SPEC-SPLIT. A lazy program emits successors before consulting its input, so
+# reduction is not blocked on any variable and the SPLIT above never fires.
+# Every tree has at least one node, so a |v| owed in the spec licenses the
+# same split without a blocker. Same shapes, same soundness.
+#
+# ABSTRACT. These machines carry copies of the input that lag one constructor
+# behind the live occurrence, so no state is ever an instance of a hypothesis
+# and FOLD never closes. Anti-unification against a hypothesis a fold could
+# use finds the lag junk, and each junk position is replaced by a fresh
+# opaque variable:
+#
+#   Γ ⊢ s[p₁:=J₁, …, pₖ:=Jₖ] ⊨ E      (Jᵢ fresh, small junk only)
+#   ─────────────────────────────────────────────────────────── ABSTRACT
+#   Γ ⊢ s ⊨ E
+#
+# Sound because an opaque variable stands for an arbitrary tree and nothing
+# can ever case on the Jᵢ — splitting needs the variable in the spec, and
+# they are not. Instantiating them back recovers the goal — for junk that
+# diverges under eager evaluation too, which is why this rule is what makes
+# the certificate normal-order only, and why the eager prover keeps none of
+# this.
+#
+# CUT and ⟨★⟩. Splitting a fork rewrites |v| to [1,|a|,|b|], so left-nested
+# forks grow the spec without bound and no finite family of hypotheses closes
+# the induction. The spec gains a tail atom ⟨★⟩, "and then whatever the
+# continuation owes", at most one per spec:
+#
+#   Γ ⊢ s ⊨ E ⊎ [⟨★⟩]     Γ ⊢ es ⊨ F   (every state es the phase ends in)
+#   ──────────────────────────────────────────────────────────────────── CUT
+#   Γ ⊢ s ⊨ E ⊎ F
+#
+#   ────────────────── ★ (records s as an end state)
+#   Γ ⊢ s ⊨ [⟨★⟩]
+#
+# The phase proof shows s emits E and then reaches one of finitely many end
+# states; each end state owes what was cut away; composition gives E ⊎ F.
+# FOLD treats ⟨★⟩ as an atom present on both sides or neither — and a fold
+# whose hypothesis was recorded under a different tail than the goal's
+# borrows that hypothesis's end states for another continuation. That is
+# sound exactly when those ends also satisfy the borrowing cut's spec, which
+# is what [_validate] re-checks across the finished proof before a verdict.
+
+# The spec gains a fourth atom: [△ (△ △) k] is ⟨★k⟩, "then whatever the
+# continuation k owes". At most one per spec.
+_starx = \k △ (△ △) k
+_atomx = \o1 \osz \oval \ostar triage o1 osz (\c \v triage (oval v) (\_ ostar v) (\_ \_ oval v) c)
+_is_star = _atomx false (\_ false) (\_ false) (\_ true)
+_star_name = _atomx Option.none (\_ Option.none) (\_ Option.none) (\k Option.some k)
+_core = List.filter (\a Bool.not (_is_star a))
+_stars = List.filter _is_star
+_atom_var = _atomx Option.none Option.some Option.some Option.none
+
+# Fresh names carry the proof path, so every star and hypothesis id minted
+# anywhere in the tree is globally distinct; the leading Snat says what kind
+# of name it is, and no tree variable starts above one (parts prepend 0 or 1).
+_n3 = Snat.succ Snat.two
+_n4 = Snat.succ _n3
+_n5 = Snat.succ _n4
+_n6 = Snat.succ _n5
+_n7 = Snat.succ _n6
+_n8 = Snat.succ _n7
+_genname = \p △ Snat.two p
+_jname = \i \p △ _n3 (△ i p)
+_starname = \p △ _n4 p
+
+# Hypotheses: [△ state (△ spec (△ split_variable id))].
+# [_foldx] matches a hypothesis against a state: the split variable must land
+# strictly below itself, the renamed size atoms must be exactly the goal's,
+# and a tail is bridged whenever both sides have one — a bridge across two
+# different tails borrows the hypothesis's end states for another cut's
+# continuation, so it is recorded and re-checked by [_validate] afterwards.
+_renamex = \s _atomx (Option.some _one) (\v Option.map _sz $ _image s v)
+  (\v Option.map _val $ _image s v) (\_ Option.none)
+_foldx = \a \t Pair.let a $ \state \r Pair.let r $ \spec \r2 Pair.let r2 $ \v \hid
+  Option.bind (\s Option.bind
+    (\w Bool.match Option.none
+      (Option.map (\renamed △ renamed (△ (List.foldr (\at \acc Option.alt (_star_name at) acc) Option.none spec) (△ s hid)))
+        (Option.sequence $ List.map (_renamex s) (_core spec)))
+      (_extends v w))
+    (_image s v))
+    (_match state t [])
+
+# Proof nodes: [△ tag payload], tag an Snat.
+#   0 zero   1 value   2 peel   3 split   4 fold   5 generalize
+#   6 abstract   7 cut   8 end-of-phase
+_pf = \tag \payload △ tag payload
+# Handlers take the payload; picking one costs only the tag walk.
+_pf_case = \p \z \va \pe \sp \fo \ge \ab \cu \st Pair.let p $ \tag \pay
+  (Snat.match z (\t1 Snat.match va (\t2 Snat.match pe
+  (\t3 Snat.match sp (\t4 Snat.match fo (\t5 Snat.match ge
+  (\t6 Snat.match ab (\t7 Snat.match cu (\_ st) t7) t6) t5) t4) t3) t2) t1) tag) pay
+
+# The states a phase ends in: every tag-8 leaf naming this tail. An abstract
+# (or generalize) node proved its subtree for fresh variables standing for
+# concrete subterms, so its ends cover the original by instantiation:
+# substitute back on the way out, or the continuation loses what the phase
+# abstracted away.
+_ends = \star fix $ \self \p _pf_case p
+  (\_ [])
+  (\_ [])
+  self
+  (Pair.match $ \_ \kids List.concat_list (List.map self kids))
+  (\_ [])
+  (Pair.match $ \nc \sub Pair.let nc $ \n \c List.map (Quoted.instantiate_eq n c) (self sub))
+  (Pair.match $ \subst \sub List.map (Quoted.apply_record subst) (self sub))
+  (Pair.match $ \_ Pair.match $ \phase \obls List.concat (self phase) (List.concat_list $ List.map self obls))
+  (Pair.match $ \st \state Bool.match [] [state] (equal st star))
+
+# ── ABSTRACT: induction strengthening ────────────────────────────────────────
+# Walk hypothesis state and goal state in parallel, collecting every variable
+# capture and every structural mismatch with its path (a list: true = into the
+# function, false = into the argument).
+_collect = fix $ \self \p \t \path \acc triage
+  (triage acc (\_ Pair.map_snd (△ (△ path t)) acc) (\_ \_ Pair.map_snd (△ (△ path t)) acc) t)
+  (\n Pair.map_fst (△ (△ n (△ path t))) acc)
+  (\pf \px triage
+    (Pair.map_snd (△ (△ path t)) acc)
+    (\_ Pair.map_snd (△ (△ path t)) acc)
+    (\tf \tx self px tx (△ false path) $ self pf tf (△ true path) acc)
+    t)
+  p
+
+_replace_at = fix $ \self \path \sub \t List.match sub
+  (\hd \tl triage △ (\a △ a)
+    (\f \x (Bool.match (\_ △ f (self tl sub x)) (\_ △ (self tl sub f) x) hd) △) t)
+  path
+
+# The lag junk of one state against a hypothesis a fold could use: positions
+# where the split variable captured anything but its strictly-smaller image.
+# A capture that is itself a strictly-smaller variable is another live
+# position, never junk. Junk is small (the measured lag is 2-7 nodes); a
+# large mismatch is live structure, and abstracting it only wastes the search.
+# Size in nodes of the tree a quoted term stands for, not of its encoding: a
+# variable is one node however long its name, an application spine one node
+# plus its arguments'. The junk cap is calibrated in this metric — the lag a
+# machine carries is two to seven nodes of value, whatever that costs to spell.
+_psize = fix $ \self triage 1 (\_ 1) (\f \x Nat.add (self f) (self x))
+_small = \t Nat.is_lte (_psize t) 12
+_compat = \e \spec Bool.and
+  (equal (List.length (_core spec)) (List.length (_core e)))
+  (equal (List.is_empty (_stars spec)) (List.is_empty (_stars e)))
+_is_below_var = \w \t triage false (\u _extends w u) (\_ \_ false) t
+_worth = \t triage true (\_ false) (\_ \_ true) t
+_junk_of = \w \caps \hards
+  let (List.map Pair.snd (List.filter (Pair.match $ \n \_ equal n w) caps)) $ \wcaps
+  Option.bind (\_
+    let (List.filter (Pair.match $ \_ _worth) (List.concat
+          (List.filter (Pair.match $ \_ \t Bool.not (_is_below_var w t)) wcaps) hards)) $ \junk
+    (Bool.match (\_ Option.none) (\_ Option.some junk) (Bool.and
+      (Bool.and (Bool.not (List.is_empty junk)) (Nat.is_lte (List.length junk) 4))
+      (List.all (Pair.match $ \_ _small) junk)) △))
+    (_first (Pair.match $ \_ \t Bool.match Option.none (Option.some t) (_is_below_var w t)) wcaps)
+
+# Replace each distinct junk subterm with one fresh opaque variable. Nothing
+# can ever case on those variables — splitting needs the variable in the spec
+# — so proving the strengthened state proves the original at any
+# instantiation, divergent junk included. Sound in normal order only, which is
+# the certificate this prover issues.
+_abstractx = \path \asms \e \s
+  _first (\a Pair.let a $ \state \r Pair.let r $ \spec \r2 Pair.let r2 $ \v \_
+    (Bool.match (\u2 Option.none) (\u2
+      Pair.let (_at u2 _collect state s [] (△ [] [])) $ \caps \hards
+      Option.bind (\junk
+        Pair.let ((fix $ \self List.match (\_ △ [] [])
+              (\hd \tl \i Pair.let hd $ \pth \t
+                Pair.let (self tl (Snat.succ i)) $ \names \subst
+                Option.match
+                  (△ (△ (△ t (_jname i path)) names) (△ (△ (_jname i path) t) subst))
+                  (\_ △ names subst)
+                  (List.lookup t names))) junk Snat.zero) $ \names \subst
+        let (List.foldr (Pair.match $ \pth \t \acc Option.match acc
+              (\nm _replace_at (List.reverse pth) (_var nm) acc) (List.lookup t names)) s junk) $ \s2
+        (Bool.match (\_ Option.some (△ s2 subst)) (\_ Option.none) (equal s2 s) △))
+        (_junk_of v caps hards))
+      (_compat e spec) △))
+    asms
+
+# ── CUT: the tail ────────────────────────────────────────────────────────────
+# Which variable is the machine working on now? Leaf every other spec variable
+# and count emissions until it blocks on v: the subject in hand blocks
+# earliest. A bounded probe, for candidate order only.
+_pbudget = Snat.from_nat 2000
+_nf_probe = \q (Option.match
+  (\u _at u Quoted.head_normalize _pbudget q)
+  (\r \_ Option.some r)
+  (Quoted.normalize_lazy _pbudget q)) △
+_rank = \e \s \v
+  let (List.foldr (\a \q Option.match q
+        (\w Bool.match (Quoted.instantiate_eq w △ q) q (equal w v))
+        (_atom_var a)) s (_core e)) $ \q0
+  (fix $ \self \fuel \n \q Snat.match (Snat.from_nat 600) (\fuel2
+    Option.match
+      (\u2 Snat.from_nat 900)
+      (Pair.match $ \r \bopt \u2
+        (Bool.match
+          (\u3 Snat.from_nat 900)
+          (\u3 (triage
+            (\u4 (triage (\u5 Snat.from_nat 700) (\w2 \u5 Snat.from_nat 700) (\rf \rx \u5
+                (triage (\u6 _at u6 self fuel2 (Snat.succ n) rx)
+                  (\_ \u6 Snat.from_nat 700) (\_ \_ \u6 Snat.from_nat 700) rf) u5)
+              r) u4)
+            (\w \u4 Bool.match (Snat.from_nat 800) n (equal w v))
+            (\_ \_ \u4 Snat.from_nat 800)
+            bopt) u3)
+          (Nat.is_lte (size r) 4000)) u2)
+      (_at fuel2 _nf_probe q) fuel2) fuel) (Snat.from_nat 25) Snat.zero q0
+_insert_ranked = \x fix $ \self List.match [x]
+  (\hd \tl (Bool.match (\tl2 △ hd (self tl2)) (\tl2 △ x (△ hd tl2))
+    (Snat.is_lt (Pair.fst x) (Pair.fst hd))) tl)
+_sort_ranked = fix $ \self List.match [] (\hd \tl _insert_ranked hd (self tl))
+
+# Partition the spec around v: its own atoms (and the 1s) stay in the phase,
+# the rest is what the phase's end states will owe.
+
+# Partition the spec around v: the 1s and v's own atoms stay in the phase,
+# everything else — the tail included — is what the phase's ends will owe.
+_keeps = \v \a Option.match (equal a _one)
+  (\w Bool.or (equal w v) (_extends v w)) (_atom_var a)
+_partition = \v \e △ (List.filter (_keeps v) e) (List.filter (\a Bool.not (_keeps v a)) e)
+
+_dedupe = fix $ \self List.match []
+  (\hd \tl (Bool.match (\tl2 △ hd (self tl2)) (\tl2 self tl2) (List.any (equal hd) tl)) tl)
+_dedupe_first = fix $ \self \seen List.match []
+  (\hd \tl (Bool.match (\tl2 △ hd (_at tl2 self (△ hd seen) tl2)) (\tl2 _at tl2 self seen tl2)
+    (List.any (equal hd) seen)) tl)
+
+# Map a fallible prover over a list with an index, first failure aborting; the
+# tail travels through the branch as its argument, so a later element is only
+# attempted once the earlier ones succeed.
+_mapxi = \f fix $ \self \i List.match (Option.some [])
+  (\hd \tl Option.match (\tl2 Option.none)
+    (\r \tl2 Option.map (△ r) (_at tl2 self (Snat.succ i) tl2)) (f i hd) tl)
+
+# GENERALIZE, against star-free hypothesis instances only.
+_generalizex = \g \asms \e \s
+  _first (\c _first (\a Option.bind (Pair.match $ \core \r2
+    (triage
+      (\_ Option.map (\rest △ (_at rest _replace c (_var g) s) (△ (△ (_val g) rest) c)) (_minus core e))
+      (\_ \_ Option.none)
+      (\_ \_ \_ Option.none)
+      (Pair.fst r2)) △) $ _foldx a c) asms) (_subterms s)
+
+# Try alternatives in order. Each element is a function of a throwaway
+# argument, applied only when its turn comes, and the recursion into the tail
+# receives that argument too — self and tl alone would form an application
+# eager reduction runs while the branch is still being built.
+_try = fix $ \self \u List.match Option.none (\hd \tl
+  (triage (\u2 self u2 tl) (\x \_ Option.some x) (\_ \_ \_ Option.none) (hd u)) △)
+
+# The prover. Each rule lives in its own top-level definition; [_at] and the
+# argument-threading inside each rule keep every recursive call out of reach
+# until the branch that makes it is the one taken.
+_stg_fold = \gstar \asms \e \s _first (\a Option.bind (Pair.match $ \core \r2
+    Pair.let r2 $ \staropt \r3 Pair.let r3 $ \sigma \hid
+    (Bool.match (\_ Option.none) (\_ (Bool.match (\_ Option.none) (\_ Option.some $ _pf _n4 $
+        Option.match Option.none (\hs Option.match Option.none (\gs
+            (Bool.match (\_ Option.some (△ hs (△ gs (△ sigma hid)))) (\_ Option.none) (equal hs gs) △))
+            gstar) staropt)
+      (_spec_eq (_core e) core) △))
+    (equal (Option.match false (\_ true) staropt) (Option.match false (\_ true) gstar)) △))
+  (_foldx a s)) asms
+_stg_star = \e \s List.match Option.none (\hd \tl (Bool.match (\_ Option.none) (\_
+    Option.match Option.none (\st Option.some (_pf _n8 (△ st s))) (_star_name hd))
+    (Bool.and (_is_star hd) (List.is_empty tl)) △)) e
+_stg_cut_cand = \selfp \depth \path \asms \e \s \rv Pair.let rv $ \_ \v
+  Pair.let (_partition v e) $ \keep \cut
+  (Bool.match (\u2 Option.none) (\u2
+    let (△ _n5 (△ v path)) $ \cpath
+    let (_starname cpath) $ \st
+    Option.match
+      (\u3 Option.none)
+      (\phase \u3
+        Option.match (\u4 Option.none)
+          (\obls \u4 Option.some $ _pf _n7 $ △ (△ st (△ cut asms)) (△ phase obls))
+          (_at phase _mapxi (\i \es _at es selfp es depth (△ i (△ _n8 cpath)) true asms cut)
+            Snat.zero (_dedupe (_ends st phase)))
+          u3)
+      (_at u2 selfp s depth (△ _n7 cpath) true asms (List.concat keep [_starx st]))
+      u2)
+    (Bool.and (Bool.not (List.is_empty (_core cut))) (Bool.not (List.is_empty (_core keep)))))
+  △
+_stg_cut = \selfp \depth \path \asms \e \s \blocked
+  (Bool.match (\u2 Option.none) (\u2
+    let (List.take 3 $ _dedupe_first []
+          (List.concat (Option.match [] (\w [w]) blocked)
+            (List.foldr (\a \acc Option.match acc (\w2 △ w2 acc) (_atom_var a)) [] (_core e)))) $ \cands
+    _at u2 _first (_stg_cut_cand selfp depth path asms e s)
+      (List.match [] (\c1 \tl (Bool.match
+        (\tl2 _sort_ranked $ List.map (\v2 △ (_rank e s v2) v2) (△ c1 tl2))
+        (\tl2 [△ Snat.zero c1])
+        (List.is_empty tl)) tl) cands))
+    (Nat.is_lte 2 (List.length (_core e)))) △
+_stg_abs = \selfp \depth \path \ca \asms \e \s
+  (Bool.match (\u2 (Bool.match (\u3 Option.none) (\u3
+    Option.match (\u4 Option.none) (\cand \u4
+      Pair.let cand $ \s2 \subst
+      Option.map (\sub _pf _n6 (△ subst sub))
+        (_at u4 selfp s2 depth (△ _n6 path) false asms e))
+      (_at u3 _abstractx path asms e s)
+      u3) ca) u2)
+    (\u2 Option.none)
+    (List.is_empty asms)) △
+_split_at = \selfp \depth \path \asms \e \s \v
+  Snat.match Option.none (\d
+    let (△ s (△ e (△ v path))) $ \hyp
+    let (\rest \sh _mapxi (\i Pair.match $ \shape \atoms
+          _at shape selfp (Quoted.instantiate_eq v shape s) d (△ i path) true (△ hyp asms)
+            (List.concat atoms rest))
+          Snat.zero sh) $ \go
+    Option.map (\kids _pf _n3 (△ (△ v path) kids)) $
+      (Option.match
+        (\u2 Option.match (\u3 Option.none) (\rest \u3 _at u3 go rest (_shapes v false))
+          (_remove (_val v) e) u2)
+        (\rest \u2 _at u2 go rest (_shapes v true))
+        (_remove (_sz v) e) △))
+    depth
+_stg_split = \selfp \depth \path \asms \e \s \blocked
+  Option.match
+    (\u2 _at u2 _first (\a Option.match (\u3 Option.none)
+      (\v \u3 _at u3 _split_at selfp depth path asms e s v) (_atom_var a) a) e)
+    (\v \u2 _at u2 _split_at selfp depth path asms e s v)
+    blocked △
+_stg_read = \selfp \depth \path \asms \e \s \blocked
+  triage
+    ((Bool.match (\_ Option.none) (\_ Option.some (_pf Snat.zero △)) (List.is_empty e)) △)
+    (\n (Bool.match (\_ Option.none) (\_ Option.some (_pf Snat.one n)) (_spec_eq e [_val n])) △)
+    (\f \x (triage
+      (\u2 Option.match
+        (\u3 _at u3 _stg_split selfp depth path asms e s blocked)
+        (\e2 \u3 Option.map (_pf Snat.two) (_at u3 selfp x depth (△ _n6 (△ _n6 path)) true asms e2))
+        (_remove _one e) u2)
+      (\g \u2 _at u2 _stg_split selfp depth path asms e s blocked)
+      (\ff \fx \u2 (triage (\u3 Option.none)
+        (\g2 \u3 _at u3 _stg_split selfp depth path asms e s blocked)
+        (\g2 \g3 \u3 _at u3 _stg_split selfp depth path asms e s blocked) ff) u2)
+      f) △)
+    s
+
+# The full normal form is tried on a small budget and the head normal form is
+# the fallback on the big one. A lazy machine's states have no normal form at
+# all — the recursion unfolds forever under the constructor it emits — so
+# every full attempt on one is spent to exhaustion, and the attempt being
+# cheap is what keeps this prover's costs at reading pace. Successful
+# normalizations across every program certified here stay under 800 steps.
+_nf_budget = Snat.from_nat 2000
+_lazilyx = \q (Option.match
+  (\u _at u Quoted.head_normalize _head_budget q)
+  (\r \_ Option.some r)
+  (Quoted.normalize_lazy _nf_budget q)) △
+
+_depthx = Snat.from_nat 5
+_sizecap = 20000
+_provex = fix $ \selfp \q \depth \path \ca \asms \e
+  Option.match (\_ Option.none) (Pair.match $ \s \blocked \selfp
+  (Bool.match (\_ \_ Option.none) (\_ \selfp
+  let (List.foldr (\at \acc Option.alt (_star_name at) acc) Option.none e) $ \gstar
+  let (\u5 _try u5
+    [ \u6 _at u6 _stg_star e s
+    ; \u6 _at u6 _stg_cut selfp depth path asms e s blocked
+    ; \u6 _at u6 _stg_abs selfp depth path ca asms e s
+    ; \u6 _at u6 _stg_read selfp depth path asms e s blocked
+    ]) $ \rest
+  Option.match
+    (\selfp2 (Bool.match
+      (\selfp3 Option.match
+        (\selfp4 rest selfp4)
+        (\gen \selfp4 Pair.let gen $ \s2 \r Pair.let r $ \e2 \c
+          Option.map (\sub _pf _n5 (△ (△ (_genname path) c) sub))
+            (_at selfp4 selfp3 s2 depth (△ _n5 path) true asms e2))
+        (_at selfp3 _generalizex (_genname path) asms e s)
+        selfp3)
+      (\selfp3 rest selfp3)
+      (List.is_empty asms)) selfp2)
+    (\pf \_ Option.some pf)
+    (_stg_fold gstar asms e s)
+    selfp)
+  (Nat.is_lte (size s) _sizecap) △ selfp))
+  (_lazilyx q) selfp
+
+# ── The borrow check ─────────────────────────────────────────────────────────
+# A fold that bridged two tails borrowed its hypothesis's end states for a
+# different continuation. That is sound exactly when those end states — the
+# ones of the hypothesis's own split subtree, under the fold's substitution —
+# also satisfy the borrowing cut's spec. Walk the finished proof, collect the
+# borrow graph, prove the extra obligations, and iterate on any new borrows
+# those proofs introduce.
+_walk_cuts = fix $ \self \p _pf_case p (\_ []) (\_ []) self
+  (Pair.match $ \_ \kids List.concat_list (List.map self kids))
+  (\_ [])
+  (Pair.match $ \_ self)
+  (Pair.match $ \_ self)
+  (Pair.match $ \info Pair.match $ \phase \obls
+    △ info (List.concat (self phase) (List.concat_list (List.map self obls))))
+  (\_ [])
+_walk_splits = fix $ \self \p _pf_case p (\_ []) (\_ []) self
+  (Pair.match $ \vp \kids △ (△ (Pair.snd vp) (_pf _n3 (△ vp kids)))
+    (List.concat_list (List.map self kids)))
+  (\_ [])
+  (Pair.match $ \_ self)
+  (Pair.match $ \_ self)
+  (Pair.match $ \_ Pair.match $ \phase \obls
+    List.concat (self phase) (List.concat_list (List.map self obls)))
+  (\_ [])
+_walk_borrows = fix $ \self \p _pf_case p (\_ []) (\_ []) self
+  (Pair.match $ \_ \kids List.concat_list (List.map self kids))
+  (Option.match [] (\c [c]))
+  (Pair.match $ \_ self)
+  (Pair.match $ \_ self)
+  (Pair.match $ \_ Pair.match $ \phase \obls
+    List.concat (self phase) (List.concat_list (List.map self obls)))
+  (\_ [])
+
+_validate = \proof
+  let (_walk_cuts proof) $ \cuts
+  let (_walk_splits proof) $ \splits
+  _all (Pair.match $ \hs \r Pair.let r $ \gs \r2 Pair.let r2 $ \sigma \hid
+    Option.match false (Pair.match $ \cutspec \asms
+      Option.match false (\tree
+        _all (\es Option.match false (\sub List.is_empty (_walk_borrows sub))
+          (_provex (Quoted.apply_record sigma es) _depthx (△ _n8 (△ _n8 hid)) true asms cutspec))
+          (_dedupe (_ends hs tree)))
+        (List.lookup hid splits))
+      (List.lookup gs cuts))
+    (_walk_borrows proof)
+
+# ── Rendering ────────────────────────────────────────────────────────────────
+# A certificate as one rule per line, children indented under their rule. A
+# tree variable prints as its position in the input — t is the input, t01
+# the right part of its left part — because that is what its name is. A
+# generated name — g for a generalized count, j for abstracted junk, k for
+# a tail's continuation — is unique by carrying its proof path, which reads
+# as digit noise, so the renderer numbers them by first appearance instead:
+# g1, j2, k3.
+
+# The names a proof mentions, in the order the renderer prints them.
+_names_in = fix $ \self \p _pf_case p
+  (\_ [])
+  (\n [n])
+  self
+  (Pair.match $ \_ \kids List.concat_list (List.map self kids))
+  (\_ [])
+  (Pair.match $ \nc \sub Pair.let nc $ \nm \_ △ nm (self sub))
+  (Pair.match $ \subst \sub List.concat (List.map Pair.fst subst) (self sub))
+  (Pair.match $ \info Pair.match $ \phase \obls Pair.let info $ \st \r
+    List.concat
+      (List.foldr (\a \acc Option.match acc (\w △ w acc) (Option.alt (_atom_var a) (_star_name a)))
+        [] (Pair.fst r))
+      (List.concat (self phase) (List.concat_list (List.map self obls))))
+  (\_ [])
+
+# Assign the generated names their display names, a counter per kind.
+_num_step = \env \cg \cj \ck \n List.match (△ env (△ cg (△ cj ck))) (\hd \tl
+  (Bool.match
+    (\_ Snat.match (△ env (△ cg (△ cj ck))) (\h2 Snat.match (△ env (△ cg (△ cj ck))) (\h3
+      Snat.match (△ (△ (△ n (List.concat "g" (Nat.to_source cg))) env) (△ (Nat.add cg 1) (△ cj ck)))
+      (\h4 Snat.match (△ (△ (△ n (List.concat "j" (Nat.to_source cj))) env) (△ cg (△ (Nat.add cj 1) ck)))
+        (\_ △ (△ (△ n (List.concat "k" (Nat.to_source ck))) env) (△ cg (△ cj (Nat.add ck 1)))) h4) h3) h2) hd)
+    (\_ △ env (△ cg (△ cj ck)))
+    (Snat.is_lt hd Snat.two)) △) n
+_number_names = \names Pair.fst $ List.foldl (\acc \n Pair.let acc $ \env \cnt
+    Pair.let cnt $ \cg \r2 Pair.let r2 $ \cj \ck
+    Option.match (_num_step env cg cj ck n) (\_ acc) (List.lookup n env))
+  (△ [] (△ 1 (△ 1 1))) names
+
+_render_name = \env \n Option.match
+  (List.match "t" (\hd \tl
+    (Bool.match
+      (\_ List.concat
+        (Snat.match "?" (\h2 Snat.match "?" (\h3 Snat.match "g"
+          (\h4 Snat.match "j" (\_ "k") h4) h3) h2) hd)
+        (List.concat_list (List.map Snat.to_string (List.reverse tl))))
+      (\_ List.concat "t" (List.concat_list (List.map Snat.to_string
+        (List.match [] (\h2 \t2 t2) (List.reverse n)))))
+      (Snat.is_lt hd Snat.two)) n) n)
+  id
+  (List.lookup n env)
+_render_atom = \env _atomx "1"
+  (\v List.concat "|" (List.concat (_render_name env v) "|"))
+  (_render_name env)
+  (\k List.concat "*" (_render_name env k))
+_render_spec = \env \e List.concat "["
+  (List.concat (List.join "," (List.map (_render_atom env) e)) "]")
+
+# render pf — the proof tree, one rule per line, indented by depth. Each node
+# contributes its list of lines, prefixed by the indentation it was handed;
+# a child gets two more spaces.
+render = \pf let (_number_names (_names_in pf)) $ \env
+  List.join [10] $ (fix $ \self \ind \p
+  let (List.concat "  " ind) $ \ind2
+  _pf_case p
+  (\_ [List.concat ind "ZERO"])
+  (\n [List.concat ind (List.concat "VALUE " (_render_name env n))])
+  (\sub △ (List.concat ind "PEEL") (self ind2 sub))
+  (Pair.match $ \vp \kids Pair.let vp $ \v \_
+    △ (List.concat ind (List.concat "SPLIT " (_render_name env v)))
+      (List.concat_list (List.map (self ind2) kids)))
+  (Option.match [List.concat ind "FOLD"] (\_ [List.concat ind "FOLD*"]))
+  (Pair.match $ \nc \sub Pair.let nc $ \nm \_
+    △ (List.concat ind (List.concat "GEN " (_render_name env nm))) (self ind2 sub))
+  (Pair.match $ \subst \sub
+    △ (List.concat ind (List.concat "ABSTRACT "
+        (List.join "," (List.map (Pair.match $ \nm \_ _render_name env nm) subst))))
+      (self ind2 sub))
+  (Pair.match $ \info Pair.match $ \phase \obls Pair.let info $ \st \r
+    △ (List.concat ind (List.concat "CUT " (_render_spec env (Pair.fst r))))
+      (List.concat (self ind2 phase) (List.concat_list (List.map (self ind2) obls))))
+  (Pair.match $ \st \state [List.concat ind "END"])) "" pf
+
+# certify_size p — the proof that p returns its argument's node count, as an
+# Snat, for every tree, under normal-order evaluation; or none.
+certify_size = \p
+  Option.bind (\pf Bool.match (\_ Option.none) (\_ Option.some pf) (_validate pf) △)
+    (_provex (_app (Reflect.quote p) (_var _input)) _depthx [Snat.one] true [] [_sz _input])
+
+# computes_size p — true only if p returns the node count of its argument, as
+# an Snat, for every tree. False means "not certifiable here", not "not size".
+computes_size = \p Option.match false (\_ true) (certify_size p)
+
