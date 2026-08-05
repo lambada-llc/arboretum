@@ -41,20 +41,119 @@ size__smallest6 = \x (fix _f6) x Snat.zero
 # its rule and still run them. They are named by node count rather than by rank,
 # so that finding a smaller one adds a line instead of renumbering the rest.
 #
-# They are not one family. _lazy_body is what the 108 and the 113 have in common
-# (and 79 nodes of it is shared with size__smallest, which is where those two
-# were carved from); _lazy_body2 is a different architecture altogether. The 103
-# and the 106 share only 30 nodes with each other, and little with anything
-# else, so they are written out whole.
-_lazy_body = △ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ △)))))))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ (△ △)) △)))) (△ (△ (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ △)))) (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ △)))))))) (△ (△ (△ △ (△ △))))))))) (△ (△ (△ (△ △) △)) △))
-_lazy_body2 = △ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △))))))) (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ △) △))) (△ (△ (△ △ (△ (△ (△ △ △))))) △)))
-size__lazy_100 = △ (△ (△ (△ (△ △ (△ (△ (△ (△ (△ △)) △)) (△ △)))) (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ △ △)))) _lazy_body2))) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ (△ △) △)) △)))))) (△ △)
-size__lazy_103 = △ (△ (△ (△ (△ △ (△ (△ (△ (△ △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △)))))))))) (△ △ (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ △)) △)))))))) (△ △))))) (△ (△ (△ (△ (△ △)) △)) (△ △ △))))) (△ (△ (△ (△ △) △)) △))))) (△ △)
-size__lazy_104 = △ (△ (△ (△ (△ △ (△ (△ (△ (△ (△ △)) △)) (△ △)))) (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ △ △)))) (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ △)))))))) _lazy_body2)))) (△ (△ (△ (△ △) △)) △))))) (△ △)
-size__lazy_106 = △ (△ (△ (△ (△ △ (△ (△ (△ (△ △))) (△ △)))) (△ △ (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ △)) △)))))))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △)))))))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △)))) (△ △ △))))) (△ (△ (△ (△ △) △)) △))))) (△ △)
-size__lazy_108 = △ (△ (△ (△ (△ △ (△ (△ (△ (△ △))) (△ △)))) _lazy_body)) (△ (△ △) (△ △ △))
-size__lazy_113 = △ (△ (△ (△ (△ (△ (△ △ (△ (△ (△ (△ (△ (△ (△ △)) △)) (△ △)))))) (△ △))) _lazy_body)) (△ △ △)
+# Search results are not obliged to decompose, but these do. Written as trees
+# the six are walls of triangles; taken apart they share one skeleton — a
+# recursive loop tied without any delay, entered through a small dispatch, on
+# an input packed into a fork — and differ in the step the loop drives and in
+# how the input reaches it. The parts below rebuild each record tree node for
+# node: every definition in this section terminates eagerly and reduces to
+# exactly the tree the search found, so the counts at the bottom of this file
+# are still the search's counts. Only running them needs normal order.
+#
+# The knot. Where fix above keeps its recursion delayed behind wait — the 44
+# nodes size__smallest pays, _h twice included — these pay 7 once:
+_fork_self = \f △ f (△ f) (△ f)
+# _fork_self is △ (△ (△ (△ △) △)) △: applied to a fork it hands the fork to
+# its own right branch — △ u v ↦ v (△ u v). Nothing delays that
+# re-application, which is exactly why nothing built on it terminates eagerly.
+_loop = \step _s (const step) _fork_self
+# _loop step = △ (△ (△ △ step)) _fork_self: a plain value, no recursion in it
+# yet. Write c for it. c z reduces to step (_fork_self z), and _fork_self
+# applied to the fork △ △ c is c (△ △ c) over again — so
+#   X := c (const c)   reduces to   step X,
+# a fixpoint that unfolds once per demand in normal order, and without end
+# under eager evaluation.
+_tie = \c c (const c)
+# _tie c is that X. The programs never reduce it while being built: _tie and
+# the loop sit side by side as values, and only the input's arrival at run
+# time applies one to the other.
+_tie_open = \c _s △ c (const c)
+# _tie_open c = △ (const c) (_tie c): a fork, so applied to a packed input
+# △ a b it spills both halves into the knot — X a b. (Read off the fork, its
+# leaf and stem cases are △ and c; no input below ever reaches them.)
+_lazy_size = \tie \loop \t const tie t loop (const t)
+# The skeleton of the four smallest: _lazy_size tie loop, applied to t,
+# reduces to tie loop (△ △ t) — enter the loop through tie, handing it the
+# input dragged one constructor behind. The states the loops then chew on are
+# built the same way: counts in progress, stems over a fork lagging what is
+# left of the input. Their workhorse is _b2 from above: _b2 w reduces to
+# △ (△ (△ △ w)) — count two, then the lag — which is also exactly what
+# compose w reduces to. One tree being both "add two" and "compose" is why it
+# could stand in for compose in size__smallest5/6, and why the searches below
+# keep rediscovering it.
+
+# The 100 and the 104 are one architecture. Their step triages the state — a
+# leaf answers △, a stem answers itself — and a fork spills into _park and
+# _lag2, one half swallowed, the count redone:
+_park = \w △ (△ w (△ w)) (compose Snat.succ (△ w))
+# _park w reduces to triage w (△ w) (compose Snat.succ (△ w)): w parked as
+# the answer for a leaf, grafted under whatever arrives instead otherwise.
+_lag2 = \w △ (△ (const (_b2 w)))
+# _lag2 w = △ (△ (△ △ (_b2 w))) — count two, lag, count two, lag: _b2 after
+# _b2, spelled as one chain.
+_step_100 = \loop triage △ △ (_lag2 loop _park)
+# The fork case, _lag2 loop _park, reduces to compose (_b2 loop) _park.
+_loop_counted = \step _s (const step) (compose (compose Snat.succ) _fork_self)
+# _loop with one count folded into the knot itself: re-entry is
+# compose Snat.succ X rather than X, each unfolding's stem already emitted.
+size__lazy_100 = _lazy_size _tie (_loop_counted _step_100)
+_step_104 = \loop triage △ △ (compose (compose Snat.succ) (_lag2 loop _park))
+# The same step emitting that count itself — compose Snat.succ composed onto
+# the fork case — which costs the four nodes the 100 saves.
+size__lazy_104 = _lazy_size _tie (_loop _step_104)
+
+# The 103 and the 106 share their count ladder — and nothing else:
+_recount = \w △ (△ (compose Snat.succ (compose Snat.succ Snat.succ w)))
+# Two counts, then one more composed over w pushed two counts further on.
+_state_103 = \w △ (△ (_s _recount (const w)))
+_step_103 = \loop _state_103 loop (loop △)
+# X reduces to _state_103 X (X △): the state rebuilt around the loop, applied
+# to the loop restarted at a bare leaf.
+_tie_lagged = \c _s △ c (const (compose _b2 c))
+# _tie_open, except the knot closes over const (compose _b2 c): the 103's
+# loop never sees itself bare — every re-entry reduces to _b2 X.
+size__lazy_103 = _lazy_size _tie_lagged (_loop _step_103)
+_state_106 = \w △ (△ (_s _recount (const (_b2 w))))
+_step_106 = \loop _state_106 loop (_b2 loop △)
+# As the 103 with both slots pushed through _b2: X reduces to
+# _state_106 X (_b2 X △), and _b2 X △ is X composed after △.
+size__lazy_106 = _lazy_size _tie_open (_loop _step_106)
+
+# The 108 and the 113 drive one step, and it is not theirs: it is, node for
+# node, the 76-node body size__smallest's fix knot drives — the expect test
+# below reads it back out of size__smallest — with everything around it
+# re-carved. That is the sense in which #20's deletions started from the
+# eager program.
+_b2__left = \w compose Snat.succ Snat.succ (const w)
+# _b2 once more — count two, then lag — as the search spelled it here: the
+# same function and the same 12 nodes with the composition leaning the other
+# way, so a different tree.
+_carved_states = \w _b2__left (compose Snat.succ Snat.succ (compose _b2__left w))
+_carved = \z △ (triage Snat.two △ z) (_carved_states z (compose const z))
+# _carved z dispatches the next state: a leaf answers △ Snat.two △, a stem w
+# re-enters the loop as z w, a fork falls to the states beside it.
+_step_carved = \loop compose (compose Snat.succ) (_carved loop)
+# X reduces to compose (compose Snat.succ) (_carved X): one more count
+# composed onto everything the machinery underneath returns.
+size__lazy_108 = \t const _tie_open t (_loop _step_carved) (△ t △)
+# The skeleton again, but the input packed the other way around — △ t △ — so
+# _tie_open spills it into the knot as X t △.
+size__lazy_113 = \t _s _tie (const t) (_loop _step_carved) △
+# No dispatch at all: the head builds _s _tie (const t), which applied to the
+# loop reduces to X t, and the trailing △ completes the same X t △ call the
+# 108 makes. The assembled tree is size__smallest's own, with one cut: its
+# 19-node delayed re-entry △ (△ _h) replaced by the 7-node _fork_self.
 size__smallest__lazy = size__lazy_100
+
+# The carved-from claim, checked: the step the 108 and the 113 loop over sits
+# whole inside size__smallest — left, left, right, right, left, left, right
+# from the top.
+_left = triage △ id const
+_right = triage △ id (const id)
+_to_string = Bool.to_source
+equal _step_carved (_right (_left (_left (_right (_right (_left (_left size__smallest)))))))
+# = true
+
 _size_body = \self \x compose △ $ triage (\self id) (\u \self self self u) (\v \u \self compose (self self u) (self self v)) x self
 size__fastest = \x (self_apply _size_body) x △
 size = \x (wait self_apply _size_body) x △
