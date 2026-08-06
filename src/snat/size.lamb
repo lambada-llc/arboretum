@@ -70,14 +70,15 @@ size__eager_118 = \x (△ (△ _k) (△ _code)) x △
 # filter — the same deletion-and-replacement spirit as #20, pointed at the
 # eager family — first as a 110 tied with fix's knot, then reformulated
 # through the compiler and retied with _k. Every unfolding consumes one
-# node of state, so reduction terminates in every order; but recursion on a
-# rebuilt chain is not recursion on a subtree, and the certifiers' FOLD
-# only closes over strict subtrees, so no proof is found and both verdicts
-# below are false — the conservative false the header describes, read off
-# the rules rather than a defect found. What stands behind this one is the
-# measure argument above and exhaustive testing (every tree to 13 nodes);
-# size__eager_118 is the smallest program here carrying a certificate. Of
-# the lazy records below, only the 100 still undercuts the eager ones.
+# node of state, so reduction terminates in every order — but recursion on
+# a rebuilt chain is not recursion on a subtree, which no structural FOLD
+# closes. The eager certifier carries size-measure rules for exactly this
+# shape (RGEN and GEN-TREE, src/certify/size.lamb): the chain becomes a
+# minted tree variable of known size, strictly smaller than the split
+# variable, and the induction closes — so the certificate below is as
+# machine-checked as the record's. The lazy certifier has no such rules,
+# and its false stays the conservative false the header describes. Of the
+# lazy records further down, only the 100 still undercuts the eager ones.
 _chain_step = \self \x compose Snat.succ $ triage id self (\u \v self (self u v)) x
 _chain_code = \sq _chain_step (△ (△ _k) sq)
 size__eager_103 = \x (△ (△ _k) (△ _chain_code)) x △
@@ -100,7 +101,7 @@ Certify.computes_size_eagerly size__eager_118
 Certify.computes_size size__eager_118
 # = true
 Certify.computes_size_eagerly size__eager_103
-# = false
+# = true
 Certify.computes_size size__eager_103
 # = false
 

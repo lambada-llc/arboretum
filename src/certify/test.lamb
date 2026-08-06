@@ -113,3 +113,23 @@ Certify.computes_size_eagerly _deep_bug
 # = false
 Certify.computes_size_eagerly (compose Snat.from_nat size)
 # = false
+
+# Recursion on a rebuilt tree, right and wrong. A chain step counts a fork's
+# left child by stacking it onto the right child — self u v reduces to △ⁿ v —
+# and recursing on that chain, which is no subtree of the input. The eager
+# certifier's size-measure rules close the real one, and the accounting
+# rejects the mutants: counting u twice needs parts that are not disjoint,
+# dropping v leaves a size the spec still owes unmatched, and a missing
+# successor leaves a 1 unpaid.
+_chain = \x (fix $ \self \x compose Snat.succ $ triage id self (\u \v self (self u v)) x) x △
+_chain_twice = \x (fix $ \self \x compose Snat.succ $ triage id self (\u \v self (self u u)) x) x △
+_chain_dropped = \x (fix $ \self \x compose Snat.succ $ triage id self (\u \v self (self u △)) x) x △
+_chain_unpaid = \x (fix $ \self \x triage id self (\u \v self (self u v)) x) x △
+Certify.computes_size_eagerly _chain
+# = true
+Certify.computes_size_eagerly _chain_twice
+# = false
+Certify.computes_size_eagerly _chain_dropped
+# = false
+Certify.computes_size_eagerly _chain_unpaid
+# = false

@@ -1,0 +1,27 @@
+# The certificates, exported to a foundational checker. Each expression below
+# evaluates to a file: a self-contained Lean 4 module that defines triage
+# calculus's five reduction rules as a big-step relation, states the program
+# as a tree literal, and proves it evaluates every input to the numeral for
+# that input's node count — plus determinism, so that numeral is the only
+# possible result. `lean` accepts each module as-is: no imports, no sorry,
+# and the proofs use no axioms beyond propext and Quot.sound. The emitter
+# renders this certifier's own primitives — the match on the input is SPLIT,
+# the quantified next argument RGEN's residual, the recursive calls FOLDs at
+# GEN-TREE's minted arguments, and every App constructor one NORMALIZE step,
+# replayed from the program's eager reduction.
+
+Option.match △ id (Certify.lean_size_proof "SizeProof125.lean" Snat.size__smallest)
+# = SizeProof125.lean sha256:dab2e6a0dcea69efb66ff289f4a39d8cff67e875d99ea4a948ded099f3a7d5cb
+Option.match △ id (Certify.lean_size_proof "SizeProof118.lean" Snat.size__eager_118)
+# = SizeProof118.lean sha256:90d752ae1ff3d7ffcfd489d3b59fbde026d5441a45a11f02ad9e959ae8f85168
+Option.match △ id (Certify.lean_size_proof "SizeProof103.lean" Snat.size__eager_103)
+# = SizeProof103.lean sha256:f9fe3b3ebd31b24b4c13bab35758ee76f3b2bfeeb4317e891f6771fec909f3f8
+
+# No module for a program with no eager derivation: the lazy 100 converges in
+# normal order only, so there is no big-step computation to replay — every
+# derivation of the relation the modules define evaluates all its premises.
+# Exporting the lazy certificates would take small-step semantics and their
+# phase structure (CUT, ABSTRACT), which this emitter does not cover.
+_to_string = Option.match "none" (\_ "a module")
+Certify.lean_size_proof "SizeProof100.lean" Snat.size__lazy_100
+# = none

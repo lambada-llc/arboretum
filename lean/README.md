@@ -1,47 +1,53 @@
 # Lean-verified size records
 
-[`SizeRecords.lean`](./SizeRecords.lean) is a self-contained Lean 4 module —
-no imports, no dependencies — that re-verifies the two record programs of
-[`src/snat/size.lamb`](../src/snat/size.lamb) from first principles:
+Two ways the size records get foundational proofs:
 
-* it defines triage calculus (the five reduction rules) as a big-step
-  evaluation relation `App` over unlabelled binary trees;
-* it defines the node count `sz` and the unary numeral encoding `snat`;
-* it states `prog118` and `prog103` as tree literals that are node for node
-  `Snat.size__eager_118` and `Snat.size__eager_103`;
-* it proves, for both, that applied to *any* tree they evaluate to the
-  numeral for that tree's node count, and that this value is unique:
+## Generated in-repo: `Certify.lean_size_proof`
 
-  ```
-  theorem prog118_computes_size : ∀ t, App prog118 t (snat (sz t))
-  theorem prog103_computes_size : ∀ t, App prog103 t (snat (sz t))
-  theorem App.det : App a b c → App a b c' → c = c'
-  ```
+[`src/certify/lean.lamb`](../src/certify/lean.lamb) defines a tree-calculus
+program that **emits** a self-contained Lean 4 module for a size program: it
+recognises the knotted-loop shape, replays the program's own eager reduction
+symbolically — one `App` constructor per reduction step — and renders the
+certifier's primitives as an induction Lean re-checks from the five reduction
+rules alone (the match on the input is SPLIT, the quantified next argument is
+RGEN's residual, the recursive calls are FOLDs at GEN-TREE's minted
+arguments).
 
-A derivation of `App a b c` is a complete computation record — every premise
-of every rule is itself an evaluated application — so each theorem packages
-convergence and the answer in one statement. The proofs follow the shape of
-the certificates `Certify.certify_size` emits: induction over the input
-(SPLIT), an invariant generalised over the accumulator (GENERALIZE),
-induction hypotheses at the recursive calls (FOLD), and one `App` constructor
-per reduction step (NORMALIZE). The derivation terms were generated
-mechanically by replaying the symbolic eager reduction of the actual program
-trees; the scaffolding and endgames are hand-written.
+[`src/certify/lean_test.lamb`](../src/certify/lean_test.lamb) demonstrates it
+as file-style expect tests; the modules land in
+[`src/certify/expect-test-out/`](../src/certify/expect-test-out/) —
+`SizeProof125.lean` (the previous record `size__smallest`),
+`SizeProof118.lean` and `SizeProof103.lean` (the current records). Each is
+accepted by `lean` as-is: no imports, no `sorry`, axioms `propext` and
+`Quot.sound` only. The lazy 100 gets `none` rather than a module: it
+converges in normal order only, so there is no big-step computation to
+replay; exporting the lazy certificates (CUT/ABSTRACT phase structure over
+small-step semantics) is future work.
 
-Where the in-repo certifier's induction only closes over recursion on strict
-subtrees — which is why `size__eager_103`'s verdict there is a conservative
-`false` — the strong induction on `sz` here has no such restriction, so the
-103 gets a full proof too.
+## Hand-assembled: `SizeRecords.lean`
 
-## Checking it
-
-With [elan](https://github.com/leanprover/elan) installed, from this
-directory (the `lean-toolchain` file pins the version):
+[`SizeRecords.lean`](./SizeRecords.lean) is the original, hand-assembled
+module covering both current records in one file, with the same theorems
+plus uniqueness corollaries and fuller prose. Same guarantees: (with elan
+installed, from this directory — `lean-toolchain` pins the version)
 
 ```bash
 lean SizeRecords.lean
 ```
 
-No output means Lean accepts every theorem. The proofs use no `sorry` and no
-classical reasoning: `#print axioms` on either final theorem reports only
-`propext` and `Quot.sound`, Lean's benign structural axioms.
+No output means Lean accepts every theorem.
+
+## What the theorems say
+
+For each program `p`: `App p t (snat (sz t))` for **every** tree `t` — the
+program applied to any input evaluates to the unary numeral for that input's
+node count — and by `App.det` that value is unique. A derivation of the
+big-step relation `App` evaluates every premise, so each theorem packages
+convergence and the answer; order-independence additionally rests on
+confluence of the calculus, which is argued in the repository and not
+formalized here.
+
+These proofs cover `size__eager_103` as well, whose chain recursion is no
+subtree recursion: the strong induction on node count that closes it in Lean
+is the same measure the certifier's RGEN/GEN-TREE rules encode — the Lean
+export and the certifier extension were built against each other.
