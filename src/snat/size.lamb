@@ -7,7 +7,8 @@ _triage = \self triage id self $ \u
 _functional_smallest = \self \x compose Snat.succ $ _triage self x
 size__smallest = \x (fix _functional_smallest) x Snat.zero
 
-# size__smallest is search-verified minimal at 125 nodes: seed wrapper (5) + fix knot
+# size__smallest is search-verified minimal at 125 nodes among fix-knotted forms:
+# seed wrapper (5) + fix knot
 # (44: the 17-node unfolder _h below, paid twice) + body (76). Exhaustive enumeration
 # (~150M candidates: all knot unfolders to 16 nodes, wrapper/dispatch shells to 14,
 # fork-case replacements to enum-15 with combinator atoms, every normal-form subtree
@@ -30,6 +31,78 @@ size__smallest5 = \x (fix _f5) x Snat.zero
 _q6 = △ (△ (△ (△ (△ △ _b2)) (△ (△ (△ △ _s)) (△ (△ (△ △ compose)))))) (△ (△ (△ △ (△ △))))
 _f6 = \self \x compose Snat.succ $ triage id self (_q6 self) x
 size__smallest6 = \x (fix _f6) x Snat.zero
+
+# Smaller and still eager: a knot that costs 31 nodes where fix's costs 44.
+# Where fix keeps re-entry delayed behind wait — the 17-node unfolder _h,
+# paid twice — the knot below is a quine: the loop rebuilds itself from the
+# copy it carries, and what keeps that eager-safe is that the rebuild only
+# ever happens under the input constructor just consumed, one unfolding per
+# node. _k is const of a triage: it drops an argument, splits a fork, and
+# applies the code found inside to that code's own stem —
+#   _k z (△ q z)  ⟶  q (△ q) z
+# — fourteen nodes, paid twice like _h, plus three of wiring. Tie
+#   self = △ (△ _k) (△ q).
+# Rule (2) sends an application self z to _k z (△ q z) — the code and the
+# input packed into a fork — so self z ⟶ q (△ q) z, and a code value that
+# rebuilds self over its own stem closes the loop: _code below reduces
+# q (△ q) to step (△ (△ _k) (△ q)), which is step self, so
+#   self z  ⟶  step self z.
+# Every intermediate term is a value; nothing here waits, and nothing
+# unfolds except into the next constructor of the input. The step is
+# _functional_smallest, unchanged: only the knot around it is new, and the
+# certificates below are the same machine-checked ones the six above carry.
+_selfstem = \q q (△ q)
+_k = const (triage △ △ _selfstem)
+_code = \sq _functional_smallest (△ (△ _k) sq)
+size__eager_118 = \x (△ (△ _k) (△ _code)) x △
+
+# The same knot around a different step reaches 103. The record step
+# composes the two child counts; this one owns no composition machinery at
+# all: a fork's left child is counted by stacking its nodes onto the right
+# child — self u v reduces to △ⁿ v for n = |u| — and recursing on that
+# chain, which is one node smaller than △ u v was. Its fork case is two
+# bare applications of self where the record step pays compose twice and a
+# shared S to spell them:
+#   leaf   ⟶ [n] △ n
+#   △ u    ⟶ [n] △ (self u n)
+#   △ u v  ⟶ [n] △ (self (self u v) n)
+# Found by annealing over whole trees with an eager evaluator as the
+# filter — the same deletion-and-replacement spirit as #20, pointed at the
+# eager family — first as a 110 tied with fix's knot, then reformulated
+# through the compiler and retied with _k. Every unfolding consumes one
+# node of state, so reduction terminates in every order; but recursion on a
+# rebuilt chain is not recursion on a subtree, and the certifiers' FOLD
+# only closes over strict subtrees, so no proof is found and both verdicts
+# below are false — the conservative false the header describes, read off
+# the rules rather than a defect found. What stands behind this one is the
+# measure argument above and exhaustive testing (every tree to 13 nodes);
+# size__eager_118 is the smallest program here carrying a certificate. Of
+# the lazy records below, only the 100 still undercuts the eager ones.
+_chain_step = \self \x compose Snat.succ $ triage id self (\u \v self (self u v)) x
+_chain_code = \sq _chain_step (△ (△ _k) sq)
+size__eager_103 = \x (△ (△ _k) (△ _chain_code)) x △
+
+_to_string = Snat.to_string
+size__eager_118 (△ (△ △) (△ △))
+# = 5
+size__eager_103 (△ (△ △) (△ △))
+# = 5
+size__eager_118 size__eager_103
+# = 103
+size__eager_103 size__eager_118
+# = 118
+size__eager_103 size__eager_103
+# = 103
+
+_to_string = Bool.to_source
+Certify.computes_size_eagerly size__eager_118
+# = true
+Certify.computes_size size__eager_118
+# = true
+Certify.computes_size_eagerly size__eager_103
+# = false
+Certify.computes_size size__eager_103
+# = false
 
 # Smaller still, once the program no longer has to terminate under eager
 # evaluation. Nathan Farlow found these by deleting subtrees of a known program
@@ -461,7 +534,11 @@ Reflect.lazy_eval size__lazy_108 id
 Reflect.lazy_eval size__lazy_113 id
 # = 5
 
-# Node counts, which is what the __lazy ones are named after.
+# Node counts, which is what the __lazy and __eager ones are named after.
+size size__eager_118
+# = 118
+size size__eager_103
+# = 103
 size size__smallest
 # = 125
 size size__smallest2
