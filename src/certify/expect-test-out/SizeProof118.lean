@@ -66,6 +66,9 @@ theorem App.det {a b c c2 : Tree} (h : App a b c) (h2 : App a b c2) : c = c2 := 
     cases h2 with
     | r3c g1 g2 => obtain rfl := ih1 g1; exact ih2 g2
 
+theorem App.cast {x y c c2 : Tree} (h : App x y c) (e : c = c2) : App x y c2 :=
+  Eq.mp (congrArg (App x y) e) h
+
 -- The loop value inside prog
 def SELF : Tree := (F (S (F L (F (F L L) (F (S (F (S (S L)) L)) L)))) (S (F (S (F L (F (S (F L (S (S (F L (S (S (F L L)))))))) (F (S (F (S (F L L)) (S (F (S (S L)) L)))) (F (S (F (S (F L (F (S (F L (F (S (F L L)) L))) (S L)))) (F (S (F L (F (S (F L L)) L))) (S (S (F L (F (S (F L (F (S (F L L)) L))) (S L)))))))) (S (S (F L (S L))))))))) (S (S (F L (F (F L L) (F (S (F (S (S L)) L)) L))))))))
 
@@ -75,34 +78,30 @@ def prog : Tree := F (S SELF) (F L L)
 -- The match on t is the certificate's SPLIT, the quantified s its RGEN
 -- residual, the recursive calls its FOLDs, and every App constructor one
 -- NORMALIZE step, replayed from the program's own eager reduction.
-theorem self_spec (t : Tree) :
+theorem self_spec : (t : Tree) ->
     Exists (fun f => And (App SELF t f)
-      ((s : Tree) -> App f s (stack (sz t) s))) := by
-  match t with
+      ((s : Tree) -> App f s (stack (sz t) s)))
   | leaf =>
-    exact Exists.intro _ (And.intro (App.rS App.rK App.grow1 (App.r3c (App.rS (App.rS App.grow1 App.grow0 App.rK) App.grow0 (App.rS App.rK App.grow1 (App.rS App.rK (App.rS (App.rS App.rK App.grow1 App.grow0) (App.rS (App.rS App.rK (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0)) (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0))) App.grow1 App.grow1) App.grow1) App.grow1))) (App.rS App.rK App.r3a App.grow1))) (fun s => (App.rS App.rK (App.rS App.grow1 App.grow0 App.rK) App.grow0)))
+    Exists.intro _ (And.intro (App.rS App.rK App.grow1 (App.r3c (App.rS (App.rS App.grow1 App.grow0 App.rK) App.grow0 (App.rS App.rK App.grow1 (App.rS App.rK (App.rS (App.rS App.rK App.grow1 App.grow0) (App.rS (App.rS App.rK (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0)) (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0))) App.grow1 App.grow1) App.grow1) App.grow1))) (App.rS App.rK App.r3a App.grow1))) (fun s => (App.rS App.rK (App.rS App.grow1 App.grow0 App.rK) App.grow0)))
   | stem u =>
     match self_spec u with
     | Exists.intro f1 (And.intro hf1a hf1b) =>
-    exact Exists.intro _ (And.intro (App.rS App.rK App.grow1 (App.r3c (App.rS (App.rS App.grow1 App.grow0 App.rK) App.grow0 (App.rS App.rK App.grow1 (App.rS App.rK (App.rS (App.rS App.rK App.grow1 App.grow0) (App.rS (App.rS App.rK (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0)) (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0))) App.grow1 App.grow1) App.grow1) App.grow1))) (App.rS App.rK (App.r3b hf1a) App.grow1))) (fun s => (App.rS App.rK (hf1b s) App.grow0)))
+    Exists.intro _ (And.intro (App.rS App.rK App.grow1 (App.r3c (App.rS (App.rS App.grow1 App.grow0 App.rK) App.grow0 (App.rS App.rK App.grow1 (App.rS App.rK (App.rS (App.rS App.rK App.grow1 App.grow0) (App.rS (App.rS App.rK (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0)) (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0))) App.grow1 App.grow1) App.grow1) App.grow1))) (App.rS App.rK (App.r3b hf1a) App.grow1))) (fun s => (App.rS App.rK (hf1b s) App.grow0)))
   | fork u v =>
     match self_spec u with
     | Exists.intro f1 (And.intro hf1a hf1b) =>
     match self_spec v with
     | Exists.intro f2 (And.intro hf2a hf2b) =>
-    refine Exists.intro _ (And.intro (App.rS App.rK App.grow1 (App.r3c (App.rS (App.rS App.grow1 App.grow0 App.rK) App.grow0 (App.rS App.rK App.grow1 (App.rS App.rK (App.rS (App.rS App.rK App.grow1 App.grow0) (App.rS (App.rS App.rK (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0)) (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0))) App.grow1 App.grow1) App.grow1) App.grow1))) (App.rS App.rK (App.r3c (App.rS App.rK (App.rS App.rK hf1a App.grow1) App.grow1) (App.rS (App.rS App.rK hf2a (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0))) App.rK App.grow1)) App.grow1))) (fun s => ?_))
-    have h := (App.rS App.rK (App.rS App.rK (hf1b s) (hf2b (stack (sz u) s))) App.grow0)
-    have e : (stack (sz v) (stack (sz u) s)) = stack (sz u + sz v) s := by
-      simp only [stack_stack, sz_stack, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm]
-    rw [e] at h
-    exact h
-termination_by sz t
+    Exists.intro _ (And.intro (App.rS App.rK App.grow1 (App.r3c (App.rS (App.rS App.grow1 App.grow0 App.rK) App.grow0 (App.rS App.rK App.grow1 (App.rS App.rK (App.rS (App.rS App.rK App.grow1 App.grow0) (App.rS (App.rS App.rK (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0)) (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0))) App.grow1 App.grow1) App.grow1) App.grow1))) (App.rS App.rK (App.r3c (App.rS App.rK (App.rS App.rK hf1a App.grow1) App.grow1) (App.rS (App.rS App.rK hf2a (App.rS App.rK App.grow1 (App.rS App.rK App.grow0 App.grow0))) App.rK App.grow1)) App.grow1))) (fun s =>
+      App.cast (App.rS App.rK (App.rS App.rK (hf1b s) (hf2b (stack (sz u) s))) App.grow0)
+        (congrArg stem (Eq.trans (stack_stack (sz v) (sz u) s) (congrArg (fun n => stack n s) (Nat.add_comm (sz v) (sz u)))))))
+termination_by t => sz t
 decreasing_by all_goals (simp only [sz, sz_stack]; omega)
 
 theorem prog_computes_size (t : Tree) :
-    App prog t (snat (sz t)) := by
+    App prog t (snat (sz t)) :=
   match self_spec t with
-  | Exists.intro f (And.intro h1 h2) => exact App.rS h1 App.rK (h2 leaf)
+  | Exists.intro f (And.intro h1 h2) => App.rS h1 App.rK (h2 leaf)
 
 theorem prog_unique {t r : Tree}
     (h : App prog t r) : r = snat (sz t) :=

@@ -127,29 +127,63 @@ _preamble = \ind fix $ \self List.match "" (\h \tl Pair.let h $ \arg \r
         ; ind; "| Exists.intro f"; is; " (And.intro hf"; is; "a hf"; is; "b) =>"; [10]
         ; self tl ])
 
-# A case body: with one hypothesis or none the emitted value is definitionally
-# the specified stack; with two, the minted stacks are re-associated by the
-# endgame equality first.
+# The endgame equality for a two-hypothesis case, as a pure proof term. The
+# replayed value is one stem over either nested stacks — re-associated by
+# stack_stack and commuted where the application order asks for it — or a
+# stack at a minted chain, resolved by sz_stack. Anything else is refused.
+_addterm = \x \y
+  Bool.match
+    (\u Bool.match (\u2 Option.none) (\u2
+        Bool.match (\u3 Option.none)
+          (\u3 Option.some (_cats ["(Nat.add_comm (sz "; x; ") (sz "; y; "))"]))
+          (equal y "u") u2)
+      (equal x "v") u)
+    (\u Bool.match (\u2 Option.none) (\u2 Option.some "rfl") (equal y "v") u)
+    (equal x "u") △
+_endterm = \al1 \al2 \name
+  let (_cats ["(stack (sz "; al2; ") (stack (sz "; al1; ") s))"]) $ \cA
+  let (_cats ["(stack (sz "; al1; ") (stack (sz "; al2; ") s))"]) $ \cB
+  let (Bool.match "u" "v" (equal al1 "u")) $ \other
+  let (_cats ["(stack (sz "; al1; ") "; other; ")"]) $ \chain
+  let (_cats ["(stack (sz "; al2; ") s)"]) $ \cC
+  Bool.match
+    (\u Bool.match
+      (\u2 Bool.match (\u3 Option.none)
+        (\u3 Option.some (_cats
+          ["(congrArg (fun n => stack n s) (sz_stack (sz "; al1; ") "; other; "))"]))
+        (Bool.and (equal name cC)
+          (Bool.and (equal al1 "u") (equal al2 chain))) u2)
+      (\u2 Option.bind (\add Option.some (_cats
+        ["(Eq.trans (stack_stack (sz "; al1; ") (sz "; al2; ") s) (congrArg (fun n => stack n s) "; add; "))"]))
+        (_addterm al1 al2)) (equal name cB) u)
+    (\u Option.bind (\add Option.some (_cats
+      ["(Eq.trans (stack_stack (sz "; al2; ") (sz "; al1; ") s) (congrArg (fun n => stack n s) "; add; "))"]))
+      (_addterm al2 al1)) (equal name cA) △
+
+# A case body, a pure proof term: with one hypothesis or none the replayed
+# value is definitionally the specified stack; with two, App.cast carries it
+# across the endgame equality.
 _case_text = \selfq \shape \pat
   Option.bind (\c Pair.let c $ \hyps \r Pair.let r $ \pr1 \r2 Pair.let r2 $ \pr2 \v2
     triage Option.none (\_ Option.none) (\vf \vx
       Bool.match (\u Option.none) (\u
         let (List.length hyps) $ \nh
         Bool.match
-          (\u2 Bool.match (\u3 Option.none) (\u3 Option.some (_cats
-            [ "  | "; pat; " =>"; [10]
-            ; _preamble "    " hyps
-            ; "    refine Exists.intro _ (And.intro "; pr1; " (fun s => ?_))"; [10]
-            ; "    have h := "; pr2; [10]
-            ; "    have e : "; _lean_q vx; " = stack (sz u + sz v) s := by"; [10]
-            ; "      simp only [stack_stack, sz_stack, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm]"; [10]
-            ; "    rw [e] at h"; [10]
-            ; "    exact h"; [10] ]))
+          (\u2 Bool.match (\u3 Option.none) (\u3
+            List.match Option.none (\h1 \t1 Pair.let h1 $ \a1 \r1a Pair.let r1a $ \i1 \al1
+              List.match Option.none (\h2 \t2 Pair.let h2 $ \a2 \r2a Pair.let r2a $ \i2 \al2
+                Option.bind (\et Option.some (_cats
+                  [ "  | "; pat; " =>"; [10]
+                  ; _preamble "    " hyps
+                  ; "    Exists.intro _ (And.intro "; pr1; " (fun s =>"; [10]
+                  ; "      App.cast "; pr2; [10]
+                  ; "        (congrArg stem "; et; ")))"; [10] ]))
+                  (_endterm al1 al2 (_lean_q vx))) t1) hyps)
             (equal nh 2) △)
           (\u2 Option.some (_cats
             [ "  | "; pat; " =>"; [10]
             ; _preamble "    " hyps
-            ; "    exact Exists.intro _ (And.intro "; pr1; " (fun s => "; pr2; "))"; [10] ]))
+            ; "    Exists.intro _ (And.intro "; pr1; " (fun s => "; pr2; "))"; [10] ]))
           (Nat.is_lte nh 1) △)
         (equal vf △) △)
       v2)
@@ -226,6 +260,9 @@ _scaffold = \pname \plit List.join [10]
   ; "    cases h2 with"
   ; "    | r3c g1 g2 => obtain rfl := ih1 g1; exact ih2 g2"
   ; ""
+  ; "theorem App.cast {x y c c2 : Tree} (h : App x y c) (e : c = c2) : App x y c2 :="
+  ; "  Eq.mp (congrArg (App x y) e) h"
+  ; ""
   ; _cat "-- The loop value inside " pname
   ; _cat "def SELF : Tree := " plit
   ; ""
@@ -233,13 +270,13 @@ _scaffold = \pname \plit List.join [10]
   ; "" ]
 
 _epilogue = \pname List.join [10]
-  [ "termination_by sz t"
+  [ "termination_by t => sz t"
   ; "decreasing_by all_goals (simp only [sz, sz_stack]; omega)"
   ; ""
   ; _cat (_cat "theorem " pname) "_computes_size (t : Tree) :"
-  ; _cat (_cat "    App " pname) " t (snat (sz t)) := by"
+  ; _cat (_cat "    App " pname) " t (snat (sz t)) :="
   ; "  match self_spec t with"
-  ; "  | Exists.intro f (And.intro h1 h2) => exact App.rS h1 App.rK (h2 leaf)"
+  ; "  | Exists.intro f (And.intro h1 h2) => App.rS h1 App.rK (h2 leaf)"
   ; ""
   ; _cat (_cat "theorem " pname) "_unique {t r : Tree}"
   ; _cat (_cat "    (h : App " pname) " t r) : r = snat (sz t) :="
@@ -264,10 +301,9 @@ lean_size_proof = \name \p
                   ; "-- The match on t is the certificate's SPLIT, the quantified s its RGEN"
                   ; "-- residual, the recursive calls its FOLDs, and every App constructor one"
                   ; "-- NORMALIZE step, replayed from the program's own eager reduction."
-                  ; "theorem self_spec (t : Tree) :"
+                  ; "theorem self_spec : (t : Tree) ->"
                   ; "    Exists (fun f => And (App SELF t f)"
-                  ; "      ((s : Tree) -> App f s (stack (sz t) s))) := by"
-                  ; "  match t with"
+                  ; "      ((s : Tree) -> App f s (stack (sz t) s)))"
                   ; "" ]
                 ; lc; sc; fc
                 ; _epilogue "prog" ])))
