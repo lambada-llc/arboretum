@@ -23,13 +23,34 @@
 #                becomes an induction hypothesis, reusable only on a variable
 #                the split created.
 #   • FOLD       a goal that is an instance of such a hypothesis is closed by
-#                it. The instance must map the split variable to one strictly
-#                below it, so the recursion is on a strictly smaller tree: that
-#                is the well-founded measure the induction rests on.
+#                it. The instance must map the split variable strictly below
+#                itself — to a part the split produced, or to a variable
+#                GEN-TREE minted from disjoint proper parts — so the node
+#                count strictly decreases: that is the well-founded measure
+#                the induction rests on.
 #   • GENERALIZE a subterm a hypothesis proves is a known Snat becomes a fresh
 #                Snat variable, and its share of the spec goes with it. Without
 #                it the analysis chases an unbounded family of accumulator
 #                states; with it, the state space is finite.
+#
+# [computes_size_eagerly]'s prover has two rules of its own, added for the
+# programs whose recursion is not on a subtree of the input:
+#   • RGEN       a literal △ in argument position down the state's spine — an
+#                accumulator seed — becomes an opaque residual r, and the spec
+#                gains the atom ⟨r⟩, "then the tree r": a state owing E ⊎ [⟨r⟩]
+#                evaluates to r under sum(E) successors. The hypothesis the
+#                next split records then covers every accumulator, and r := △
+#                recovers the plain goal, a stack over a leaf being an Snat.
+#   • GEN-TREE   a subterm a hypothesis proves evaluates to a known-size chain
+#                — part sizes stacked over a residual — becomes a fresh tree
+#                variable of exactly that size, its parts recorded in its name
+#                for FOLD's measure check. A machine that emits its successors
+#                outside the loop hands the chain on without its head
+#                constructor, so the hypothesis is also tried one synthesized
+#                stem up, the missing node returning to the spec as a 1. This
+#                is what closes recursion on rebuilt trees — the chain step of
+#                Snat.size__eager_103 among them — where structural FOLD
+#                cannot.
 #
 # Generalization is what makes the certificate style-agnostic: `1+(|a|+|b|)` and
 # an accumulator threaded through the traversal reduce differently, and both
@@ -97,6 +118,37 @@ _sz = \v △ v          # the size of tree variable v
 _val = \v △ △ v       # the value of Snat variable v
 _atom = \o1 \osz \oval triage o1 osz (\_ oval)
 
+# A fourth atom, for the size-measure induction: [△ (△ △) r] is ⟨r⟩, "then
+# the tree r" — a state owing E ⊎ [⟨r⟩] must evaluate to the value of r under
+# sum(E) successors rather than to a bare Snat. At most one per spec, and the
+# plain judgment is the special case ⟨△⟩, a stack of successors over a leaf
+# being exactly an Snat. The lazy certifier further down spells its ⟨★k⟩ tail
+# the same way but reads it as continuation obligations; the two provers never
+# exchange specs, so the encoding is shared and the semantics are not.
+_res = \r △ (△ △) r
+_atom4 = \o1 \osz \oval \ores triage o1 osz (\c \v triage (oval v) (\_ ores v) (\_ \_ oval v) c)
+_res_var = _atom4 Option.none (\_ Option.none) (\_ Option.none) Option.some
+_has_res = \e List.any (\a Option.match false (\_ true) (_res_var a)) e
+
+# Tree variables minted by [_gen_tree] carry their accounting in their name: a
+# fork head that no part- or counter-name has, then the list of part variables
+# whose sizes the minted tree adds up to. [_below] is FOLD's well-foundedness
+# check, widened from "a part the splitting produced" to also accept a minted
+# variable whose recorded parts are pairwise disjoint parts strictly below the
+# split variable: disjoint proper parts never add up to the whole tree, so the
+# node count still strictly decreases and the induction stays well-founded.
+_gname = \parts △ (△ △ △) parts
+_gparts = triage Option.none (\_ Option.none)
+  (\hd \tl triage Option.none (\_ Option.none) (\_ \_ Option.some tl) hd)
+_disjoint = fix $ \self List.match true (\hd \tl Bool.and
+  (List.all (\o Bool.not (Bool.or (equal hd o) (Bool.or (_extends hd o) (_extends o hd)))) tl)
+  (self tl))
+_below = \v \w Bool.match
+  (Option.match false (\parts Bool.and (Bool.not (List.is_empty parts))
+    (Bool.and (List.all (_extends v) parts) (_disjoint parts))) (_gparts w))
+  true
+  (_extends v w)
+
 _remove = \x fix $ \self List.match Option.none
   (\hd \tl Bool.match (Option.map (△ hd) (self tl)) (Option.some tl) (equal hd x))
 _minus = \f \e List.foldl (\acc \x Option.bind (_remove x) acc) (Option.some e) f
@@ -134,10 +186,11 @@ _match = fix $ \self \p \t \s triage
 # The instance must send the split variable strictly below itself; that is the
 # measure that makes reuse an induction hypothesis rather than a circular claim.
 _image = \s \v Option.bind (triage Option.none (\w Option.some w) (\_ \_ Option.none)) $ List.lookup v s
-_rename = \s _atom (Option.some _one) (\v Option.map _sz $ _image s v) (\v Option.map _val $ _image s v)
+_rename = \s _atom4 (Option.some _one) (\v Option.map _sz $ _image s v)
+  (\v Option.map _val $ _image s v) (\r Option.map _res $ _image s r)
 _fold = \a \t Pair.let a $ \state \r Pair.let r $ \spec \v
   Option.bind (\s Option.bind
-    (\w Bool.match Option.none (Option.sequence $ List.map (_rename s) spec) $ _extends v w)
+    (\w Bool.match Option.none (Option.sequence $ List.map (_rename s) spec) $ _below v w)
     (_image s v))
     (_match state t [])
 
@@ -149,6 +202,34 @@ _replace = \needle \v fix $ \self \t
 _generalize = \g \asms \e \s
   _first (\c _first (\a Option.bind (\f Option.map
     (\rest △ (_replace c (_var g) s) (△ (_val g) rest)) $ _minus f e) $ _fold a c) asms) (_subterms s)
+
+# Generalization for the size measure: a subterm a hypothesis proves evaluates
+# to a known-size chain — its renamed spec is a core of part sizes over ⟨b⟩ —
+# becomes a fresh tree variable. The parts and b leave the goal's spec and the
+# minted variable's size enters it; the name records the parts for [_below].
+_gen_tree = \asms \e \s
+  _first (\c _first (\a
+    let (\k1s \fopt Option.bind (\f
+      Option.bind (\b
+        let (List.filter (\at Option.match true (\_ false) (_res_var at)) f) $ \core
+        Option.bind (\parts
+          Option.bind (\rest
+            Option.map (\rest2
+              let (_gname (List.concat parts [b])) $ \gn
+              △ (_replace c (_var gn) s) (△ (_sz gn) (List.concat k1s rest2)))
+            (_remove (_sz b) rest))
+          (_minus core e))
+        (Option.sequence $ List.map
+          (_atom4 Option.none Option.some (\_ Option.none) (\_ Option.none)) core))
+      (List.foldr (\at \acc Option.alt (_res_var at) acc) Option.none f))
+      fopt) $ \attempt
+    # A machine that emits its successors outside the loop hands the chain on
+    # without its head constructor, so the hypothesis is also tried against
+    # the candidate under one synthesized stem; the missing node returns to
+    # the spec as a literal 1, and the minted tree only gets smaller.
+    Option.match (attempt [_one] (_fold a (_app △ c))) Option.some
+      (attempt [] (_fold a c)))
+    asms) (_subterms s)
 
 # Case split: every tree is one of three shapes, every Snat one of two.
 _stem = \w _app △ (_var w)
@@ -166,6 +247,13 @@ _split = \recurse \e \s \v Option.match
   (\rest \recurse _cases recurse s v rest $ _shapes v true)
   (_remove (_sz v) e) recurse
 
+# The single-△-argument positions down a state's right application spine,
+# each returned as the whole state with that occurrence replaced by [_var r]:
+# the candidate seeds RGEN may generalise.
+_rgen_sites = \r fix $ \self triage [] (\_ []) (\f \x
+  List.concat (triage [△ f (_var r)] (\_ []) (\_ \_ []) x)
+    (List.map (△ f) (self x)))
+
 # The prover. Every branch that can recurse is handed `self` only once it is
 # taken: under eager reduction a recursive call fires as soon as its arguments
 # are bound, whether or not its branch was selected, so an unguarded `self` here
@@ -177,18 +265,37 @@ _prove = \nf fix $ \self \depth \g \asms \e \q
     # is what enters `asms`, so it is available as a hypothesis from here down.
     let (\self Snat.match (\_ false) (\d \_ Option.match (\_ false)
           (\v \_ _split (self d g $ △ (△ s (△ e v)) asms) e s v) blocked self) depth self) $ \split
+    # RGEN, when the split fails: a literal △ in argument position down the
+    # state's application spine — the seed — is generalised to an opaque
+    # residual and the goal retried, so that the hypothesis the next split
+    # records ranges over every accumulator rather than the empty one.
+    # Proving the goal under ⟨r⟩ proves it at r := △, and ⟨△⟩ is the plain
+    # judgment.
+    let (\self Bool.match
+          (\u Bool.match (\u2 false)
+             (\u2 let (_fresh g) $ \r
+                Option.match false (\_ true) $
+                _first (\s2 Bool.match Option.none (Option.some △)
+                         (_at s2 self depth (Snat.succ g) asms (△ (_res r) e) s2))
+                  (_rgen_sites r s))
+             (Bool.not (_has_res e)) u)
+          (\u true)
+          (split self) △) $ \split2
     Bool.match                                                  # FOLD, else …
-      (\self Option.match                                       # … GENERALIZE, else read s off:
-        (\self triage
-          (\_ List.is_empty e)                                  # a leaf is zero
-          (\v \_ _spec_eq e [_val v])                           # a bare Snat variable
-          (\f \x \self triage
-            (\self Option.match (\self split self)              # [△ x] is a successor: PEEL a 1
-              (\e2 \self self depth g asms e2 x) (_remove _one e) self)
-            (\_ \self split self)                               # stuck under a variable
-            (\ff \_ \self triage (\_ false) (\_ \self split self) (\_ \_ \self split self) ff self)
-            f self)                                             # …a fork is not an Snat; else stuck
-          s self)
+      (\self Option.match                                       # … GENERALIZE, else …
+        (\self Option.match                                     # … GEN-TREE, else read s off:
+          (\self triage
+            (\_ List.is_empty e)                                # a leaf is zero
+            (\v \_ Bool.or (_spec_eq e [_val v]) (_spec_eq e [_res v]))  # a bare variable
+            (\f \x \self triage
+              (\self Option.match (\self split2 self)           # [△ x] is a successor: PEEL a 1
+                (\e2 \self self depth g asms e2 x) (_remove _one e) self)
+              (\_ \self split2 self)                            # stuck under a variable
+              (\ff \_ \self triage (\_ false) (\_ \self split2 self) (\_ \_ \self split2 self) ff self)
+              f self)                                           # …a fork is not an Snat; else stuck
+            s self)
+          (\gen \self Pair.let gen $ \s2 \e2 self depth g asms e2 s2)
+          (_at self _gen_tree asms e s) self)
         (\gen \self Pair.let gen $ \s2 \e2 self depth (Snat.succ g) asms e2 s2)
         (_generalize (_fresh g) asms e s) self)
       (\_ true)
@@ -758,4 +865,5 @@ certify_size = \p
 # computes_size p — true only if p returns the node count of its argument, as
 # an Snat, for every tree. False means "not certifiable here", not "not size".
 computes_size = \p Option.match false (\_ true) (certify_size p)
+
 

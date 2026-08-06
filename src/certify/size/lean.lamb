@@ -1,0 +1,402 @@
+# Exporting a certificate to a foundational checker: [lean_size_proof name p]
+# returns a self-contained Lean 4 module — as a file value — that defines the
+# five reduction rules as a big-step relation, states p as a tree literal, and
+# proves that applied to any tree it evaluates to the numeral for that tree's
+# node count. None where the replay does not close.
+#
+# The whole program is what goes in, exactly as with the certifier: nothing
+# about its wrapper is assumed. The loop value the induction quantifies over
+# is discovered the way RGEN discovers the accumulator — by replaying the
+# program on an opaque input and taking the first closed value it applies to
+# an opaque variable — and the theorem tying the program to the invariant is
+# itself proved by replay, not by convention.
+#
+# The proof mirrors this certifier's primitives: the match on the input is
+# SPLIT, the quantifier over the loop's next argument is RGEN's residual, the
+# recursive calls are FOLDs at GEN-TREE's minted arguments, and every App
+# constructor is one NORMALIZE step. The constructors are found by replaying
+# the program's own eager reduction symbolically, so the derivation Lean
+# checks is exactly the computation the certifier walks.
+
+_cat = List.concat
+_cats = List.concat_list
+_var = \n △ n
+_app = \f \x △ f x
+_at = \u \f f
+
+# Lean text for a raw tree, over the module's L/S/F shorthands.
+_lean_tree = fix $ \self triage "L"
+  (\x _cats ["(S "; self x; ")"])
+  (\x \y _cats ["(F "; self x; " "; self y; ")"])
+
+# Replay values are quoted terms whose opaque variables are named by the Lean
+# expression they stand for, so rendering one is reading the names off.
+_lean_q = fix $ \self triage "L" (\n n) (\f \x
+  triage (_cats ["(S "; self x; ")"]) (\_ "?") (\f2 \x2
+    triage (_cats ["(F "; self x2; " "; self x; ")"]) (\_ "?") (\_ \_ "?") f2) f)
+
+# Hypothesis bookkeeping during replay: [△ next hyps], hyps a list of
+# [△ arg (△ i argLean)], in minting order.
+_st0 = △ 1 []
+_hyp_for = \b fix $ \self List.match Option.none (\h \tl Pair.let h $ \arg \r
+  Bool.match (\u self tl) (\u Option.some r) (equal arg b) △)
+_fname = \i _cat "f" (Nat.to_source i)
+_fvar_lookup = \n fix $ \self List.match Option.none (\h \tl Pair.let h $ \arg \r
+  Pair.let r $ \i \al
+  Bool.match (\u self tl) (\u Option.some r) (equal (_fname i) n) △)
+
+# The replay: one App constructor per reduction rule. [_emit selfq st a b] is
+# [some (△ st (△ value proof))], or none where reduction blocks on anything
+# but the loop value or a minted function. Applying the loop value mints a
+# hypothesis; applying a minted f-variable yields its stack specification.
+# Fuelled, so a program whose eager reduction does not return — the __lazy
+# family — costs a none rather than an answer that never comes.
+_fuel = Snat.from_nat 3000
+_emit = \selfq fix $ \self \fuel \st \a \b
+  Snat.match Option.none (\fuel
+  Bool.match (\u
+    triage
+      (\u2 Option.some (△ st (△ (_app △ b) "App.grow0")))
+      (\n \u2 Option.match (\u3 Option.none) (\r \u3 Pair.let r $ \i \al
+          Option.some (△ st (△
+            (_var (_cats ["(stack (sz "; al; ") "; _lean_q b; ")"]))
+            (_cats ["(hf"; Nat.to_source i; "b "; _lean_q b; ")"]))))
+        (Pair.let st $ \n2 \hyps _fvar_lookup n hyps) u2)
+      (\p \q \u2 triage
+        (\u3 Option.some (△ st (△ (_app (_app △ q) b) "App.grow1")))
+        (\n \u3 Option.none)
+        (\p2 \q2 \u3 Bool.match (\u4 Option.none) (\u4
+          triage
+            (\u5 Option.some (△ st (△ q "App.rK")))
+            (\n \u5 Option.none)
+            (\p3 \q3 \u5 triage
+              (\u6 Option.bind (\r1 Pair.let r1 $ \st1 \vp1 Pair.let vp1 $ \v1 \pr1
+                    Option.bind (\r2 Pair.let r2 $ \st2 \vp2 Pair.let vp2 $ \v2 \pr2
+                      Option.bind (\r3 Pair.let r3 $ \st3 \vp3 Pair.let vp3 $ \v3 \pr3
+                        Option.some (△ st3 (△ v3
+                          (_cats ["(App.rS "; pr1; " "; pr2; " "; pr3; ")"]))))
+                        (_at pr2 self fuel st2 v1 v2))
+                      (_at pr1 self fuel st1 q b))
+                    (_at u6 self fuel st q3 b))
+              (\n \u6 Option.none)
+              (\p4 \q4 \u6 Bool.match (\u7 Option.none) (\u7
+                triage
+                  (\u8 Option.some (△ st (△ q4 "App.r3a")))
+                  (\bn \u8 Option.none)
+                  (\bf \bx \u8 triage
+                    (\u9 Option.bind (\r Pair.let r $ \st1 \vp Pair.let vp $ \v \pr
+                          Option.some (△ st1 (△ v (_cats ["(App.r3b "; pr; ")"]))))
+                        (_at u9 self fuel st q3 bx))
+                    (\n \u9 Option.none)
+                    (\bf2 \bx2 \u9 Bool.match (\u10 Option.none) (\u10
+                      Option.bind (\r1 Pair.let r1 $ \st1 \vp1 Pair.let vp1 $ \v1 \pr1
+                          Option.bind (\r2 Pair.let r2 $ \st2 \vp2 Pair.let vp2 $ \v2 \pr2
+                            Option.some (△ st2 (△ v2
+                              (_cats ["(App.r3c "; pr1; " "; pr2; ")"]))))
+                            (_at pr1 self fuel st1 v1 bx))
+                          (_at u10 self fuel st q bx2))
+                      (equal bf2 △) u9)
+                    bf u8)
+                  b u7)
+                (equal p4 △) u6)
+              p3 u5)
+            q2 u4)
+          (equal p2 △) u3)
+        p u2)
+      a u)
+    (\u
+      Pair.let st $ \n \hyps
+      Option.match
+        (\u2 let (_lean_q b) $ \al
+          Option.some (△ (△ (Nat.add n 1) (List.concat hyps [△ b (△ n al)])) (△
+            (_var (_fname n))
+            (_cats ["hf"; Nat.to_source n; "a"]))))
+        (\r \u2 Pair.let r $ \i \al Option.some (△ st (△
+            (_var (_fname i))
+            (_cats ["hf"; Nat.to_source i; "a"]))))
+        (_hyp_for b hyps) u)
+    (Bool.and (equal a selfq) (triage false (\_ true) (\_ \_ false) b)) △) fuel
+
+# One invariant case: replay the loop value on the case's input shape, then
+# the result on the opaque "s". Yields the minted hypotheses and both proofs.
+_case = \selfq \shape
+  Option.bind (\r1 Pair.let r1 $ \st1 \vp1 Pair.let vp1 $ \v1 \pr1
+    Option.bind (\r2 Pair.let r2 $ \st2 \vp2 Pair.let vp2 $ \v2 \pr2
+      Pair.let st2 $ \n \hyps
+      Option.some (△ hyps (△ pr1 (△ pr2 v2))))
+      (_at pr1 (_emit selfq) _fuel st1 v1 (_var "s")))
+    (_emit selfq _fuel _st0 selfq shape)
+
+# Discovery: the loop value, found as the certifier finds the accumulator —
+# semantically. Replay the program on the stem of an opaque variable and
+# return the first closed value that gets applied to a bare variable, the
+# entry application and previously refused candidates excluded. The walk is
+# the same rule dispatch as the replay, without proofs.
+_closedq = fix $ \self triage true (\_ false) (\f \x Bool.and (self f) (self x))
+_hunt = fix $ \self \fuel \avoid \a \b
+  Snat.match Option.none (\fuel
+  Bool.match (\u
+    triage
+      (\u2 Option.some (△ Option.none (_app △ b)))
+      (\n \u2 Option.none)
+      (\p \q \u2 triage
+        (\u3 Option.some (△ Option.none (_app (_app △ q) b)))
+        (\n \u3 Option.none)
+        (\p2 \q2 \u3 Bool.match (\u4 Option.none) (\u4
+          triage
+            (\u5 Option.some (△ Option.none q))
+            (\n \u5 Option.none)
+            (\p3 \q3 \u5 triage
+              (\u6 Option.bind (\r1 Pair.let r1 $ \c1 \v1 Option.match
+                    (\u7 Option.bind (\r2 Pair.let r2 $ \c2 \v2 Option.match
+                        (\u8 _at u8 self fuel avoid v1 v2)
+                        (\c \u8 Option.some r2) c2 u7)
+                      (_at v1 self fuel avoid q b))
+                    (\c \u7 Option.some r1) c1 u6)
+                  (_at u6 self fuel avoid q3 b))
+              (\n \u6 Option.none)
+              (\p4 \q4 \u6 Bool.match (\u7 Option.none) (\u7
+                triage
+                  (\u8 Option.some (△ Option.none q4))
+                  (\bn \u8 Option.none)
+                  (\bf \bx \u8 triage
+                    (\u9 _at u9 self fuel avoid q3 bx)
+                    (\n \u9 Option.none)
+                    (\bf2 \bx2 \u9 Bool.match (\u10 Option.none) (\u10
+                      Option.bind (\r1 Pair.let r1 $ \c1 \v1 Option.match
+                          (\u11 _at u11 self fuel avoid v1 bx)
+                          (\c \u11 Option.some r1) c1 u10)
+                        (_at u10 self fuel avoid q bx2))
+                      (equal bf2 △) u9)
+                    bf u8)
+                  b u7)
+                (equal p4 △) u6)
+              p3 u5)
+            q2 u4)
+          (equal p2 △) u3)
+        p u2)
+      a u)
+    (\u Option.some (△ (Option.some a) △))
+    (Bool.and (_closedq a)
+      (Bool.and (triage false (\_ true) (\_ \_ false) b)
+        (Bool.not (List.any (equal a) avoid)))) △) fuel
+
+# A closed quoted value, back as the raw tree it stands for.
+_unquote = fix $ \self triage △ (\n △) (\f \x triage (△ (self x)) (\_ △)
+  (\f2 \x2 triage (△ (self x2) (self x)) (\_ △) (\_ \_ △) f2) f)
+
+# The match preamble for the minted hypotheses, one nested tactic match each.
+_preamble = \ind fix $ \self List.match "" (\h \tl Pair.let h $ \arg \r
+  Pair.let r $ \i \al let (Nat.to_source i) $ \is
+  _cats [ ind; "match self_spec "; al; " with"; [10]
+        ; ind; "| Exists.intro f"; is; " (And.intro hf"; is; "a hf"; is; "b) =>"; [10]
+        ; self tl ])
+
+# The endgame equality for a two-hypothesis case, as a pure proof term. The
+# replayed value is one stem over either nested stacks — re-associated by
+# stack_stack and commuted where the application order asks for it — or a
+# stack at a minted chain, resolved by sz_stack. Anything else is refused.
+_addterm = \x \y
+  Bool.match
+    (\u Bool.match (\u2 Option.none) (\u2
+        Bool.match (\u3 Option.none)
+          (\u3 Option.some (_cats ["(Nat.add_comm (sz "; x; ") (sz "; y; "))"]))
+          (equal y "u") u2)
+      (equal x "v") u)
+    (\u Bool.match (\u2 Option.none) (\u2 Option.some "rfl") (equal y "v") u)
+    (equal x "u") △
+_endterm = \al1 \al2 \name
+  let (_cats ["(stack (sz "; al2; ") (stack (sz "; al1; ") s))"]) $ \cA
+  let (_cats ["(stack (sz "; al1; ") (stack (sz "; al2; ") s))"]) $ \cB
+  let (Bool.match "u" "v" (equal al1 "u")) $ \other
+  let (_cats ["(stack (sz "; al1; ") "; other; ")"]) $ \chain
+  let (_cats ["(stack (sz "; al2; ") s)"]) $ \cC
+  Bool.match
+    (\u Bool.match
+      (\u2 Bool.match (\u3 Option.none)
+        (\u3 Option.some (_cats
+          ["(congrArg (fun n => stack n s) (sz_stack (sz "; al1; ") "; other; "))"]))
+        (Bool.and (equal name cC)
+          (Bool.and (equal al1 "u") (equal al2 chain))) u2)
+      (\u2 Option.bind (\add Option.some (_cats
+        ["(Eq.trans (stack_stack (sz "; al1; ") (sz "; al2; ") s) (congrArg (fun n => stack n s) "; add; "))"]))
+        (_addterm al1 al2)) (equal name cB) u)
+    (\u Option.bind (\add Option.some (_cats
+      ["(Eq.trans (stack_stack (sz "; al2; ") (sz "; al1; ") s) (congrArg (fun n => stack n s) "; add; "))"]))
+      (_addterm al2 al1)) (equal name cA) △
+
+# A case body, a pure proof term: with one hypothesis or none the replayed
+# value is definitionally the specified stack; with two, App.cast carries it
+# across the endgame equality.
+_case_text = \selfq \shape \pat
+  Option.bind (\c Pair.let c $ \hyps \r Pair.let r $ \pr1 \r2 Pair.let r2 $ \pr2 \v2
+    triage Option.none (\_ Option.none) (\vf \vx
+      Bool.match (\u Option.none) (\u
+        let (List.length hyps) $ \nh
+        Bool.match
+          (\u2 Bool.match (\u3 Option.none) (\u3
+            List.match Option.none (\h1 \t1 Pair.let h1 $ \a1 \r1a Pair.let r1a $ \i1 \al1
+              List.match Option.none (\h2 \t2 Pair.let h2 $ \a2 \r2a Pair.let r2a $ \i2 \al2
+                Option.bind (\et Option.some (_cats
+                  [ "  | "; pat; " =>"; [10]
+                  ; _preamble "    " hyps
+                  ; "    Exists.intro _ (And.intro "; pr1; " (fun s =>"; [10]
+                  ; "      App.cast "; pr2; [10]
+                  ; "        (congrArg stem "; et; ")))"; [10] ]))
+                  (_endterm al1 al2 (_lean_q vx))) t1) hyps)
+            (equal nh 2) △)
+          (\u2 Option.some (_cats
+            [ "  | "; pat; " =>"; [10]
+            ; _preamble "    " hyps
+            ; "    Exists.intro _ (And.intro "; pr1; " (fun s => "; pr2; "))"; [10] ]))
+          (Nat.is_lte nh 1) △)
+        (equal vf △) △)
+      v2)
+    (_case selfq shape)
+
+# The static scaffolding: types, node count, stacking, the five rules as App,
+# determinism. ASCII throughout, since the module travels as file bytes.
+_scaffold = \pname \slit \plit List.join [10]
+  [ "-- Generated by arboretum's Certify.Size.lean_size_proof: a machine-checked"
+  ; "-- proof that the tree-calculus program below computes the node count of"
+  ; "-- every tree it is applied to. Self-contained; check with `lean` alone."
+  ; "set_option linter.unusedVariables false"
+  ; "set_option linter.unusedSimpArgs false"
+  ; ""
+  ; "inductive Tree where"
+  ; "  | leaf : Tree"
+  ; "  | stem : Tree -> Tree"
+  ; "  | fork : Tree -> Tree -> Tree"
+  ; ""
+  ; "open Tree"
+  ; ""
+  ; "abbrev L : Tree := leaf"
+  ; "abbrev S : Tree -> Tree := stem"
+  ; "abbrev F : Tree -> Tree -> Tree := fork"
+  ; ""
+  ; "def sz : Tree -> Nat"
+  ; "  | leaf => 1"
+  ; "  | stem t => sz t + 1"
+  ; "  | fork l r => sz l + sz r + 1"
+  ; ""
+  ; "def stack : Nat -> Tree -> Tree"
+  ; "  | 0, s => s"
+  ; "  | n + 1, s => stem (stack n s)"
+  ; ""
+  ; "def snat (n : Nat) : Tree := stack n leaf"
+  ; ""
+  ; "theorem stack_stack (a b : Nat) (s : Tree) :"
+  ; "    stack a (stack b s) = stack (a + b) s := by"
+  ; "  induction a with"
+  ; "  | zero => simp [stack]"
+  ; "  | succ n ih => simp [stack, ih, Nat.succ_add]"
+  ; ""
+  ; "theorem sz_stack (n : Nat) (s : Tree) : sz (stack n s) = n + sz s := by"
+  ; "  induction n with"
+  ; "  | zero => simp [stack]"
+  ; "  | succ n ih => simp [stack, sz, ih]; omega"
+  ; ""
+  ; "-- Big-step application: App a b c holds when the tree a applied to the"
+  ; "-- tree b evaluates to c by the five rules of triage calculus. Every"
+  ; "-- premise is itself an evaluated application, so a derivation is a"
+  ; "-- complete computation record."
+  ; "inductive App : Tree -> Tree -> Tree -> Prop where"
+  ; "  | grow0 {b} : App leaf b (stem b)"
+  ; "  | grow1 {x b} : App (stem x) b (fork x b)"
+  ; "  | rK {y z} : App (fork leaf y) z y"
+  ; "  | rS {x y z r1 r2 r} : App x z r1 -> App y z r2 -> App r1 r2 r ->"
+  ; "      App (fork (stem x) y) z r"
+  ; "  | r3a {w x y} : App (fork (fork w x) y) leaf w"
+  ; "  | r3b {w x y u r} : App x u r -> App (fork (fork w x) y) (stem u) r"
+  ; "  | r3c {w x y u v r1 r} : App y u r1 -> App r1 v r ->"
+  ; "      App (fork (fork w x) y) (fork u v) r"
+  ; ""
+  ; "theorem App.det {a b c c2 : Tree} (h : App a b c) (h2 : App a b c2) : c = c2 := by"
+  ; "  induction h generalizing c2 with"
+  ; "  | grow0 => cases h2; rfl"
+  ; "  | grow1 => cases h2; rfl"
+  ; "  | rK => cases h2; rfl"
+  ; "  | rS h1 h2 h3 ih1 ih2 ih3 =>"
+  ; "    cases h2 with"
+  ; "    | rS g1 g2 g3 => obtain rfl := ih1 g1; obtain rfl := ih2 g2; exact ih3 g3"
+  ; "  | r3a => cases h2; rfl"
+  ; "  | r3b h ih => cases h2 with | r3b g => exact ih g"
+  ; "  | r3c h1 h2 ih1 ih2 =>"
+  ; "    cases h2 with"
+  ; "    | r3c g1 g2 => obtain rfl := ih1 g1; exact ih2 g2"
+  ; ""
+  ; "theorem App.cast {x y c c2 : Tree} (h : App x y c) (e : c = c2) : App x y c2 :="
+  ; "  Eq.mp (congrArg (App x y) e) h"
+  ; ""
+  ; _cat "-- The loop value discovered inside " pname
+  ; _cat "def SELF : Tree := " slit
+  ; ""
+  ; _cat (_cat (_cat "def " pname) " : Tree := ") plit
+  ; "" ]
+
+_epilogue = \pname List.join [10]
+  [ "termination_by t => sz t"
+  ; "decreasing_by all_goals (simp only [sz, sz_stack]; omega)"
+  ; "" ]
+
+# The theorem tying the program to the invariant, proved by replaying the
+# program itself on an opaque input: whatever its wrapper does — here, feed
+# the input and a leaf seed to the loop — becomes constructors, the loop
+# application becomes the invariant's hypothesis, and the result must land
+# on the numeral.
+_link_text = \pname \pq \selfq
+  Option.bind (\r1 Pair.let r1 $ \st1 \vp1 Pair.let vp1 $ \v1 \pr1
+    Pair.let st1 $ \n \hyps
+    Bool.match (\u Option.none) (\u
+      List.match Option.none (\h1 \t1 Pair.let h1 $ \a1 \r1a Pair.let r1a $ \i1 \al1
+        Bool.match (\u2 Option.none) (\u2 Option.some (_cats
+          [ "theorem "; pname; "_computes_size (t : Tree) :"; [10]
+          ; "    App "; pname; " t (snat (sz t)) :="; [10]
+          ; _preamble "  " hyps
+          ; "  "; pr1; [10]
+          ; [10]
+          ; "theorem "; pname; "_unique {t r : Tree}"; [10]
+          ; "    (h : App "; pname; " t r) : r = snat (sz t) :="; [10]
+          ; "  App.det h ("; pname; "_computes_size t)"; [10] ]))
+          (Bool.and (equal al1 "t")
+            (equal v1 (_var "(stack (sz t) L)"))) u) hyps)
+      (equal (List.length hyps) 1) △)
+    (_emit selfq _fuel _st0 pq (_var "t"))
+
+# lean_size_proof name p — the module, as a file [△ (△ name "text/plain")
+# bytes]; none where no discovered loop value closes the replay.
+_pipeline = \name \p \pq \selfq
+  Option.bind (\lc
+    Option.bind (\sc
+      Option.bind (\fc
+        Option.bind (\link
+          Option.some (△ (△ name "text/plain") (_cats
+            [ _scaffold "prog" (_lean_tree (_unquote selfq)) (_lean_tree p)
+            ; List.join [10]
+              [ "-- The invariant: applied to any tree t, the loop value evaluates to a"
+              ; "-- function that stacks (sz t) stems onto whatever it is applied to next."
+              ; "-- The match on t is the certificate's SPLIT, the quantified s its RGEN"
+              ; "-- residual, the recursive calls its FOLDs, and every App constructor one"
+              ; "-- NORMALIZE step, replayed from the program's own eager reduction."
+              ; "theorem self_spec : (t : Tree) ->"
+              ; "    Exists (fun f => And (App SELF t f)"
+              ; "      ((s : Tree) -> App f s (stack (sz t) s)))"
+              ; "" ]
+            ; lc; sc; fc
+            ; _epilogue "prog"
+            ; link ])))
+          (_link_text "prog" pq selfq))
+        (_case_text selfq (_app (_app △ (_var "u")) (_var "v")) "fork u v"))
+      (_case_text selfq (_app △ (_var "u")) "stem u"))
+    (_case_text selfq △ "leaf")
+lean_size_proof = \name \p
+  let (Reflect.quote p) $ \pq
+  (fix $ \self \avoid \k Snat.match Option.none (\k2
+    Option.match (\u Option.none) (\cv \u Pair.let cv $ \copt \v2
+      Option.match (\u2 Option.none) (\cand \u2
+        Option.match (\u3 _at u3 self (△ cand avoid) k2)
+          (\parts \u3 Option.some parts)
+          (_pipeline name p pq cand) u2)
+        copt u)
+      (_hunt _fuel avoid pq (_app △ (_var "u"))) △) k)
+    [pq] (Snat.from_nat 3)
