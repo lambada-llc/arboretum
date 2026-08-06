@@ -11,11 +11,11 @@
 # replayed from the program's eager reduction.
 
 Option.match △ id (Certify.lean_size_proof "SizeProof125.lean" Snat.size__smallest)
-# = SizeProof125.lean sha256:9e292ce0c408ec191956477ef770c96331ace0fc0bfb97648a5323303e87e65b
+# = SizeProof125.lean sha256:d9bdde1f574dac101b460b79905f9c76053ada63fa9f18036ed51b3c9a5dca59
 Option.match △ id (Certify.lean_size_proof "SizeProof118.lean" Snat.size__eager_118)
-# = SizeProof118.lean sha256:b8298daf1b1c6b514d84635722eaa71b0fa306506299c0ded54701f2f2e32362
+# = SizeProof118.lean sha256:1be9b36c6f50453a5a8789db694b853b806b3b5b4ef205bfc8f2a7648f971cae
 Option.match △ id (Certify.lean_size_proof "SizeProof103.lean" Snat.size__eager_103)
-# = SizeProof103.lean sha256:d3b1bd94947c4669dcff02fd4bcc35091816dcfc3829ec6779c728a68b252491
+# = SizeProof103.lean sha256:c848057087769c23c32ffa7cf3b1263018d13dce640a95667853d010c66835fa
 
 # No module for a program with no eager derivation: the lazy 100 converges in
 # normal order only, so there is no big-step computation to replay — every

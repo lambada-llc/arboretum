@@ -69,10 +69,10 @@ theorem App.det {a b c c2 : Tree} (h : App a b c) (h2 : App a b c2) : c = c2 := 
 theorem App.cast {x y c c2 : Tree} (h : App x y c) (e : c = c2) : App x y c2 :=
   Eq.mp (congrArg (App x y) e) h
 
--- The loop value inside prog
+-- The loop value discovered inside prog
 def SELF : Tree := (F (S (F L (F (F L L) (F (S (F (S (S L)) L)) L)))) (S (F (S (F L (F (S (F L (S (S (F L (S (S (F L L)))))))) (F (S (F (S (F L L)) (S (F (S (S L)) L)))) (F (S (F (S (F L (F (S (F L (F (S (F L L)) L))) (S L)))) (F (S (F L (F (S (F L L)) L))) (S (S (F L (F (S (F L (F (S (F L L)) L))) (S L)))))))) (S (S (F L (S L))))))))) (S (S (F L (F (F L L) (F (S (F (S (S L)) L)) L))))))))
 
-def prog : Tree := F (S SELF) (F L L)
+def prog : Tree := (F (S (F (S (F L (F (F L L) (F (S (F (S (S L)) L)) L)))) (S (F (S (F L (F (S (F L (S (S (F L (S (S (F L L)))))))) (F (S (F (S (F L L)) (S (F (S (S L)) L)))) (F (S (F (S (F L (F (S (F L (F (S (F L L)) L))) (S L)))) (F (S (F L (F (S (F L L)) L))) (S (S (F L (F (S (F L (F (S (F L L)) L))) (S L)))))))) (S (S (F L (S L))))))))) (S (S (F L (F (F L L) (F (S (F (S (S L)) L)) L))))))))) (F L L))
 -- The invariant: applied to any tree t, the loop value evaluates to a
 -- function that stacks (sz t) stems onto whatever it is applied to next.
 -- The match on t is the certificate's SPLIT, the quantified s its RGEN
@@ -97,11 +97,11 @@ theorem self_spec : (t : Tree) ->
         (congrArg stem (Eq.trans (stack_stack (sz v) (sz u) s) (congrArg (fun n => stack n s) (Nat.add_comm (sz v) (sz u)))))))
 termination_by t => sz t
 decreasing_by all_goals (simp only [sz, sz_stack]; omega)
-
 theorem prog_computes_size (t : Tree) :
     App prog t (snat (sz t)) :=
   match self_spec t with
-  | Exists.intro f (And.intro h1 h2) => App.rS h1 App.rK (h2 leaf)
+  | Exists.intro f1 (And.intro hf1a hf1b) =>
+  (App.rS hf1a App.rK (hf1b L))
 
 theorem prog_unique {t r : Tree}
     (h : App prog t r) : r = snat (sz t) :=

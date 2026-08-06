@@ -2,9 +2,12 @@
 
 [`src/certify/lean.lamb`](../src/certify/lean.lamb) defines
 `Certify.lean_size_proof` — a tree-calculus program that **emits** a
-self-contained Lean 4 module for a size program. It recognises the
-knotted-loop shape, replays the program's own eager reduction symbolically,
-and prints the proof as a pure term: one `App` constructor per reduction
+self-contained Lean 4 module for a size program. The whole program is what
+goes in, exactly as with the certifier: the loop value the induction
+quantifies over is discovered by replay — the first closed value the
+program applies to an opaque variable — and the theorem tying the program
+to the invariant is itself proved by replaying the wrapper, not assumed
+from its shape. The proof is printed as a pure term: one `App` constructor per reduction
 step, the induction hypotheses plugged in at exactly the recursion points,
 and the endgame equalities as explicit `congrArg`/`Eq.trans` chains. The
 certifier's primitives map one-to-one — the match on the input is SPLIT,
