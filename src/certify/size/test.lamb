@@ -1,8 +1,8 @@
-# Tests for the size certifier in src/certify/size.lamb.
+# Tests for the size certifier in src/certify/size.
 #
 # They are a file of their own because the analysis is applied where the
 # programs it judges are defined: src/snat/size.lamb certifies its size programs
-# there, and so depends on Certify.computes_size. Dependencies are per file and
+# there, and so depends on Certify.Size.computes_size. Dependencies are per file and
 # cycles are rejected, so the analysis cannot also be the file that reaches back
 # into Snat. What belongs here is the rest — size written in styles the library
 # does not use, and programs that are not size at all.
@@ -19,21 +19,21 @@ _accumulating = \x (fix $ \self \x \n triage
   (Snat.succ n) (\a Snat.succ (self a n)) (\a \b Snat.succ (self b (self a n))) x) x Snat.zero
 
 _to_string = Bool.to_source
-Certify.computes_size _naive
+Certify.Size.computes_size _naive
 # = true
-Certify.computes_size _swapped
+Certify.Size.computes_size _swapped
 # = true
-Certify.computes_size _shifted
+Certify.Size.computes_size _shifted
 # = true
-Certify.computes_size _accumulating
+Certify.Size.computes_size _accumulating
 # = true
 
 # A true is backed by a proof tree that can be looked at: SPLIT with a case
 # per shape of the split variable, PEEL per emitted successor, GEN naming a
 # subterm's count, CUT opening a phase against a tail that END closes, FOLD
 # closing an instance of an induction hypothesis.
-_to_string = Option.match "no proof" Certify.render
-Certify.certify_size _naive
+_to_string = Option.match "no proof" Certify.Size.render
+Certify.Size.certify_size _naive
 # = SPLIT t
 #     PEEL
 #       ZERO
@@ -53,13 +53,13 @@ _to_string = Bool.to_source
 
 # The same four in the stronger reading: `size` whatever the reduction order,
 # so none of them leans on a rule discarding a subterm before it is reduced.
-Certify.computes_size_eagerly _naive
+Certify.Size.computes_size_eagerly _naive
 # = true
-Certify.computes_size_eagerly _swapped
+Certify.Size.computes_size_eagerly _swapped
 # = true
-Certify.computes_size_eagerly _shifted
+Certify.Size.computes_size_eagerly _shifted
 # = true
-Certify.computes_size_eagerly _accumulating
+Certify.Size.computes_size_eagerly _accumulating
 # = true
 
 # Programs that are not size, and are rejected.
@@ -73,13 +73,13 @@ _off_by_one = compose Snat.succ Snat.size
 _deep_bug = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.succ $ Snat.add (self a) $
   triage Snat.one (\c Snat.succ $ Snat.succ (self c)) (\c \d Snat.succ $ Snat.add (self c) (self d)) b)
 
-Certify.computes_size _leaves
+Certify.Size.computes_size _leaves
 # = false
-Certify.computes_size _left_spine
+Certify.Size.computes_size _left_spine
 # = false
-Certify.computes_size _off_by_one
+Certify.Size.computes_size _off_by_one
 # = false
-Certify.computes_size _deep_bug
+Certify.Size.computes_size _deep_bug
 # = false
 # The disagreement, from four nodes up:
 _to_string = Snat.to_string
@@ -93,25 +93,25 @@ Snat.size (△ △ (△ △))
 # = 4
 
 _to_string = Bool.to_source
-Certify.computes_size id
+Certify.Size.computes_size id
 # = false
-Certify.computes_size Snat.add
+Certify.Size.computes_size Snat.add
 # = false
 
 # Conservative, not wrong: this is size, but it counts in binary Nat and
 # converts only at the end, so the induction never closes over the unary spec.
-Certify.computes_size (compose Snat.from_nat size)
+Certify.Size.computes_size (compose Snat.from_nat size)
 # = false
 
 # The eager reading adds a way to fail and takes none away, so everything above
 # is rejected here too — and a false still means "not certifiable" rather than
 # "diverges": the binary-counting one terminates in every order and is rejected
 # for the reason it always was.
-Certify.computes_size_eagerly _leaves
+Certify.Size.computes_size_eagerly _leaves
 # = false
-Certify.computes_size_eagerly _deep_bug
+Certify.Size.computes_size_eagerly _deep_bug
 # = false
-Certify.computes_size_eagerly (compose Snat.from_nat size)
+Certify.Size.computes_size_eagerly (compose Snat.from_nat size)
 # = false
 
 # Recursion on a rebuilt tree, right and wrong. A chain step counts a fork's
@@ -125,11 +125,11 @@ _chain = \x (fix $ \self \x compose Snat.succ $ triage id self (\u \v self (self
 _chain_twice = \x (fix $ \self \x compose Snat.succ $ triage id self (\u \v self (self u u)) x) x △
 _chain_dropped = \x (fix $ \self \x compose Snat.succ $ triage id self (\u \v self (self u △)) x) x △
 _chain_unpaid = \x (fix $ \self \x triage id self (\u \v self (self u v)) x) x △
-Certify.computes_size_eagerly _chain
+Certify.Size.computes_size_eagerly _chain
 # = true
-Certify.computes_size_eagerly _chain_twice
+Certify.Size.computes_size_eagerly _chain_twice
 # = false
-Certify.computes_size_eagerly _chain_dropped
+Certify.Size.computes_size_eagerly _chain_dropped
 # = false
-Certify.computes_size_eagerly _chain_unpaid
+Certify.Size.computes_size_eagerly _chain_unpaid
 # = false

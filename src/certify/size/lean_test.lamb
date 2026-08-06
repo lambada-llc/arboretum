@@ -10,12 +10,12 @@
 # GEN-TREE's minted arguments, and every App constructor one NORMALIZE step,
 # replayed from the program's eager reduction.
 
-Option.match △ id (Certify.lean_size_proof "SizeProof125.lean" Snat.size__smallest)
-# = SizeProof125.lean sha256:d9bdde1f574dac101b460b79905f9c76053ada63fa9f18036ed51b3c9a5dca59
-Option.match △ id (Certify.lean_size_proof "SizeProof118.lean" Snat.size__eager_118)
-# = SizeProof118.lean sha256:1be9b36c6f50453a5a8789db694b853b806b3b5b4ef205bfc8f2a7648f971cae
-Option.match △ id (Certify.lean_size_proof "SizeProof103.lean" Snat.size__eager_103)
-# = SizeProof103.lean sha256:c848057087769c23c32ffa7cf3b1263018d13dce640a95667853d010c66835fa
+Option.match △ id (Certify.Size.lean_size_proof "SizeProof125.lean" Snat.size__smallest)
+# = SizeProof125.lean sha256:b4518a23a403a5eaec87ba4c98639e21cfd0b054aa89a11b78da75417aa52737
+Option.match △ id (Certify.Size.lean_size_proof "SizeProof118.lean" Snat.size__eager_118)
+# = SizeProof118.lean sha256:4dc4508b78188005929817db43c6bd16289a05bf9acb730e68d8210cc20ffb66
+Option.match △ id (Certify.Size.lean_size_proof "SizeProof103.lean" Snat.size__eager_103)
+# = SizeProof103.lean sha256:e9112963626f243a9dfd353270499b5dec22ae73e02f268d138cad12020dad18
 
 # No module for a program with no eager derivation: the lazy 100 converges in
 # normal order only, so there is no big-step computation to replay — every
@@ -23,5 +23,5 @@ Option.match △ id (Certify.lean_size_proof "SizeProof103.lean" Snat.size__eage
 # Exporting the lazy certificates would take small-step semantics and their
 # phase structure (CUT, ABSTRACT), which this emitter does not cover.
 _to_string = Option.match "none" (\_ "a module")
-Certify.lean_size_proof "SizeProof100.lean" Snat.size__lazy_100
+Certify.Size.lean_size_proof "SizeProof100.lean" Snat.size__lazy_100
 # = none

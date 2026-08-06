@@ -1,7 +1,15 @@
-# Lean-verified size records
+# Certifying size programs
 
-[`src/certify/lean.lamb`](../src/certify/lean.lamb) defines
-`Certify.lean_size_proof` — a tree-calculus program that **emits** a
+This directory is the size instance of `Certify`: [`size.lamb`](./size.lamb)
+defines the certifiers (`Certify.Size.computes_size`,
+`Certify.Size.computes_size_eagerly`, and the certificate-producing
+`Certify.Size.certify_size`), [`test.lamb`](./test.lamb) exercises them on
+programs the library does not use, and the files below export certificates
+to Lean.
+
+## Lean-verified size records
+
+[`lean.lamb`](./lean.lamb) defines `Certify.Size.lean_size_proof` — a tree-calculus program that **emits** a
 self-contained Lean 4 module for a size program. The whole program is what
 goes in, exactly as with the certifier: the loop value the induction
 quantifies over is discovered by replay — the first closed value the
@@ -16,9 +24,8 @@ FOLDs at GEN-TREE's minted arguments, and every constructor one NORMALIZE
 step — so each module is a bespoke proof object for its program, not a
 tactic script.
 
-[`src/certify/lean_test.lamb`](../src/certify/lean_test.lamb) demonstrates
-it as file-style expect tests; the modules land in
-[`src/certify/expect-test-out/`](../src/certify/expect-test-out/) —
+[`lean_test.lamb`](./lean_test.lamb) demonstrates it as file-style expect tests; the modules land in
+[`expect-test-out/`](./expect-test-out/) —
 `SizeProof125.lean` (the previous record `size__smallest`),
 `SizeProof118.lean` and `SizeProof103.lean` (the current records). The lazy
 100 gets `none` rather than a module: it converges in normal order only, so
@@ -32,7 +39,7 @@ Each module is self-contained ASCII with no imports and no `sorry`. With
 (the `lean-toolchain` file pins the version):
 
 ```bash
-lean ../src/certify/expect-test-out/SizeProof103.lean
+lean expect-test-out/SizeProof103.lean
 ```
 
 No output means Lean accepts every theorem. Tactics appear only in the

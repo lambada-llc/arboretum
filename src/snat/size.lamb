@@ -73,7 +73,7 @@ size__eager_118 = \x (△ (△ _k) (△ _code)) x △
 # node of state, so reduction terminates in every order — but recursion on
 # a rebuilt chain is not recursion on a subtree, which no structural FOLD
 # closes. The eager certifier carries size-measure rules for exactly this
-# shape (RGEN and GEN-TREE, src/certify/size.lamb): the chain becomes a
+# shape (RGEN and GEN-TREE, src/certify/size): the chain becomes a
 # minted tree variable of known size, strictly smaller than the split
 # variable, and the induction closes — so the certificate below is as
 # machine-checked as the record's. The lazy certifier has no such rules,
@@ -96,13 +96,13 @@ size__eager_103 size__eager_103
 # = 103
 
 _to_string = Bool.to_source
-Certify.computes_size_eagerly size__eager_118
+Certify.Size.computes_size_eagerly size__eager_118
 # = true
-Certify.computes_size size__eager_118
+Certify.Size.computes_size size__eager_118
 # = true
-Certify.computes_size_eagerly size__eager_103
+Certify.Size.computes_size_eagerly size__eager_103
 # = true
-Certify.computes_size size__eager_103
+Certify.Size.computes_size size__eager_103
 # = false
 
 # Smaller still, once the program no longer has to terminate under eager
@@ -232,33 +232,33 @@ _size_body = \self \x compose △ $ triage (\self id) (\u \self self self u) (\v
 size__fastest = \x (self_apply _size_body) x △
 size = \x (wait self_apply _size_body) x △
 
-# Certify.computes_size proves a program returns its argument's node count for
-# every tree, by reading it as the tree it is; src/certify/size.lamb has the how.
+# Certify.Size.computes_size proves a program returns its argument's node count for
+# every tree, by reading it as the tree it is; src/certify/size has the how.
 _to_string = Bool.to_source
-Certify.computes_size size
+Certify.Size.computes_size size
 # = true
-Certify.computes_size size__fastest
+Certify.Size.computes_size size__fastest
 # = true
-Certify.computes_size size__smallest
+Certify.Size.computes_size size__smallest
 # = true
-Certify.computes_size size__smallest2
+Certify.Size.computes_size size__smallest2
 # = true
-Certify.computes_size size__smallest3
+Certify.Size.computes_size size__smallest3
 # = true
-Certify.computes_size size__smallest4
+Certify.Size.computes_size size__smallest4
 # = true
-Certify.computes_size size__smallest5
+Certify.Size.computes_size size__smallest5
 # = true
-Certify.computes_size size__smallest6
+Certify.Size.computes_size size__smallest6
 # = true
 
 # A true stands on a proof, and the proof is an induction tree that can be
-# looked at: Certify.certify_size returns it, Certify.render draws it. For
+# looked at: Certify.Size.certify_size returns it, Certify.Size.render draws it. For
 # the minimal program — SPLIT with a case per shape of the split variable,
 # PEEL per emitted successor, GEN naming a subterm's count, FOLD closing an
 # instance of an induction hypothesis.
-_to_string = Option.match "no proof" Certify.render
-Certify.certify_size size__smallest
+_to_string = Option.match "no proof" Certify.Size.render
+Certify.Size.certify_size size__smallest
 # = SPLIT t
 #     PEEL
 #       ZERO
@@ -279,25 +279,25 @@ Certify.certify_size size__smallest
 #         VALUE g2
 _to_string = Bool.to_source
 
-# Certify.computes_size_eagerly proves that and more: that reduction terminates
+# Certify.Size.computes_size_eagerly proves that and more: that reduction terminates
 # in every order, so these are `size` for an evaluator that reduces arguments
 # before it uses them, which is what this repository's rule asks of them. The
 # eight above are written to that rule and pass.
-Certify.computes_size_eagerly size
+Certify.Size.computes_size_eagerly size
 # = true
-Certify.computes_size_eagerly size__fastest
+Certify.Size.computes_size_eagerly size__fastest
 # = true
-Certify.computes_size_eagerly size__smallest
+Certify.Size.computes_size_eagerly size__smallest
 # = true
-Certify.computes_size_eagerly size__smallest2
+Certify.Size.computes_size_eagerly size__smallest2
 # = true
-Certify.computes_size_eagerly size__smallest3
+Certify.Size.computes_size_eagerly size__smallest3
 # = true
-Certify.computes_size_eagerly size__smallest4
+Certify.Size.computes_size_eagerly size__smallest4
 # = true
-Certify.computes_size_eagerly size__smallest5
+Certify.Size.computes_size_eagerly size__smallest5
 # = true
-Certify.computes_size_eagerly size__smallest6
+Certify.Size.computes_size_eagerly size__smallest6
 # = true
 
 # And it is what the __lazy ones fail, on the very first state: reducing them
@@ -306,45 +306,45 @@ Certify.computes_size_eagerly size__smallest6
 # That is what separates the two families here, read off the programs rather
 # than taken on faith — and what the naming, the lazy_eval below and the node
 # counts at the bottom are all about.
-Certify.computes_size_eagerly size__lazy_100
+Certify.Size.computes_size_eagerly size__lazy_100
 # = false
-Certify.computes_size_eagerly size__lazy_103
+Certify.Size.computes_size_eagerly size__lazy_103
 # = false
-Certify.computes_size_eagerly size__lazy_104
+Certify.Size.computes_size_eagerly size__lazy_104
 # = false
-Certify.computes_size_eagerly size__lazy_106
+Certify.Size.computes_size_eagerly size__lazy_106
 # = false
-Certify.computes_size_eagerly size__lazy_108
+Certify.Size.computes_size_eagerly size__lazy_108
 # = false
-Certify.computes_size_eagerly size__lazy_113
+Certify.Size.computes_size_eagerly size__lazy_113
 # = false
 
-# Certify.computes_size asks only for the count, in normal order, and its
-# extended rule system (src/certify/size.lamb) closes over two of them: the
+# Certify.Size.computes_size asks only for the count, in normal order, and its
+# extended rule system (src/certify/size) closes over two of them: the
 # induction abstracts away the input copies their states drag one constructor
 # behind the live one, and a tail atom caps the spec their left-nested forks
 # would otherwise grow without bound. A true is a proof that the program
 # returns its argument's node count on every tree — which is more than any
 # run of it below can say.
-Certify.computes_size size__lazy_100
+Certify.Size.computes_size size__lazy_100
 # = true
-Certify.computes_size size__lazy_103
+Certify.Size.computes_size size__lazy_103
 # = false
-Certify.computes_size size__lazy_104
+Certify.Size.computes_size size__lazy_104
 # = true
-Certify.computes_size size__lazy_106
+Certify.Size.computes_size size__lazy_106
 # = false
-Certify.computes_size size__lazy_108
+Certify.Size.computes_size size__lazy_108
 # = false
-Certify.computes_size size__lazy_113
+Certify.Size.computes_size size__lazy_113
 # = false
 
 # The 100's certificate, drawn. This is what the extended rules exist for —
 # no eager program's proof tree has a CUT against a ⟨★k⟩ tail, an END
 # recording where a phase stopped, an ABSTRACT stripping lag junk, or a
 # FOLD* whose borrowed tail the second pass re-checked.
-_to_string = Option.match "no proof" Certify.render
-Certify.certify_size size__lazy_100
+_to_string = Option.match "no proof" Certify.Size.render
+Certify.Size.certify_size size__lazy_100
 # = SPLIT t
 #     PEEL
 #       ZERO
