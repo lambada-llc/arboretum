@@ -1,0 +1,19 @@
+# XML building blocks: attributes and elements as strings.
+# Values are emitted verbatim — callers must pass XML-safe content.
+_quote = [34]
+attr = Pair.match $ \k \v List.concat_list [" "; k; "="; _quote; v; _quote]
+attrs = compose List.concat_list (List.map attr)
+element = \tag \as \children List.concat_list
+  ["<"; tag; attrs as;
+   List.match "/>" (\_ \_ List.concat_list [">"; List.concat_list children; "</"; tag; ">"]) children]
+
+# Tests
+_to_string = id
+attr (△ "fill" "white")
+# =  fill="white"
+element "br" [] []
+# = <br/>
+element "rect" [△ "width" "100%"; △ "fill" "white"] []
+# = <rect width="100%" fill="white"/>
+element "g" [△ "id" "x"] ["<rect/>"; "<circle/>"]
+# = <g id="x"><rect/><circle/></g>

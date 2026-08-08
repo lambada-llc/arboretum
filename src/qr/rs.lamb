@@ -1,0 +1,41 @@
+# Reed-Solomon error correction encoding for QR codes
+
+# Build generator polynomial for n EC codewords:
+# g(x) = product of (x + alpha^i) for i = 0..n-1
+# Each factor (x + alpha^i) is [alpha^i; 1] in low-degree-first
+_gen_poly = \n
+  List.foldl
+    (\acc \i Qr.poly_mul acc [Qr.gf_alpha_pow i; 1])
+    [1]
+    (List.range n)
+
+# RS encode using LFSR-style polynomial division
+# data: list of codewords (naturals 0-255), processed in order
+# gen_coeffs: generator polynomial coefficients, descending degree, excluding leading 1
+# Returns: list of EC codewords
+_rs_encode_with = \data \gen_coeffs
+  let (List.length gen_coeffs) $ \n
+  List.foldl
+    (\reg \data_byte
+      let (Qr.gf_add data_byte (Option.get_or 0 (List.head reg))) $ \factor
+      List.mapi
+        (\fb \i Qr.gf_add fb (Qr.gf_mul factor (Option.get_or 0 (List.nth i gen_coeffs))))
+        (List.concat (Option.get_or [] (List.tail reg)) [0]))
+    (List.repeat n 0)
+    data
+
+# RS encode: given data codewords and number of EC codewords, produce EC codewords
+rs_encode = \data \num_ec
+  let (List.drop 1 $ List.reverse $ _gen_poly num_ec) $ \gen_coeffs
+  _rs_encode_with data gen_coeffs
+
+# Tests
+_to_string = List.to_source Nat.to_source
+
+# Generator polynomial for 10 EC codewords (low-degree-first)
+_gen_poly 10
+# = [193; 157; 113; 95; 94; 199; 111; 159; 194; 216; 1]
+
+# RS encode "Hi" (16 data codewords including padding)
+rs_encode [64; 36; 134; 144; 236; 17; 236; 17; 236; 17; 236; 17; 236; 17; 236; 17] 10
+# = [134; 112; 158; 123; 184; 138; 38; 225; 174; 58]

@@ -1,0 +1,37 @@
+# Polynomial arithmetic over GF(256)
+# Polynomials = lists of GF(256) elements, low degree first
+# [a0; a1; a2] represents a0 + a1*x + a2*x^2
+
+# Remove trailing zero coefficients
+_poly_trim = List.foldr (\h \acc Bool.match (△ h acc) acc $ Bool.and (Nat.is_zero h) (List.is_empty acc)) []
+
+# Add two polynomials (XOR corresponding coefficients)
+poly_add = \a \b _poly_trim $ List.map (Pair.match Qr.gf_add) $ List.zip a b
+
+# Scale all coefficients by a constant
+poly_scale = \c \p _poly_trim $ List.map (Qr.gf_mul c) p
+
+# Multiply two polynomials (Horner-style convolution)
+poly_mul = \a \b _poly_trim $ List.foldr (\ai \acc poly_add (poly_scale ai b) (△ 0 acc)) [] a
+
+# Tests
+_to_string = List.to_source Nat.to_source
+
+# poly_add
+poly_add [1; 2; 3] [4; 5; 6]
+# = [5; 7; 5]
+poly_add [1; 2; 3] [1; 2; 3]
+# = []
+poly_add [1; 2] [0; 0; 5]
+# = [1; 2; 5]
+
+# poly_scale
+poly_scale 2 [1; 2; 3]
+# = [2; 4; 6]
+
+# poly_mul: (x + 1) * (x + 2) = x^2 + 3x + 2 = [2; 3; 1]
+poly_mul [1; 1] [2; 1]
+# = [2; 3; 1]
+# (x + 1) * (x + 1) = x^2 + 2x + 1, but 2 = 0 in GF(256) XOR, so = [1; 0; 1]
+poly_mul [1; 1] [1; 1]
+# = [1; 0; 1]

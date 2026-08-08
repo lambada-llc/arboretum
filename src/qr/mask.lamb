@@ -1,0 +1,32 @@
+# QR mask pattern application — uses mask 2: (col % 3 == 0)
+
+_mask_fn = \x \y Nat.is_zero $ Nat.mod x 3
+
+# Apply mask: flip data cells where mask function is true; reserved cells stay put
+qr_mask = \v \grid
+  Qr.grid_mapi (\x \y \val
+    Bool.match
+      (Bool.match val (Bool.match 1 0 (equal val 1)) (_mask_fn x y))
+      val
+      (Qr.is_reserved v x y))
+    grid
+
+_to_string = Bool.to_source
+_mask_fn 0 0
+# = true
+_mask_fn 0 1
+# = true
+_mask_fn 0 2
+# = true
+_mask_fn 0 3
+# = true
+_mask_fn 5 6
+# = false
+Qr.is_reserved 1 0 0
+# = true
+Qr.is_reserved 1 10 10
+# = false
+Qr.is_reserved 2 18 18
+# = true
+Qr.is_reserved 2 10 10
+# = false

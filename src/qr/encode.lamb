@@ -1,0 +1,54 @@
+# QR data encoding — Versions 1-M and 2-M, byte mode
+# V1-M: 16 data + 10 EC = 26 codewords
+# V2-M: 28 data + 16 EC = 44 codewords
+
+_data_count = \v Bool.match 28 16 (equal v 1)
+_ec_count   = \v Bool.match 16 10 (equal v 1)
+
+# Generate n padding bytes: alternating 236, 17
+_make_pad = fix $ \self \n \even
+  Nat.match [] (\pred △ (Bool.match 17 236 even) (self pred (Bool.not even))) n
+
+_pad_bytes = \target \bytes
+  List.concat bytes $ _make_pad (Nat.sub target (List.length bytes)) true
+
+# Pad bit list to next multiple of 8 with false bits
+_pad_to_byte = \bits
+  let (Nat.mod (List.length bits) 8) $ \rem
+  Bool.match (List.concat bits $ List.repeat (Nat.sub 8 rem) false) bits $ Nat.is_zero rem
+
+# Raw bit stream: mode + count + data + terminator
+_raw_bits = \str
+  let (List.length str) $ \len
+  List.concat
+    (Qr.to_msb 4 4)
+    (List.concat
+      (Qr.to_msb 8 len)
+      (List.concat
+        (List.concat_map (Qr.to_msb 8) str)
+        (List.repeat 4 false)))
+
+# Encode a string into the full message (data + EC) for version v
+qr_encode = \v \str
+  let (_pad_to_byte $ _raw_bits str) $ \byte_aligned
+  let (List.map Qr.from_msb $ List.chunk 8 byte_aligned) $ \data_bytes
+  let (_pad_bytes (_data_count v) data_bytes) $ \data_codewords
+  let (Qr.rs_encode data_codewords (_ec_count v)) $ \ec_codewords
+  List.concat data_codewords ec_codewords
+
+# Tests
+_to_string = Nat.to_source
+List.length (_raw_bits "Hi")
+# = 32
+List.length (_pad_to_byte $ _raw_bits "Hi")
+# = 32
+
+_to_string = List.to_source Nat.to_source
+List.map Qr.from_msb $ List.chunk 8 $ _pad_to_byte $ _raw_bits "Hi"
+# = [64; 36; 134; 144]
+_pad_bytes 16 [64; 36; 134; 144]
+# = [64; 36; 134; 144; 236; 17; 236; 17; 236; 17; 236; 17; 236; 17; 236; 17]
+qr_encode 1 "Hi"
+# = [64; 36; 134; 144; 236; 17; 236; 17; 236; 17; 236; 17; 236; 17; 236; 17; 134; 112; 158; 123; 184; 138; 38; 225; 174; 58]
+qr_encode 2 "https://treecalcul.us/"
+# = [65; 102; 135; 71; 71; 7; 51; 162; 242; 247; 71; 38; 86; 86; 54; 22; 198; 55; 86; 194; 231; 87; 50; 240; 236; 17; 236; 17; 34; 168; 72; 47; 195; 96; 92; 233; 194; 123; 179; 193; 102; 240; 109; 174]

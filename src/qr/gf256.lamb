@@ -1,0 +1,100 @@
+# GF(256) Galois field arithmetic
+# Primitive polynomial: x^8 + x^4 + x^3 + x^2 + 1 = 0x11D = 285
+
+_primitive = 285
+
+# Addition in GF(256) is XOR
+gf_add = Qr.xor
+
+# Reduce a value that may have overflowed 8 bits back into GF(256)
+# If value >= 256, XOR with primitive polynomial
+_is_gte_256 = \n Bool.not $ Nat.is_zero $ List.drop 8 n
+_gf_reduce = \a Bool.match a (Qr.xor a _primitive) $ _is_gte_256 a
+
+# Multiplication in GF(256) using Russian peasant method
+# Fold over 8 bits of b: for each bit, conditionally XOR a into result,
+# then double a and reduce
+gf_mul = \a \b
+  Pair.fst $
+  List.foldl
+    (\acc \bit Pair.match
+      (\result \a
+        △ (Bool.match result (Qr.xor result a) bit)
+          (_gf_reduce $ Nat.double a))
+      acc)
+    (△ 0 a)
+    (Qr.byte b)
+
+# Exponentiation by repeated squaring (binary exponentiation)
+gf_pow = \base \exp Fn.pow_fast exp gf_mul 1 base
+
+# alpha = 2 (primitive element of the field)
+_alpha = 2
+
+# Compute alpha^n (powers of the generator element)
+gf_alpha_pow = gf_pow _alpha
+
+# Tests
+_to_string = Nat.to_source
+
+# Addition (XOR)
+gf_add 0 0
+# = 0
+gf_add 1 1
+# = 0
+gf_add 255 255
+# = 0
+gf_add 5 3
+# = 6
+
+# Multiplication basics
+gf_mul 0 1
+# = 0
+gf_mul 1 1
+# = 1
+gf_mul 1 0
+# = 0
+gf_mul 2 1
+# = 2
+gf_mul 1 2
+# = 2
+
+# Multiplication — known values
+# 2 * 2 = 4 (no overflow)
+gf_mul 2 2
+# = 4
+# 2 * 128 = 256 -> reduce by XOR 285 -> 256 XOR 285 = 29
+gf_mul 2 128
+# = 29
+
+# a * 1 = a (identity)
+gf_mul 37 1
+# = 37
+gf_mul 1 37
+# = 37
+
+# Commutativity: a * b = b * a
+gf_mul 5 3
+# = 15
+gf_mul 3 5
+# = 15
+
+# Distributivity: a * (b + c) = a*b + a*c
+# 7 * (5 + 3) vs 7*5 + 7*3
+# 5 XOR 3 = 6
+gf_mul 7 6
+# = 18
+gf_add (gf_mul 7 5) (gf_mul 7 3)
+# = 18
+
+# Powers of alpha (generator = 2)
+gf_alpha_pow 0
+# = 1
+gf_alpha_pow 1
+# = 2
+gf_alpha_pow 2
+# = 4
+gf_alpha_pow 7
+# = 128
+gf_alpha_pow 8
+# = 29
