@@ -3,7 +3,7 @@
 # shape alone. They live at the root; this directory only benches them.
 _to_string = Nat.to_source
 size equal__smallest
-# = 278
+# = 271
 size equal__fastest
 # = 542
 size equal
@@ -12,7 +12,7 @@ size equal
 _to_string = id
 Bench.run [equal__smallest; △; △]
 # = oh | 0a 0b  1  2 3a 3b 3c | alc red
-#    2 | 11 22 27 30  1  0  0 |  33  58
+#    2 | 12 20 25 28  1  0  1 |  32  55
 #    0 |  0  0  0  0  1  0  0 |   0   1
 Bench.run [equal__fastest;  △; △]
 # = oh | 0a 0b 1 2 3a 3b 3c | alc red
@@ -24,19 +24,19 @@ Bench.run [equal;           △; △]
 #    0 |  0  0 0 0  1  0  0 |   0   1
 Bench.run [equal__smallest; fix; fix]
 # =  oh |  0a   0b    1    2 3a 3b 3c |  alc  red
-#   128 | 839 1642 2097 2289 19 27 18 | 2481 4450
-#    18 |  54   54  144  126 19 45 18 |  108  352
+#   114 | 820 1372 1793 1964 21 16 77 | 2192 3871
+#    20 |  60   60  160  140 21 36 20 |  120  377
 Bench.run [equal__fastest;  fix; fix]
-# =  oh |  0a  0b    1    2 3a 3b 3c |  alc  red
-#   145 | 405 837 1118 1180 19 27 18 | 1242 2362
-#    18 |  54  54  144  126 19 45 18 |  108  352
+# =  oh |  0a  0b   1    2 3a 3b 3c |  alc  red
+#   133 | 352 748 990 1045 21 16 20 | 1100 2092
+#    20 |  60  60 160  140 21 36 20 |  120  377
 Bench.run [equal;           fix; fix]
-# =  oh |  0a  0b    1    2 3a 3b 3c |  alc  red
-#   147 | 407 843 1124 1187 19 27 18 | 1250 2375
-#    18 |  54  54  144  126 19 45 18 |  108  352
+# =  oh |  0a  0b   1    2 3a 3b 3c |  alc  red
+#   135 | 354 754 996 1052 21 16 20 | 1108 2105
+#    20 |  60  60 160  140 21 36 20 |  120  377
 Bench.run [size__smallest; Nat.succ]
 # =  oh |   0a   0b    1    2  3a  3b  3c |  alc  red
-#   673 | 1180 3028 3548 3837 126 120 207 | 4208 7838
+#   673 | 1274 2840 3360 3649 126 120 301 | 4114 7556
 Bench.run [size__fastest;  Nat.succ]
 # =  oh |  0a   0b    1    2  3a  3b  3c |  alc  red
 #   515 | 582 1673 2163 2168 126 120 207 | 2255 4784
@@ -57,11 +57,11 @@ size (equal '.')
 _to_string = id
 Bench.run [equal_const; '.'; '.']
 # = oh |  0a  0b   1   2 3a 3b 3c | alc  red
-#   34 | 243 402 543 594  7  4  6 | 645 1154
+#   34 | 260 368 509 560  7  4 23 | 628 1103
 #    0 |   0   0  12   6  7 10  6 |   0   41
 Bench.run [equal_const; '.'; 'a']
 # = oh |  0a  0b   1   2 3a 3b 3c | alc  red
-#   34 | 243 402 543 594  7  4  6 | 645 1154
+#   34 | 260 368 509 560  7  4 23 | 628 1103
 #    0 |   0   0   3   1  1  1  1 |   0    7
 Bench.run [equal;       '.'; '.']
 # = oh |  0a  0b   1   2 3a 3b 3c | alc red

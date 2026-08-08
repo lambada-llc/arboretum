@@ -68,7 +68,7 @@ equal (quote__smallest fix) (quote__fastest fix)
 
 _to_string = Nat.to_source
 size quote__smallest
-# = 137
+# = 130
 size quote__fastest
 # = 260
 size quote
@@ -76,8 +76,8 @@ size quote
 
 _to_string = id
 Bench.run [quote__smallest; Nat.succ]
-# =  oh |  0a   0b    1    2 3a 3b 3c |  alc  red
-#   188 | 751 1659 1846 2128 32 31 31 | 2410 4068
+# =  oh |  0a   0b    1    2 3a 3b  3c |  alc  red
+#   188 | 845 1471 1658 1940 32 31 125 | 2316 3786
 Bench.run [quote__fastest;  Nat.succ]
 # =  oh |  0a  0b   1    2 3a 3b 3c |  alc  red
 #   218 | 341 837 994 1086 32 31 31 | 1178 2174

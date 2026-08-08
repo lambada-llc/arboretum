@@ -50,7 +50,7 @@ parse_nat = Parser.map Nat.from_string__fastest $ Parser.seq_pair Parser.one (Pa
 _to_string = id
 Bench.run [parse_identifier; "compiler_tokenize"]
 # = oh |  0a  0b   1   2  3a 3b  3c | alc  red
-#   17 | 265 450 629 662 129 89 148 | 715 1657
+#   17 | 282 416 595 628 129 89 165 | 698 1606
 Bench.run [Nat.is_lte 64; 'x']
 # = oh |  0a  0b   1   2 3a 3b 3c | alc red
 #   22 | 121 192 323 318 14 13 13 | 313 681
@@ -734,54 +734,54 @@ compile_to_dag_bench = \s
 
 _to_string = id
 compile_to_dag_bench "x"
-# = Tokenize: 439
-#   Parse:    681
-#   Lower:    299
-#   Emit:     194
+# = Tokenize: 427
+#   Parse:    672
+#   Lower:    287
+#   Emit:     182
 
 compile_to_dag_bench "42"
-# = Tokenize: 865
-#   Parse:    532
-#   Lower:    319
-#   Emit:     1250
+# = Tokenize: 844
+#   Parse:    523
+#   Lower:    307
+#   Emit:     1220
 
 compile_to_dag_bench "1337"
-# = Tokenize: 2070
-#   Parse:    532
-#   Lower:    319
-#   Emit:     1991
+# = Tokenize: 2037
+#   Parse:    523
+#   Lower:    307
+#   Emit:     1946
 
 compile_to_dag_bench "[42]"
-# = Tokenize: 1427
-#   Parse:    1511
-#   Lower:    512
-#   Emit:     2589
+# = Tokenize: 1400
+#   Parse:    1493
+#   Lower:    494
+#   Emit:     2520
 
 compile_to_dag_bench "\x x"
-# = Tokenize: 1152
-#   Parse:    1361
-#   Lower:    1486
-#   Emit:     228
+# = Tokenize: 1128
+#   Parse:    1343
+#   Lower:    1474
+#   Emit:     213
 
 compile_to_dag_bench "x = 42"
-# = Tokenize: 1671
-#   Parse:    1208
-#   Lower:    327
-#   Emit:     1338
+# = Tokenize: 1635
+#   Parse:    1190
+#   Lower:    315
+#   Emit:     1302
 
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
-# = Tokenize: 20759
-#   Parse:    28121
-#   Lower:    5399
-#   Emit:     20043
+# = Tokenize: 20408
+#   Parse:    27764
+#   Lower:    5387
+#   Emit:     19398
 
 # The only coverage of an ADT declaration: two variants, each emitting a
 # constructor and a *_Dispatch through _syntax_emit_adt.
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
-# = Tokenize: 7702
-#   Parse:    2472
-#   Lower:    208830
-#   Emit:     37539
+# = Tokenize: 7561
+#   Parse:    2430
+#   Lower:    208422
+#   Emit:     36255
 
 # Bracket abstraction over an application spine, which used to be exponential in
 # how many applications the bound variable reaches: each further [a] under \a
@@ -790,20 +790,20 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # application from what abstracting its sides already returned made it linear:
 # the same five now cost 22674, 29212, 35750, 42288, 48826, a flat 6538 apiece.
 compile_to_dag_bench "\d \a \i i d (\x \x a) a a a a"
-# = Tokenize: 7273
-#   Parse:    8686
-#   Lower:    48826
-#   Emit:     29394
+# = Tokenize: 7141
+#   Parse:    8572
+#   Lower:    48814
+#   Emit:     28350
 
 # Literal size. A string literal is linear in both directions: a fixed ~91
 # reductions per character to tokenize and ~1205 to emit (50 characters cost
 # 5096 and 61021). Emitting is where the bulk is, because every character
 # becomes its own run of DAG lines — one per bit, plus two for the cons.
 compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
-# = Tokenize: 9646
-#   Parse:    536
-#   Lower:    319
-#   Emit:     121271
+# = Tokenize: 9334
+#   Parse:    527
+#   Lower:    307
+#   Emit:     118850
 
 # A nat literal is quadratic to tokenize, and stays that way: Horner's rule has
 # to walk an accumulator that grows by ~3.3 bits per digit, so 5, 10, 20 and 40
@@ -811,10 +811,10 @@ compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 # — [from_string__fastest] used to spend two traversals and a multiply per digit
 # where one table-driven pass does, which is worth 2.3x here.
 compile_to_dag_bench $ List.repeat 100 '1'
-# = Tokenize: 1409237
-#   Parse:    532
-#   Lower:    319
-#   Emit:     49019
+# = Tokenize: 1408628
+#   Parse:    523
+#   Lower:    307
+#   Emit:     48017
 
 _compiler_env =
   Map.pmap_set "△" △ $
