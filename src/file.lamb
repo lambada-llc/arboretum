@@ -1,0 +1,6 @@
+# A named file, typically used for build or test artifacts intended to leave the
+# LambAda ecosystem.
+
+file = \name \media_type \content △ (△ name media_type) content
+
+file "greeting.txt" "text/plain" "Hello, LambAda!"
