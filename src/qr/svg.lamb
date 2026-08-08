@@ -16,7 +16,7 @@ _cell = \x \y Xml.element "rect"
    △ "fill" "black"] []
 
 # Render a QR grid to SVG string. Size is taken from the grid.
-qr_to_svg = \grid
+to_svg = \grid
   let (Qr.grid_height grid) $ \s
   let (Nat.to_string (Nat.mul (Nat.add (Nat.mul 2 _quiet) s) _scale)) $ \sz
   List.concat _prolog
@@ -27,7 +27,7 @@ qr_to_svg = \grid
       (List.concat_list $ Qr.grid_mapi (\x \y \val Bool.match "" (_cell x y) (equal val 1)) grid)
 
 _to_string = id
-△ (△ "hi.svg" "image/svg+xml") $ qr_to_svg $ Qr.qr "Hi"
+△ (△ "hi.svg" "image/svg+xml") $ to_svg $ Qr.create "Hi"
 # = hi.svg sha256:9eb3037043199e04c52b6096fafd80376e7deca754fb206521aae1603bc980ef
-△ (△ "url.svg" "image/svg+xml") $ qr_to_svg $ Qr.qr "https://treecalcul.us/"
+△ (△ "url.svg" "image/svg+xml") $ to_svg $ Qr.create "https://treecalcul.us/"
 # = url.svg sha256:a78fda005d030f7fd689e1c165e237aa66d4bbb7c0af0ea46a69ab410d498647
