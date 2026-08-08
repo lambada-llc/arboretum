@@ -5,7 +5,7 @@ size = \x (wait self_apply _size_body) x 0
 
 _to_string = Nat.to_source
 size fix
-# = 64
+# = 57
 
 size__smallest △
 # = 1
@@ -16,7 +16,7 @@ size__smallest (△ △ △)
 size__smallest (△ (△ △) (△ △))
 # = 5
 size__smallest size__smallest
-# = 224
+# = 217
 
 size__fastest △
 # = 1

@@ -118,7 +118,7 @@ eval_with_cost Nat.succ 0
 eval_with_cost Nat.succ 3
 # = (△ 4 37)
 eval_with_cost (Nat.add 1) 2
-# = (△ 3 125)
+# = (△ 3 119)
 
 _to_string = Nat.to_source
 count_eval_steps Nat.succ 0
@@ -126,7 +126,7 @@ count_eval_steps Nat.succ 0
 count_eval_steps Nat.succ 3
 # = 37
 count_eval_steps (Nat.add 1) 2
-# = 125
+# = 119
 
 count_allocs Nat.succ 0
 # = 0

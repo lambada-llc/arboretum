@@ -84,13 +84,13 @@ run [_exercise_all_rules; △ △]
 #    0 | 10  8 9 13  1  1  1 |  18  25
 run [_exercise_all_rules_n; 0]
 # = oh | 0a 0b  1  2 3a 3b 3c | alc red
-#    1 |  5 10 13 14  1  0  0 |  15  28
+#    1 |  6  8 11 12  1  0  1 |  14  25
 run [_exercise_all_rules_n; 1]
 # = oh | 0a 0b  1  2 3a 3b 3c | alc red
-#    3 | 21 31 43 47  3  2  3 |  52  98
+#    3 | 23 27 39 43  3  2  5 |  50  92
 run [_exercise_all_rules_n; 10]
 # = oh |  0a  0b   1   2 3a 3b 3c | alc red
-#   37 | 187 294 381 420 23 20 44 | 481 888
+#   37 | 198 272 359 398 23 20 55 | 470 855
 run [_exercise_all_rules_n; 100]
 # =  oh |   0a   0b    1    2  3a  3b  3c |  alc  red
-#   395 | 1892 3068 3878 4276 205 200 490 | 4960 9049
+#   395 | 1993 2866 3676 4074 205 200 591 | 4859 8746

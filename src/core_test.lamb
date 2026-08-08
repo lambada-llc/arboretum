@@ -22,13 +22,13 @@ Bench.run [stage; △; △; △]
 _succ_functional = \self List.match 1 (\hd \tl Bool.match (\_ △ true) (\self \tl △ false $ self tl) hd self tl)
 Bench.run [fix; _succ_functional]
 # = oh | 0a 0b 1 2 3a 3b 3c | alc red
-#    0 |  2  4 5 5  0  0  0 |   6  10
+#    0 |  3  3 5 5  0  0  0 |   6  10
 Bench.run [fix _succ_functional; 8]
 # = oh | 0a 0b 1 2 3a 3b 3c | alc red
-#    2 |  1  9 9 9  1  0  1 |  10  20
+#    2 |  2  7 7 7  1  0  2 |   9  17
 Bench.run [fix _succ_functional; 15]
 # = oh | 0a 0b  1  2 3a 3b 3c | alc red
-#    5 |  5 48 47 48  1  4  4 |  53 104
+#    5 | 10 38 37 38  1  4  9 |  48  89
 Bench.run [fix__naive; _succ_functional]
 # = oh | 0a 0b 1 2 3a 3b 3c | alc red
 #    0 |  2  4 5 5  0  0  0 |   6  10
@@ -38,13 +38,28 @@ Bench.run [fix__naive _succ_functional; 8]
 Bench.run [fix__naive _succ_functional; 15]
 # = oh | 0a 0b  1  2 3a 3b 3c | alc red
 #   10 | 10 53 57 58  1  4  4 |  63 124
+Bench.run [fix__wait; _succ_functional]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    0 |  2  4 5 5  0  0  0 |   6  10
+Bench.run [fix__wait _succ_functional; 8]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    2 |  1  9 9 9  1  0  1 |  10  20
+Bench.run [fix__wait _succ_functional; 15]
+# = oh | 0a 0b  1  2 3a 3b 3c | alc red
+#    5 |  5 48 47 48  1  4  4 |  53 104
 
+# The combinator, and — what a use of it actually pays — the knot `fix f` leaves
+# behind, measured as size (fix f) - |f| with f = △.
 _to_string = Nat.to_source
 size $ fix
-# = 64
+# = 57
 size $ fix__naive
 # = 76
+size $ fix__wait
+# = 64
 Nat.pred $ size $ fix △
-# = 44
+# = 37
 Nat.pred $ size $ fix__naive △
 # = 56
+Nat.pred $ size $ fix__wait △
+# = 44

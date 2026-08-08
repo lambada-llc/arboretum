@@ -5,10 +5,13 @@ _triage = \self triage id self $ \u
         (\v compose (self v))
         (\v self u)
 _functional_smallest = \self \x compose Snat.succ $ _triage self x
-size__smallest = \x (fix _functional_smallest) x Snat.zero
+size__smallest = \x (fix__wait _functional_smallest) x Snat.zero
 
-# size__smallest is search-verified minimal at 125 nodes among fix-knotted forms:
-# seed wrapper (5) + fix knot
+# These are pinned to fix__wait, the knot they were searched against — core's
+# `fix` is now the quine knot below, which would silently shrink them to 118 and
+# invalidate both the count and the sibling relationships recorded here.
+# size__smallest is search-verified minimal at 125 nodes among fix__wait-knotted
+# forms: seed wrapper (5) + fix__wait knot
 # (44: the 17-node unfolder _h below, paid twice) + body (76). Exhaustive enumeration
 # (~150M candidates: all knot unfolders to 16 nodes, wrapper/dispatch shells to 14,
 # fork-case replacements to enum-15 with combinator atoms, every normal-form subtree
@@ -23,24 +26,24 @@ _b2 = △ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △))
 _h = △ (△ (△ △ (△ (△ (△ (△ (△ (△ (△ △)) △)) (△ △)))))) (△ △)
 _hj = △ (△ (△ △ (△ (△ (△ (△ (△ (△ △ △) △)) (△ △)))))) (△ △)
 _f2 = \self \x compose Snat.succ $ triage _j self (\u _s (\v compose (self v)) (\v self u)) x
-size__smallest2 = \x (fix _f2) x Snat.zero
+size__smallest2 = \x (fix__wait _f2) x Snat.zero
 size__smallest3 = △ (△ (△ (△ _hj) (△ △ (△ (△ (△ △ _functional_smallest)) (△ (△ _h)))))) (△ △ △)
 size__smallest4 = △ (△ (△ (△ _h) (△ △ (△ (△ (△ △ _functional_smallest)) (△ (△ _hj)))))) (△ △ △)
 _f5 = \self \x compose Snat.succ $ triage id self (\u _s (\v _b2 (self v)) (\v self u)) x
-size__smallest5 = \x (fix _f5) x Snat.zero
+size__smallest5 = \x (fix__wait _f5) x Snat.zero
 _q6 = △ (△ (△ (△ (△ △ _b2)) (△ (△ (△ △ _s)) (△ (△ (△ △ compose)))))) (△ (△ (△ △ (△ △))))
 _f6 = \self \x compose Snat.succ $ triage id self (_q6 self) x
-size__smallest6 = \x (fix _f6) x Snat.zero
+size__smallest6 = \x (fix__wait _f6) x Snat.zero
 
-# Smaller and still eager: a knot that costs 31 nodes where fix's costs 44.
-# Where fix keeps re-entry delayed behind wait — the 17-node unfolder _h,
+# Smaller and still eager: a knot that costs 37 nodes where fix__wait's costs 44.
+# Where fix__wait keeps re-entry delayed behind wait — the 17-node unfolder _h,
 # paid twice — the knot below is a quine: the loop rebuilds itself from the
 # copy it carries, and what keeps that eager-safe is that the rebuild only
 # ever happens under the input constructor just consumed, one unfolding per
 # node. _k is const of a triage: it drops an argument, splits a fork, and
 # applies the code found inside to that code's own stem —
 #   _k z (△ q z)  ⟶  q (△ q) z
-# — fourteen nodes, paid twice like _h, plus three of wiring. Tie
+# — fourteen nodes, paid twice like _h, plus nine of wiring. Tie
 #   self = △ (△ _k) (△ q).
 # Rule (2) sends an application self z to _k z (△ q z) — the code and the
 # input packed into a fork — so self z ⟶ q (△ q) z, and a code value that
@@ -51,6 +54,9 @@ size__smallest6 = \x (fix _f6) x Snat.zero
 # unfolds except into the next constructor of the input. The step is
 # _functional_smallest, unchanged: only the knot around it is new, and the
 # certificates below are the same machine-checked ones the six above carry.
+# That knot generalizes, and is now core's `fix` — so size__eager_118 is
+# exactly \x (fix _functional_smallest) x Snat.zero. It stays spelled out here
+# because size__eager_103 below builds on _k too.
 _selfstem = \q q (△ q)
 _k = const (triage △ △ _selfstem)
 _code = \sq _functional_smallest (△ (△ _k) sq)
@@ -68,7 +74,7 @@ size__eager_118 = \x (△ (△ _k) (△ _code)) x △
 #   △ u v  ⟶ [n] △ (self (self u v) n)
 # Found by annealing over whole trees with an eager evaluator as the
 # filter — the same deletion-and-replacement spirit as #20, pointed at the
-# eager family — first as a 110 tied with fix's knot, then reformulated
+# eager family — first as a 110 tied with fix__wait's knot, then reformulated
 # through the compiler and retied with _k. Every unfolding consumes one
 # node of state, so reduction terminates in every order — but recursion on
 # a rebuilt chain is not recursion on a subtree, which no structural FOLD
@@ -124,7 +130,7 @@ Certify.Size.computes_size size__eager_103
 # exactly the tree the search found, so the counts at the bottom of this file
 # are still the search's counts. Only running them needs normal order.
 #
-# The knot. Where fix above keeps its recursion delayed behind wait — the 44
+# The knot. Where fix__wait above keeps its recursion delayed behind wait — the 44
 # nodes size__smallest pays, _h twice included — these pay 7 once:
 _fork_self = \f △ f (△ f) (△ f)
 # _fork_self is △ (△ (△ (△ △) △)) △: applied to a fork it hands the fork to
@@ -194,7 +200,7 @@ _step_106 = \loop _state_106 loop (_b2 loop △)
 size__lazy_106 = _lazy_size _tie_open (_loop _step_106)
 
 # The 108 and the 113 drive one step, and it is not theirs: it is, node for
-# node, the 76-node body size__smallest's fix knot drives — the expect test
+# node, the 76-node body size__smallest's fix__wait knot drives — the expect test
 # below reads it back out of size__smallest — with everything around it
 # re-carved. That is the sense in which #20's deletions started from the
 # eager program.

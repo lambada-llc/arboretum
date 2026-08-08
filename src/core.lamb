@@ -9,6 +9,14 @@ let = \x \f f x
 fix__naive = let self_apply $ \m
       \f wait m (\x f (wait m x))
 # self_apply_k with lighter inner delay for smaller reduced trees
-fix = let (\x x (\_ x)) $ \self_apply_k
+fix__wait = let (\x x (\_ x)) $ \self_apply_k
       \f wait self_apply_k (\x f (△ (△ $ \b \c self_apply_k c b) x))
+# `fix` leverages a trick that relies on `fix f` being a fork, found by
+# Nathan Farlow's search for a smaller "size" function:
+# https://github.com/lambada-llc/tree-calculus/issues/20
+# `fix f` is still a value that unfolds only once an argument arrives, and the
+# knot costs 37 nodes and 13 reductions per iteration where fix__wait's cost 44
+# and 16.
+fix = let (const (triage △ △ (\q q (△ q)))) $ \knot
+      \f △ (△ knot) (△ (compose f (△ (△ knot))))
 stage = \f \x \_ (\_ f) _ x
