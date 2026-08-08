@@ -1,0 +1,74 @@
+# 2D grid (list of rows, each row a list of cells)
+# Origin at top-left, row-major: grid[y][x]
+
+# Create an n*m grid filled with a value
+grid_new = \width \height \val List.repeat height $ List.repeat width val
+
+# Get cell at (x, y) — returns Option
+grid_get = \x \y \grid Option.bind (List.nth x) $ List.nth y grid
+
+# Set cell at (x, y) — returns updated grid
+grid_set = \x \y \val \grid
+  List.mapi
+    (\row \iy Bool.match
+      row
+      (List.mapi (\cell \ix Bool.match cell val $ equal ix x) row)
+      $ equal iy y)
+    grid
+
+# Set a rectangular region: blit a pattern (list of rows) at offset (ox, oy)
+grid_blit = \ox \oy \pattern \grid
+  List.mapi
+    (\row \iy
+      Bool.match
+        row
+        (Option.match row
+          (\pat_row List.mapi
+            (\cell \ix
+              Bool.match
+                cell
+                (Option.match cell (\v v) $ List.nth (Nat.sub ix ox) pat_row)
+                $ Nat.is_lte ox ix)
+            row)
+          $ List.nth (Nat.sub iy oy) pattern)
+        $ Nat.is_lte oy iy)
+    grid
+
+# Map a function over all cells, providing (x, y, value) to the function
+grid_mapi = \f
+  List.mapi $ \row \y
+    List.mapi (\cell \x f x y cell) row
+
+# Dimensions
+grid_width = \grid Option.match 0 List.length $ List.head grid
+grid_height = List.length
+
+# Render grid as string (for debugging)
+# Takes a cell-to-char function
+grid_to_str = \cell_to_str \grid
+  List.join [10] $ List.map (\row List.concat_map cell_to_str row) grid
+
+# Tests
+_to_string = Nat.to_source
+grid_width (grid_new 3 2 0)
+# = 3
+grid_height (grid_new 3 2 0)
+# = 2
+
+_to_string = Option.to_source Nat.to_source
+grid_get 0 0 (grid_new 3 2 42)
+# = (some 42)
+grid_get 2 1 (grid_new 3 2 42)
+# = (some 42)
+grid_get 3 0 (grid_new 3 2 42)
+# = none
+
+grid_get 1 1 (grid_set 1 1 99 (grid_new 3 3 0))
+# = (some 99)
+grid_get 0 0 (grid_set 1 1 99 (grid_new 3 3 0))
+# = (some 0)
+
+_to_string = id
+grid_to_str (Bool.match "  " "██") (grid_set 1 0 true (grid_set 0 1 true (grid_new 3 2 false)))
+# =   ██  
+#   ██    

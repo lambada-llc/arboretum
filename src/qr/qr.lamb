@@ -1,0 +1,83 @@
+# QR code generation, byte mode at error-correction level M.
+#
+# A code is a [Qr.grid] of naturals, 0 light and 1 dark, indexed [y][x] from the
+# top left and carrying no quiet zone — that belongs to whoever renders it, and
+# [Qr.qr_to_svg] adds its own. Naturals rather than booleans because every stage
+# below works in codewords, and one numeric cell type keeps grid, mask and
+# format from each converting at their boundary.
+#
+# The version is chosen from the data length alone, which is what makes [qr] a
+# function of the string only:
+#   ≤ 14 bytes → version 1, a 21×21 code
+#   ≤ 26 bytes → version 2, a 25×25 code
+# Those caps are the data codewords the level leaves (16 and 28) less the four
+# bits of mode and eight of character count that precede the data — 14½ and 26½
+# bytes, rounded down. Longer input needs a version this module does not
+# implement, and the encoding truncates rather than fails: what comes out still
+# looks like a QR code and does not scan. Callers who cannot bound their input
+# should check the length themselves.
+
+_pick_version = \str Bool.match 2 1 (Nat.is_lte (List.length str) 14)
+
+qr = \str
+  let (_pick_version str) $ \v
+  let (Qr.qr_encode v str) $ \msg
+  let (Qr.qr_layout v msg) $ \grid
+  let (Qr.qr_mask v grid) $ \masked
+  Qr.qr_format v masked
+
+to_string = Qr.grid_to_str (\v Bool.match "  " "██" (equal v 1))
+
+_to_string = compose (List.concat [10;10]) to_string
+qr "Hi"
+# = 
+#   
+#   ██████████████              ██████████████
+#   ██          ██      ██████  ██          ██
+#   ██  ██████  ██  ████    ██  ██  ██████  ██
+#   ██  ██████  ██  ████        ██  ██████  ██
+#   ██  ██████  ██  ██████████  ██  ██████  ██
+#   ██          ██  ██      ██  ██          ██
+#   ██████████████  ██  ██  ██  ██████████████
+#                   ██  ██████                
+#   ██  ██████████    ████  ██  ██████████    
+#   ██      ████    ██      ██    ██        ██
+#     ████    ██████    ████  ██    ████████  
+#   ████            ██████        ████  ██    
+#   ████    ██  ██      ████  ██    ██  ██  ██
+#                   ██████████████    ██      
+#   ██████████████      ██  ██  ████      ██  
+#   ██          ██  ██████████████    ██    ██
+#   ██  ██████  ██  ████    ██    ██    ██    
+#   ██  ██████  ██  ██████  ██    ██    ██    
+#   ██  ██████  ██  ████  ██  ██    ██████    
+#   ██          ██    ████        ████  ██    
+#   ██████████████  ████████  ██    ████████  
+qr "https://treecalcul.us/"
+# = 
+#   
+#   ██████████████    ██    ████    ██  ██████████████
+#   ██          ██        ████  ██████  ██          ██
+#   ██  ██████  ██  ██            ████  ██  ██████  ██
+#   ██  ██████  ██  ██  ██  ████  ████  ██  ██████  ██
+#   ██  ██████  ██  ██  ██  ████    ██  ██  ██████  ██
+#   ██          ██  ██████████████████  ██          ██
+#   ██████████████  ██  ██  ██  ██  ██  ██████████████
+#                   ████  ████                        
+#   ██  ██████████        ██████████    ██████████    
+#     ██    ████  ██  ████████  ██  ████  ██      ██  
+#       ████  ████  ██  ██  ██  ████    ██    ██  ████
+#       ██        ██  ██  ████  ██████    ██        ██
+#     ██  ██    ████████      ████    ████████  ██████
+#   ██    ██  ██  ██  ██    ██  ██  ██    ██  ██  ██  
+#   ██      ██████████████    ██  ██████████████  ████
+#   ██  ██        ████  ██  ██  ████  ████████      ██
+#   ██  ██████████    ████  ████  ████████████  ██    
+#                   ██        ██  ████      ████      
+#   ██████████████      ██████████  ██  ██  ██  ██████
+#   ██          ██  ██    ██    ██  ██      ████      
+#   ██  ██████  ██  ████  ██      ████████████  ██████
+#   ██  ██████  ██  ██  ██  ████    ██████  ██████████
+#   ██  ██████  ██  ██████    ██████          ████  ██
+#   ██          ██    ██    ████  ██████████████    ██
+#   ██████████████  ██      ██  ██    ████████████████

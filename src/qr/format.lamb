@@ -1,0 +1,55 @@
+# QR format information — M EC level, mask 2
+# Format string for M-mask2: 101111001111100 (MSB-first)
+
+# Format bits indexed LSB-first
+_format = [false; false; true; true; true; true; true; false; false; true; true; true; true; false; true]
+
+# Format bit positions for vertical copy (along col 8): bits 0..14
+# V1 (size 21): top-left strip y=0..5,7,8 then bottom-left strip y=14..20
+_v_v1 = [△ 8 0; △ 8 1; △ 8 2; △ 8 3; △ 8 4; △ 8 5; △ 8 7; △ 8 8;
+         △ 8 14; △ 8 15; △ 8 16; △ 8 17; △ 8 18; △ 8 19; △ 8 20]
+# V2 (size 25): top-left same then bottom-left strip y=18..24
+_v_v2 = [△ 8 0; △ 8 1; △ 8 2; △ 8 3; △ 8 4; △ 8 5; △ 8 7; △ 8 8;
+         △ 8 18; △ 8 19; △ 8 20; △ 8 21; △ 8 22; △ 8 23; △ 8 24]
+
+# Format bit positions for horizontal copy (along row 8): bits 0..14
+# V1: top-right strip x=20,19,..,14 then top-left strip x=8,7,5,4,3,2,1,0
+_h_v1 = [△ 20 8; △ 19 8; △ 18 8; △ 17 8; △ 16 8; △ 15 8; △ 14 8;
+         △ 8 8; △ 7 8; △ 5 8; △ 4 8; △ 3 8; △ 2 8; △ 1 8; △ 0 8]
+# V2: top-right strip x=24,23,..,18 then top-left strip same as V1
+_h_v2 = [△ 24 8; △ 23 8; △ 22 8; △ 21 8; △ 20 8; △ 19 8; △ 18 8;
+         △ 8 8; △ 7 8; △ 5 8; △ 4 8; △ 3 8; △ 2 8; △ 1 8; △ 0 8]
+
+_v_positions = \v Bool.match _v_v2 _v_v1 (equal v 1)
+_h_positions = \v Bool.match _h_v2 _h_v1 (equal v 1)
+
+_place_at = \positions \bits \grid
+  List.foldl
+    (\g \pb Pair.match
+      (\pos \bit Pair.match (\x \y Qr.grid_set x y (Bool.match 0 1 bit) g) pos)
+      pb)
+    grid
+    (List.zip positions bits)
+
+qr_format = \v \grid
+  let (Qr.size v) $ \s
+  let (_place_at (_v_positions v) _format grid) $ \g
+  let (_place_at (_h_positions v) _format g) $ \g
+  Qr.grid_set 8 (Nat.sub s 8) 1 g
+
+# Tests
+_to_string = Option.to_source Nat.to_source
+Qr.grid_get 0 8  $ qr_format 1 $ Qr.grid_new 21 21 0
+# = (some 1)
+Qr.grid_get 5 8  $ qr_format 1 $ Qr.grid_new 21 21 0
+# = (some 1)
+Qr.grid_get 8 0  $ qr_format 1 $ Qr.grid_new 21 21 0
+# = (some 0)
+Qr.grid_get 8 20 $ qr_format 1 $ Qr.grid_new 21 21 0
+# = (some 1)
+Qr.grid_get 8 17 $ qr_format 2 $ Qr.grid_new 25 25 0
+# = (some 1)
+Qr.grid_get 8 24 $ qr_format 2 $ Qr.grid_new 25 25 0
+# = (some 1)
+Qr.grid_get 24 8 $ qr_format 2 $ Qr.grid_new 25 25 0
+# = (some 0)

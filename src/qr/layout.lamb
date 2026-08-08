@@ -1,0 +1,148 @@
+# QR matrix layout — Versions 1 (21x21) and 2 (25x25)
+
+# Module count for version v: 17 + 4*v
+size = \v Nat.add 17 (Nat.mul_const 4 v)
+
+# Three (hi+1)-wide finder corners: top-left, top-right (from lo), bottom-left (from lo)
+_in_corners = \lo \hi \x \y
+  Bool.or (Bool.and (Nat.is_lte x hi) (Nat.is_lte y hi))
+  (Bool.or (Bool.and (Nat.is_lte lo x) (Nat.is_lte y hi))
+   (Bool.and (Nat.is_lte x hi) (Nat.is_lte lo y)))
+
+# Finder pattern at (fx, fy): dark unless on the inner light ring
+_finder_val_at = \fx \fy \x \y
+  let (Nat.sub x fx) $ \dx
+  let (Nat.sub y fy) $ \dy
+  Bool.not $ equal (Nat.min (Nat.min dx (Nat.sub 6 dx)) (Nat.min dy (Nat.sub 6 dy))) 1
+
+_finder_cell = \s \x \y
+  let (Nat.sub s 7) $ \tail7
+  Bool.match
+    (Bool.match
+      (_finder_val_at 0 tail7 x y)
+      (_finder_val_at tail7 0 x y)
+      (Bool.and (Nat.is_lte tail7 x) (Nat.is_lte y 6)))
+    (_finder_val_at 0 0 x y)
+    (Bool.and (Nat.is_lte x 6) (Nat.is_lte y 6))
+
+_in_finder = \s _in_corners (Nat.sub s 7) 6
+
+# Timing patterns: row 6 / col 6 between finders
+_in_timing = \s \x \y
+  let (Nat.sub s 9) $ \tail9
+  Bool.or (Bool.and (equal y 6) (Nat.in_range 8 tail9 x))
+  (Bool.and (equal x 6) (Nat.in_range 8 tail9 y))
+
+_timing_val = \x \y Bool.match (Nat.is_zero $ Nat.mod y 2) (Nat.is_zero $ Nat.mod x 2) (equal y 6)
+
+# Alignment pattern (V2 only): 5x5 centered at (18, 18)
+_in_alignment = \v \x \y
+  Bool.and (equal v 2)
+    (Bool.and (Nat.in_range 16 20 x) (Nat.in_range 16 20 y))
+
+_alignment_val = \x \y
+  Bool.not $ equal (Nat.max (Nat.diff x 18) (Nat.diff y 18)) 1
+
+# Static cell value at (x, y) for version v
+_static_val = \v \x \y
+  let (size v) $ \s
+  Bool.match (
+  Bool.match (
+  Bool.match (
+  Bool.match
+  false
+  (_alignment_val x y)
+  (_in_alignment v x y))
+  true
+  $ Bool.and (equal x 8) (equal y (Nat.sub s 8)))
+  (_timing_val x y)
+  $ _in_timing s x y)
+  (_finder_cell s x y)
+  $ _in_finder s x y
+
+# Cells reserved (function patterns + format info + dark module)
+is_reserved = \v \x \y
+  let (size v) $ \s
+  Bool.or (_in_corners (Nat.sub s 8) 8 x y)
+  (Bool.or (_in_timing s x y)
+   (_in_alignment v x y))
+
+# Right column of strip i (strips of 2 columns, walking right-to-left, skipping col 6)
+_x_right = \s \i
+  let (Nat.div (Nat.sub s 7) 2) $ \cutoff
+  Bool.match
+    (Nat.sub (Nat.sub s 2) (Nat.double i))
+    (Nat.sub (Nat.sub s 1) (Nat.double i))
+    (Nat.is_lt i cutoff)
+
+_num_strips = \s Nat.add 3 (Nat.div (Nat.sub s 7) 2)
+
+# Generate (x, y) positions for strip i in serpentine order (unfiltered)
+_strip_positions = \s \i
+  let (_x_right s i) $ \xr
+  let (Nat.is_zero $ Nat.mod i 2) $ \up
+  let (List.range s) $ \ys_asc
+  let (Bool.match ys_asc (List.reverse ys_asc) up) $ \ys
+  List.concat_map (\y [△ xr y; △ (Nat.sub xr 1) y]) ys
+
+# All data positions for version v in serpentine order (reserved cells removed)
+_data_positions = \v
+  let (size v) $ \s
+  List.filter
+    (\pos Pair.match (\x \y Bool.not $ is_reserved v x y) pos)
+    (List.concat_map (_strip_positions s) (List.range (_num_strips s)))
+
+# Place a single bit at a position; pass-through if out of bits
+_place_one = \state \pos
+  Pair.match
+    (\g \remaining
+      List.match (△ g [])
+        (\bit \rest Pair.match (\x \y △ (Qr.grid_set x y (Bool.match 0 1 bit) g) rest) pos)
+        remaining)
+    state
+
+# Build the full QR matrix (before masking and format info)
+qr_layout = \v \msg_bytes
+  let (size v) $ \s
+  let (List.concat_map (Qr.to_msb 8) msg_bytes) $ \bits
+  let (Qr.grid_mapi (\x \y \_ Bool.match 0 1 $ _static_val v x y) (Qr.grid_new s s 0)) $ \grid
+  Pair.fst $ List.foldl _place_one (△ grid bits) (_data_positions v)
+
+# Tests: verify static pattern values at key positions
+_to_string = Bool.to_source
+_static_val 1 0 0
+# = true
+_static_val 1 3 3
+# = true
+_static_val 1 2 2
+# = true
+_static_val 1 6 8
+# = true
+_static_val 1 8 6
+# = true
+_static_val 1 8 13
+# = true
+_static_val 2 18 18
+# = true
+_static_val 2 17 18
+# = false
+_static_val 2 16 16
+# = true
+_static_val 2 8 17
+# = true
+is_reserved 2 18 18
+# = true
+is_reserved 2 15 15
+# = false
+is_reserved 1 10 10
+# = false
+
+_to_string = Nat.to_source
+size 1
+# = 21
+size 2
+# = 25
+_num_strips 21
+# = 10
+_num_strips 25
+# = 12

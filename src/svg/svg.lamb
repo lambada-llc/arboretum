@@ -1,0 +1,28 @@
+# SVG primitives over Xml, with Nat coordinates.
+# root takes a scale factor: width/height are pixels, the viewBox spans
+# scale × that, so callers can lay out in integer units of 1/scale px and
+# stay in exact Nat arithmetic (no fractional pixel coordinates needed).
+_n = Nat.to_string
+root = \w \h \scale \extra \body Xml.element "svg" (List.concat
+  [△ "xmlns" "http://www.w3.org/2000/svg";
+   △ "width" (_n w); △ "height" (_n h);
+   △ "viewBox" (List.join " " ["0"; "0"; _n (Nat.mul scale w); _n (Nat.mul scale h)])]
+  extra) body
+background = \fill Xml.element "rect" [△ "width" "100%"; △ "height" "100%"; △ "fill" fill] []
+line = \x1 \y1 \x2 \y2 \extra Xml.element "line" (List.concat
+  [△ "x1" (_n x1); △ "y1" (_n y1); △ "x2" (_n x2); △ "y2" (_n y2)] extra) []
+circle = \cx \cy \r \extra Xml.element "circle" (List.concat
+  [△ "cx" (_n cx); △ "cy" (_n cy); △ "r" (_n r)] extra) []
+text = \x \y \extra \content Xml.element "text" (List.concat
+  [△ "x" (_n x); △ "y" (_n y)] extra) [content]
+
+# Tests
+_to_string = id
+line 0 1 2 3 [△ "stroke" "red"]
+# = <line x1="0" y1="1" x2="2" y2="3" stroke="red"/>
+circle 5 6 7 []
+# = <circle cx="5" cy="6" r="7"/>
+text 8 9 [△ "fill" "#444"] "hi"
+# = <text x="8" y="9" fill="#444">hi</text>
+root 2 1 16 [] [background "white"; circle 16 8 4 []]
+# = <svg xmlns="http://www.w3.org/2000/svg" width="2" height="1" viewBox="0 0 32 16"><rect width="100%" height="100%" fill="white"/><circle cx="16" cy="8" r="4"/></svg>
