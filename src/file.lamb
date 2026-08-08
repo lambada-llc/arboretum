@@ -1,6 +1,8 @@
 # A named file, typically used for build or test artifacts intended to leave the
-# LambAda ecosystem.
+# LambAda ecosystem. The build system of this repo emits top-level expressions
+# of this shape as expect-test files.
 
 file = \name \media_type \content △ (△ name media_type) content
 
 file "greeting.txt" "text/plain" "Hello, LambAda!"
+# = greeting.txt sha256:169f0107cf1f04ef1f514fe755abf1d909456d69ce8d507adeea8a20eb65dbb7
