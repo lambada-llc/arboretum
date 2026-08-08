@@ -1,27 +1,56 @@
+# The eager size programs, smallest first. Node counts:
 _to_string = Nat.to_source
 size Snat.size__smallest
+# = 103
+size Snat.size__eager_118
+# = 118
+size Snat.size__eager_125
 # = 125
-size Snat.size__fastest
-# = 261
 size Snat.size
 # = 161
+size Snat.size__fastest
+# = 261
 
+# What they cost, on a leaf and on a 125-node tree. Read `red` — the two
+# orderings it settles are why the lineup is what it is:
+#
+#  * The 125 is dominated outright by the 118, fewer nodes and fewer
+#    reductions both, which is why it no longer carries the __smallest name.
+#  * __smallest is the record and not the default. Its step recurses on a
+#    rebuilt △ⁿ chain rather than on a subtree, and that costs five to six
+#    times `size`'s reductions — worse the bigger the input: per input node it
+#    spends 130 / 135 / 156 / 165 reductions on inputs of 103 / 125 / 161 / 261
+#    nodes, where `size` holds flat at ~28.
+#  * `size` is the balance it is meant to be: 100 nodes below __fastest and
+#    within half a percent of its cost. Nothing below it is worth the slowdown.
 _to_string = id
-Bench.run [Snat.size__smallest; △]
+Bench.run [Snat.size__smallest;   △]
+# = oh | 0a 0b  1  2 3a 3b 3c | alc red
+#    3 | 10 12 15 18  1  0  1 |  22  35
+Bench.run [Snat.size__eager_118;  △]
+# = oh | 0a 0b  1  2 3a 3b 3c | alc red
+#    2 |  9 12 14 17  1  0  1 |  21  33
+Bench.run [Snat.size__eager_125;  △]
 # = oh | 0a 0b  1  2 3a 3b 3c | alc red
 #    2 |  8 14 16 19  1  0  0 |  22  36
-Bench.run [Snat.size__fastest;  △]
-# = oh | 0a 0b 1 2 3a 3b 3c | alc red
-#    2 |  2  2 6 5  1  0  0 |   4  12
-Bench.run [Snat.size;           △]
+Bench.run [Snat.size;             △]
 # = oh | 0a 0b  1  2 3a 3b 3c | alc red
 #    4 |  4  9 13 13  1  0  0 |  13  27
-Bench.run [Snat.size__smallest; Snat.size__smallest]
+Bench.run [Snat.size__fastest;    △]
+# = oh | 0a 0b 1 2 3a 3b 3c | alc red
+#    2 |  2  2 6 5  1  0  0 |   4  12
+Bench.run [Snat.size__smallest;   Snat.size__eager_125]
+# =   oh |   0a   0b    1    2 3a  3b  3c |   alc   red
+#   1110 | 4855 5964 7074 8679 40 456 574 | 10819 16823
+Bench.run [Snat.size__eager_118;  Snat.size__eager_125]
+# =  oh |   0a   0b    1    2 3a 3b  3c |  alc  red
+#   165 | 1118 1571 1814 2189 40 46 164 | 2689 4253
+Bench.run [Snat.size__eager_125;  Snat.size__eager_125]
 # =  oh |  0a   0b    1    2 3a 3b 3c |  alc  red
 #   165 | 993 1821 2064 2439 40 46 39 | 2814 4628
-Bench.run [Snat.size__fastest;  Snat.size__smallest]
-# =  oh |  0a   0b    1    2 3a 3b 3c |  alc  red
-#   328 | 569 1267 1590 1713 40 46 39 | 1836 3428
-Bench.run [Snat.size;           Snat.size__smallest]
+Bench.run [Snat.size;             Snat.size__eager_125]
 # =  oh |  0a   0b    1    2 3a 3b 3c |  alc  red
 #   330 | 571 1274 1597 1721 40 46 39 | 1845 3443
+Bench.run [Snat.size__fastest;    Snat.size__eager_125]
+# =  oh |  0a   0b    1    2 3a 3b 3c |  alc  red
+#   328 | 569 1267 1590 1713 40 46 39 | 1836 3428

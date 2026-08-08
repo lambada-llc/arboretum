@@ -5,45 +5,32 @@ _triage = \self triage id self $ \u
         (\v compose (self v))
         (\v self u)
 _functional_smallest = \self \x compose Snat.succ $ _triage self x
-size__smallest = \x (fix__wait _functional_smallest) x Snat.zero
+size__eager_125 = \x (fix__wait _functional_smallest) x Snat.zero
 
-# These are pinned to fix__wait, the knot they were searched against — core's
-# `fix` is now the quine knot below, which would silently shrink them to 118 and
-# invalidate both the count and the sibling relationships recorded here.
-# size__smallest is search-verified minimal at 125 nodes among fix__wait-knotted
-# forms: seed wrapper (5) + fix__wait knot
-# (44: the 17-node unfolder _h below, paid twice) + body (76). Exhaustive enumeration
-# (~150M candidates: all knot unfolders to 16 nodes, wrapper/dispatch shells to 14,
-# fork-case replacements to enum-15 with combinator atoms, every normal-form subtree
-# against all trees up to 11 nodes) plus ~60 reformulations through the compiler
-# (best alternative: 129) found nothing smaller, but surfaced five independent
-# same-size substitution sites — 31 sibling 125-node normal forms. One per site:
-#  _j for id as the leaf case                              (size__smallest2)
-#  _hj for _h in either knot slot                          (size__smallest3/4)
-#  _b2 for compose at either fork-case composition site    (size__smallest5/6)
-_j = △ (△ △ △) △
-_b2 = △ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △))
-_h = △ (△ (△ △ (△ (△ (△ (△ (△ (△ (△ △)) △)) (△ △)))))) (△ △)
-_hj = △ (△ (△ △ (△ (△ (△ (△ (△ (△ △ △) △)) (△ △)))))) (△ △)
-_f2 = \self \x compose Snat.succ $ triage _j self (\u _s (\v compose (self v)) (\v self u)) x
-size__smallest2 = \x (fix__wait _f2) x Snat.zero
-size__smallest3 = △ (△ (△ (△ _hj) (△ △ (△ (△ (△ △ _functional_smallest)) (△ (△ _h)))))) (△ △ △)
-size__smallest4 = △ (△ (△ (△ _h) (△ △ (△ (△ (△ △ _functional_smallest)) (△ (△ _hj)))))) (△ △ △)
-_f5 = \self \x compose Snat.succ $ triage id self (\u _s (\v _b2 (self v)) (\v self u)) x
-size__smallest5 = \x (fix__wait _f5) x Snat.zero
-_q6 = △ (△ (△ (△ (△ △ _b2)) (△ (△ (△ △ _s)) (△ (△ (△ △ compose)))))) (△ (△ (△ △ (△ △))))
-_f6 = \self \x compose Snat.succ $ triage id self (_q6 self) x
-size__smallest6 = \x (fix__wait _f6) x Snat.zero
+# Pinned to fix__wait, the knot it was searched against — core's `fix` is now
+# the quine knot below, which would silently shrink it to 118 and invalidate the
+# count recorded here. It held the record when it was found, and the search that
+# established it is why the two programs below leave its step alone and change
+# only the knot around it: it is minimal at 125 nodes among fix__wait-knotted
+# forms — seed wrapper (5) + fix__wait knot (44: a 17-node unfolder, paid twice)
+# + body (76) — by exhaustive enumeration (~150M candidates: all knot unfolders
+# to 16 nodes, wrapper/dispatch shells to 14, fork-case replacements to enum-15
+# with combinator atoms, every normal-form subtree against all trees up to 11
+# nodes) plus ~60 reformulations through the compiler, best alternative 129.
+# What that enumeration did turn up was five independent same-size substitution
+# sites, so the tree above is one of 31 sibling 125-node normal forms with
+# nothing to choose between them — and the 118 below dominates all 31 outright,
+# fewer nodes and fewer reductions both (src/snat/bench.lamb).
 
 # Smaller and still eager: a knot that costs 37 nodes where fix__wait's costs 44.
-# Where fix__wait keeps re-entry delayed behind wait — the 17-node unfolder _h,
+# Where fix__wait keeps re-entry delayed behind wait — a 17-node unfolder,
 # paid twice — the knot below is a quine: the loop rebuilds itself from the
 # copy it carries, and what keeps that eager-safe is that the rebuild only
 # ever happens under the input constructor just consumed, one unfolding per
 # node. _k is const of a triage: it drops an argument, splits a fork, and
 # applies the code found inside to that code's own stem —
 #   _k z (△ q z)  ⟶  q (△ q) z
-# — fourteen nodes, paid twice like _h, plus nine of wiring. Tie
+# — fourteen nodes, paid twice like fix__wait's unfolder, plus nine of wiring. Tie
 #   self = △ (△ _k) (△ q).
 # Rule (2) sends an application self z to _k z (△ q z) — the code and the
 # input packed into a fork — so self z ⟶ q (△ q) z, and a code value that
@@ -53,7 +40,7 @@ size__smallest6 = \x (fix__wait _f6) x Snat.zero
 # Every intermediate term is a value; nothing here waits, and nothing
 # unfolds except into the next constructor of the input. The step is
 # _functional_smallest, unchanged: only the knot around it is new, and the
-# certificates below are the same machine-checked ones the six above carry.
+# certificates below are the same machine-checked ones the 125 above carries.
 # That knot generalizes, and is now core's `fix` — so size__eager_118 is
 # exactly \x (fix _functional_smallest) x Snat.zero. It stays spelled out here
 # because size__eager_103 below builds on _k too.
@@ -88,6 +75,14 @@ size__eager_118 = \x (△ (△ _k) (△ _code)) x △
 _chain_step = \self \x compose Snat.succ $ triage id self (\u \v self (self u v)) x
 _chain_code = \sq _chain_step (△ (△ _k) sq)
 size__eager_103 = \x (△ (△ _k) (△ _chain_code)) x △
+
+# The record, and the smallest of these this repository can run under its own
+# rule — so it is what __smallest names. (size__smallest__lazy further down is
+# the normal-order record, 100, and needs Reflect.lazy_eval to run at all.)
+# Smallest is not cheapest: the chain it recurses on is rebuilt rather than
+# taken apart, and it pays five to six times `size`'s reductions for it, so it
+# is the record and not the default — see src/snat/bench.lamb.
+size__smallest = size__eager_103
 
 _to_string = Snat.to_string
 size__eager_118 (△ (△ △) (△ △))
@@ -131,7 +126,7 @@ Certify.Size.computes_size size__eager_103
 # are still the search's counts. Only running them needs normal order.
 #
 # The knot. Where fix__wait above keeps its recursion delayed behind wait — the 44
-# nodes size__smallest pays, _h twice included — these pay 7 once:
+# nodes size__eager_125 pays, its unfolder twice included — these pay 7 once:
 _fork_self = \f △ f (△ f) (△ f)
 # _fork_self is △ (△ (△ (△ △) △)) △: applied to a fork it hands the fork to
 # its own right branch — △ u v ↦ v (△ u v). Nothing delays that
@@ -156,11 +151,12 @@ _lazy_size = \tie \loop \t const tie t loop (const t)
 # reduces to tie loop (△ △ t) — enter the loop through tie, handing it the
 # input dragged one constructor behind. The states the loops then chew on are
 # built the same way: counts in progress, stems over a fork lagging what is
-# left of the input. Their workhorse is _b2 from above: _b2 w reduces to
-# △ (△ (△ △ w)) — count two, then the lag — which is also exactly what
-# compose w reduces to. One tree being both "add two" and "compose" is why it
-# could stand in for compose in size__smallest5/6, and why the searches below
-# keep rediscovering it.
+# left of the input. Their workhorse is _b2: _b2 w reduces to △ (△ (△ △ w)) —
+# count two, then the lag — which is also exactly what compose w reduces to.
+# One tree being both "add two" and "compose" is why it was one of the 125's
+# same-size substitution sites, and why the searches below keep rediscovering
+# it.
+_b2 = △ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △))
 
 # The 100 and the 104 are one architecture. Their step triages the state — a
 # leaf answers △, a stem answers itself — and a fork spills into _park and
@@ -200,8 +196,8 @@ _step_106 = \loop _state_106 loop (_b2 loop △)
 size__lazy_106 = _lazy_size _tie_open (_loop _step_106)
 
 # The 108 and the 113 drive one step, and it is not theirs: it is, node for
-# node, the 76-node body size__smallest's fix__wait knot drives — the expect test
-# below reads it back out of size__smallest — with everything around it
+# node, the 76-node body size__eager_125's fix__wait knot drives — the expect test
+# below reads it back out of size__eager_125 — with everything around it
 # re-carved. That is the sense in which #20's deletions started from the
 # eager program.
 _b2__left = \w compose Snat.succ Snat.succ (const w)
@@ -221,17 +217,17 @@ size__lazy_108 = \t const _tie_open t (_loop _step_carved) (△ t △)
 size__lazy_113 = \t _s _tie (const t) (_loop _step_carved) △
 # No dispatch at all: the head builds _s _tie (const t), which applied to the
 # loop reduces to X t, and the trailing △ completes the same X t △ call the
-# 108 makes. The assembled tree is size__smallest's own, with one cut: its
-# 19-node delayed re-entry △ (△ _h) replaced by the 7-node _fork_self.
+# 108 makes. The assembled tree is size__eager_125's own, with one cut: its
+# 19-node delayed re-entry replaced by the 7-node _fork_self.
 size__smallest__lazy = size__lazy_100
 
 # The carved-from claim, checked: the step the 108 and the 113 loop over sits
-# whole inside size__smallest — left, left, right, right, left, left, right
+# whole inside size__eager_125 — left, left, right, right, left, left, right
 # from the top.
 _left = triage △ id const
 _right = triage △ id (const id)
 _to_string = Bool.to_source
-equal _step_carved (_right (_left (_left (_right (_right (_left (_left size__smallest)))))))
+equal _step_carved (_right (_left (_left (_right (_right (_left (_left size__eager_125)))))))
 # = true
 
 _size_body = \self \x compose △ $ triage (\self id) (\u \self self self u) (\v \u \self compose (self self u) (self self v)) x self
@@ -245,26 +241,17 @@ Certify.Size.computes_size size
 # = true
 Certify.Size.computes_size size__fastest
 # = true
-Certify.Size.computes_size size__smallest
-# = true
-Certify.Size.computes_size size__smallest2
-# = true
-Certify.Size.computes_size size__smallest3
-# = true
-Certify.Size.computes_size size__smallest4
-# = true
-Certify.Size.computes_size size__smallest5
-# = true
-Certify.Size.computes_size size__smallest6
+Certify.Size.computes_size size__eager_125
 # = true
 
 # A true stands on a proof, and the proof is an induction tree that can be
 # looked at: Certify.Size.certify_size returns it, Certify.Size.render draws it. For
-# the minimal program — SPLIT with a case per shape of the split variable,
-# PEEL per emitted successor, GEN naming a subterm's count, FOLD closing an
-# instance of an induction hypothesis.
+# the 125, whose plain subtree recursion makes it the smallest proof here —
+# SPLIT with a case per shape of the split variable, PEEL per emitted
+# successor, GEN naming a subterm's count, FOLD closing an instance of an
+# induction hypothesis.
 _to_string = Option.match "no proof" Certify.Size.render
-Certify.Size.certify_size size__smallest
+Certify.Size.certify_size size__eager_125
 # = SPLIT t
 #     PEEL
 #       ZERO
@@ -288,22 +275,12 @@ _to_string = Bool.to_source
 # Certify.Size.computes_size_eagerly proves that and more: that reduction terminates
 # in every order, so these are `size` for an evaluator that reduces arguments
 # before it uses them, which is what this repository's rule asks of them. The
-# eight above are written to that rule and pass.
+# five above are written to that rule and pass.
 Certify.Size.computes_size_eagerly size
 # = true
 Certify.Size.computes_size_eagerly size__fastest
 # = true
-Certify.Size.computes_size_eagerly size__smallest
-# = true
-Certify.Size.computes_size_eagerly size__smallest2
-# = true
-Certify.Size.computes_size_eagerly size__smallest3
-# = true
-Certify.Size.computes_size_eagerly size__smallest4
-# = true
-Certify.Size.computes_size_eagerly size__smallest5
-# = true
-Certify.Size.computes_size_eagerly size__smallest6
+Certify.Size.computes_size_eagerly size__eager_125
 # = true
 
 # And it is what the __lazy ones fail, on the very first state: reducing them
@@ -541,22 +518,12 @@ Reflect.lazy_eval size__lazy_108 id
 Reflect.lazy_eval size__lazy_113 id
 # = 5
 
-# Node counts, which is what the __lazy and __eager ones are named after.
-size size__eager_118
-# = 118
+# Node counts, which is what the __eager and __lazy ones are named after.
 size size__eager_103
 # = 103
-size size__smallest
-# = 125
-size size__smallest2
-# = 125
-size size__smallest3
-# = 125
-size size__smallest4
-# = 125
-size size__smallest5
-# = 125
-size size__smallest6
+size size__eager_118
+# = 118
+size size__eager_125
 # = 125
 size size__lazy_100
 # = 100

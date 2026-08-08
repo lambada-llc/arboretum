@@ -26,8 +26,9 @@ tactic script.
 
 [`lean_test.lamb`](./lean_test.lamb) demonstrates it as file-style expect tests; the modules land in
 [`expect-test-out/`](./expect-test-out/) —
-`SizeProof125.lean` (the previous record `size__smallest`),
-`SizeProof118.lean` and `SizeProof103.lean` (the current records). The lazy
+`SizeProof125.lean` (the superseded `size__eager_125`), `SizeProof118.lean`,
+and `SizeProof103.lean` — the last of these is `size__smallest`, the eager
+record. The lazy
 100 gets `none` rather than a module: it converges in normal order only, so
 there is no big-step computation to replay; exporting the lazy certificates
 (CUT/ABSTRACT phase structure over small-step semantics) is future work.

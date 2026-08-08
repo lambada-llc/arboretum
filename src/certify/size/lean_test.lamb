@@ -10,7 +10,7 @@
 # GEN-TREE's minted arguments, and every App constructor one NORMALIZE step,
 # replayed from the program's eager reduction.
 
-Option.match △ id (Certify.Size.lean_size_proof "SizeProof125.lean" Snat.size__smallest)
+Option.match △ id (Certify.Size.lean_size_proof "SizeProof125.lean" Snat.size__eager_125)
 # = SizeProof125.lean sha256:b4518a23a403a5eaec87ba4c98639e21cfd0b054aa89a11b78da75417aa52737
 Option.match △ id (Certify.Size.lean_size_proof "SizeProof118.lean" Snat.size__eager_118)
 # = SizeProof118.lean sha256:4dc4508b78188005929817db43c6bd16289a05bf9acb730e68d8210cc20ffb66
