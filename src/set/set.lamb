@@ -1,0 +1,49 @@
+# Sets of arbitrary tree keys: a Map whose values are ignored (△ is stored),
+# so [member], [add] and [remove] cost what the map's lookup and update cost.
+# [entries] lists the elements, and [union], [diff] and [intersect] fold
+# [add]/[remove] over it.
+
+empty = Map.empty
+add = \k Map.set k _
+remove = Map.remove
+member = \k \s Option.match false (\_ true) $ Map.get k s
+entries = \s List.map Pair.fst $ Map.entries s
+from_list = List.foldr add empty
+union = \s1 \s2 List.foldr add s1 (entries s2)
+diff = \s1 \s2 List.foldr remove s1 (entries s2)
+intersect = \s1 \s2 from_list $ List.filter (\k member k s2) $ entries s1
+to_source = \f \s List.enclose "{" "; " "}" f (entries s)
+
+_to_string = Bool.to_source
+member "a" empty
+# = false
+member "a" (add "a" empty)
+# = true
+member "b" (add "a" empty)
+# = false
+member "a" (remove "a" (add "a" empty))
+# = false
+member "b" (remove "a" (add "b" (add "a" empty)))
+# = true
+
+_to_string = to_source String.to_source
+from_list ["c"; "a"; "b"]
+# = {"b"; "a"; "c"}
+
+_to_string = Bool.to_source
+member "b" (union (from_list ["a"]) (from_list ["b"; "c"]))
+# = true
+member "d" (union (from_list ["a"]) (from_list ["b"; "c"]))
+# = false
+member "a" (diff (from_list ["a"; "b"; "c"]) (from_list ["b"]))
+# = true
+member "b" (diff (from_list ["a"; "b"; "c"]) (from_list ["b"]))
+# = false
+member "b" (intersect (from_list ["a"; "b"; "c"]) (from_list ["b"; "c"; "d"]))
+# = true
+member "a" (intersect (from_list ["a"; "b"; "c"]) (from_list ["b"; "c"; "d"]))
+# = false
+
+_to_string = Nat.to_source
+List.length $ entries (from_list [1; 2; 3; 2; 1])
+# = 3
