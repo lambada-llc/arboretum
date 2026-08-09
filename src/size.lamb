@@ -1,3 +1,8 @@
+# The compose-chain bodies are the measured optimum. An accumulator rewrite
+# (thread \acc through the triage cases, succ it before dispatch, no compose)
+# measures bigger AND slower — size size 262→306, its Bench.run red 4799→6867 —
+# because the \acc plumbing eliminated through every case outweighs the one
+# compose closure per node it saves. Don't retry.
 size__smallest = \x (fix $ \self \x compose Nat.succ__smallest $ triage id self (\x \y compose (self x) (self y)) x) x 0
 _size_body = \self \x compose Nat.succ__fastest $ triage (\self id) (\l \self self self l) (\l \r \self compose (self self l) (self self r)) x self
 size__fastest = \x (self_apply _size_body) x 0

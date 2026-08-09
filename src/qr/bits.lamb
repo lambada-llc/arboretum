@@ -5,14 +5,19 @@ xor = Nat.xor
 bit_and = Nat.bit_and
 bit_or = Nat.bit_or
 
-# Shift left by n (multiply by 2^n) — prepend n false bits
-shl = \n \x Bool.match (List.concat (List.repeat n false) x) x $ Nat.is_zero x
+# Shift left by n (multiply by 2^n): Nat.shl prepends n zero low bits; zero is
+# passed through so it does not pick them up as padding.
+shl = \n \x Bool.match (Nat.shl n x) x $ Nat.is_zero x
 
-# Shift right by n (integer divide by 2^n) — drop n LSBs
-shr = \n Nat.canonicalize $ List.drop n
+# Shift right by n (integer divide by 2^n) — drop n LSBs. Nat.shr preserves
+# canonical form; it does not repair already-padded input (neither did the
+# previous spelling here: it applied Nat.canonicalize to the dropping function
+# rather than composing with it, which happens to reduce to the function
+# unchanged — so callers never got re-canonicalization from this symbol).
+shr = Nat.shr
 
 # Test if bit at position i is set (0-indexed from LSB)
-bit_test = \i \n List.nth i n
+bit_test = List.nth
 
 # Pad a number (LSB-first) to exactly w bits, truncating if longer
 _pad_to = \w \n List.take w $ List.concat n $ List.repeat w false

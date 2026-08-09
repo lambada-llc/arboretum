@@ -13,15 +13,19 @@ _gen_poly = \n
 # data: list of codewords (naturals 0-255), processed in order
 # gen_coeffs: generator polynomial coefficients, descending degree, excluding leading 1
 # Returns: list of EC codewords
+# Per data byte the register shifts one position and absorbs factor times the
+# generator; walking the shifted register and the coefficients together (one
+# zip) replaces the previous indexed lookup, which re-walked gen_coeffs from
+# the front for every position — quadratic in the EC codeword count.
 _rs_encode_with = \data \gen_coeffs
-  let (List.length gen_coeffs) $ \n
   List.foldl
     (\reg \data_byte
-      let (Qr.gf_add data_byte (Option.get_or 0 (List.head reg))) $ \factor
-      List.mapi
-        (\fb \i Qr.gf_add fb (Qr.gf_mul factor (Option.get_or 0 (List.nth i gen_coeffs))))
-        (List.concat (Option.get_or [] (List.tail reg)) [0]))
-    (List.repeat n 0)
+      let (Qr.gf_add data_byte (List.head_or 0 reg)) $ \factor
+      List.zip_with
+        (\fb \g Qr.gf_add fb (Qr.gf_mul factor g))
+        (List.concat (List.drop 1 reg) [0])
+        gen_coeffs)
+    (List.repeat (List.length gen_coeffs) 0)
     data
 
 # RS encode: given data codewords and number of EC codewords, produce EC codewords
