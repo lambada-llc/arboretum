@@ -46,3 +46,17 @@ case "$probe" in
      >&2 echo "ERROR: the extracted compiler cannot compile 'x = △'; the shipped one is left alone."
      exit 1 ;;
 esac
+
+# The scopes lambada's codemirror demo offers, cut from the same bundle. A root
+# brings along what it is built from, so each file is self-contained.
+>&2 echo "Exporting demo environments"
+env_dags=submodules/lambada/codemirror/demo/env-dags
+mkdir -p "$env_dags"
+
+# Unqualified names are the root module.
+$dag extract --matching '^([a-z]|(Bool|Pair|List|Fn|Nat|Snat|Option|String|Serialize|Map|Set)\.)' \
+  src/.dag-bundle-canonical > "$env_dags/basics.dag"
+
+# What the demo's sample calls, and nothing else of Qr.
+$dag extract --symbol Qr.create --symbol Qr.to_svg \
+  src/.dag-bundle-canonical > "$env_dags/qr.dag"
