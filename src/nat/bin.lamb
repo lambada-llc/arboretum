@@ -1,5 +1,8 @@
-to_bin = Nat.to_string_pow2 1 (Nat.add '0')
-from_bin = List.foldl (\acc \c Nat.add (Nat.double acc) (Nat.sub_x_48 c)) 0
+to_bin = Nat.to_string_pow2 1 (Nat.add_const '0')
+# acc := 2*acc + bit, where the bit is the incoming char's own low bit ('0' is
+# even, '1' odd) — no arithmetic at all, just a cons ([Nat.double] keeps a zero
+# accumulator canonical).
+from_bin = List.foldl (\acc \c Bool.match Nat.double (△ true) (List.head_or false c) acc) 0
 # Render a bit list (LSB-first bools) as '0'/'1' chars prepended onto [tl]
 # (difference-list style).
 bits_to_dstring = \n \tl List.foldr (\h \a \tl △ (Bool.match '0' '1' h) $ a tl) id n tl

@@ -36,7 +36,7 @@ div = \a \b mul a (inv b)
 
 _digits = fix $ \self \prec \rem \den
   Nat.match "" (\prec10
-    Pair.match (\d \r △ (Nat.add '0' d) (self prec10 r den))
+    Pair.match (\d \r △ (Nat.add_const '0' d) (self prec10 r den))
     $ Nat.divmod (Nat.mul_const 10 rem) den
   ) prec
 

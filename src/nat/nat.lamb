@@ -186,29 +186,82 @@ _to_digits = \base \digit fix $ \self List.match
     (\hd \tl \acc Pair.match (\div \mod self div (△ (digit mod) acc)) (divmod (△ hd tl) base))
 to_string_base = \base \digit \n Bool.match (_to_digits base digit n "") "0" (is_zero n)
 from_string_base = \base \digit List.foldl (\acc \c add (mul_const base acc) (digit c)) 0
-# Fast constant-subtraction variants for ASCII parsing. Each assumes its argument
-# is in the stated range; the ASCII digit/letter blocks are power-of-two aligned,
-# so subtracting the block base is just keeping the low bits (_keep applied n
-# times = take n) plus a -1 for the letter blocks — no borrow, no zip, ~20-28x
-# cheaper than sub. The nc* forms skip canonicalization (trailing zero bits may
-# remain, like ncsub); the sub_x_* forms canonicalize, matching sub exactly.
+# Constant-operand adders and subtractors. Like [mul_const] for multiplication,
+# these take an operand known at build time and reduce to an adder/subtractor
+# specialized to that constant's bits: an unrolled chain with one step per
+# constant bit — no zip, no 3-bit table, and no carry/borrow bookkeeping at
+# runtime beyond what the constant's bits force.
+#
+# Each chain step matches one bit of the argument and hands the tail to the
+# continuation for the carry/borrow state the step leaves behind. [_copy_step]
+# owes nothing at its position and passes the bit through; [_flip_step] owes
+# exactly one there (a set constant bit, or an incoming carry/borrow — owing
+# both at once passes the bit through and keeps owing, which is [_copy_step]
+# again on the other continuation). Once the constant's bits are exhausted, a
+# pending carry is exactly [succ], a pending borrow exactly [pred], and no debt
+# is [id]. [e] is the result when the argument runs out first: nothing for
+# subtraction (which assumes k <= a), the remaining constant bits (plus the
+# pending carry) for addition.
+#
+# Reductions per call roughly halve versus the general add/sub, but every owed
+# position embeds both continuations, so the reduced tree grows with the
+# constant's set-bit count — for a dense constant the shared general form can
+# be smaller (see the size comparison in bench.lamb). The per-character parsing
+# constants these serve are thin, and the block forms below shed the dense
+# leading run entirely.
+_copy_step = \e \k \l List.match e (\h \t △ h (k t)) l
+_flip_step = \e \k0 \k1 \l List.match e (\h \t Bool.match (△ true (k0 t)) (△ false (k1 t)) h) l
+_keep = _copy_step []
+# Walk the constant's bits LSB-first, pairing the no-debt chain with the
+# debt-pending one so a step can route each bit to either.
+_sub_chain = fix $ \self List.match
+    (Pair.create id pred)
+    (\kb \rest Pair.let (self rest) $ \nb \b Bool.match
+        (Pair.create (_keep nb) (_flip_step [] b nb))
+        (Pair.create (_flip_step [] b nb) (_keep b))
+        kb)
+_add_chain = fix $ \self List.match
+    (Pair.create id succ)
+    (\kb \rest Pair.let (self rest) $ \nc \c
+        let (△ kb rest) $ \low
+        Bool.match
+            (Pair.create (_copy_step low nc) (_flip_step (succ low) nc c))
+            (Pair.create (_flip_step low nc c) (_copy_step (succ low) c))
+            kb)
+add_const = \k Pair.fst (_add_chain k)
+# ncsub_const k assumes k <= a and may leave trailing zero bits where the
+# constant's high bits cancel the argument's (like ncsub); sub_const
+# canonicalizes, matching sub exactly.
+ncsub_const = \k Pair.fst (_sub_chain k)
+sub_const = \k compose canonicalize (ncsub_const k)
+# The block forms additionally assume the argument has exactly the constant's
+# bit-length (k <= a < 2^bitlen k) — true of an ASCII character and its
+# power-of-two-aligned block base, the common case when parsing. Under that
+# assumption the constant's leading run of set bits is guaranteed to match the
+# argument's top bits and cancel, so those positions truncate away (the mask
+# form: keeping the low bits) and only the constant's bits below the run —
+# usually none — need a borrow chain.
+_strip_high_run = List.foldr (\b \low Bool.match (△ b low) (List.match [] (\h \t △ b (△ h t)) low) b) []
+_mask = fix $ \self List.match (\_ []) (\_ \rest _keep (self rest))
+ncsub_const_block = \k
+    let (_strip_high_run k) $ \low
+    let (canonicalize low) $ \rem
+    List.match (_mask low) (\_ \_ compose (ncsub_const rem) (_mask low)) rem
+sub_const_block = \k compose canonicalize (ncsub_const_block k)
+# The ASCII block bases shared by decimal/hex parsing; each assumes its
+# argument is in the stated range.
 # Note: the non-canonicalizing forms must not feed functions the build reduces to
 # whole-program normal form against symbolic input (e.g. parser combinators), as
 # that reduction diverges; use the sub_x_* forms there.
-# TODO: replace these hand-rolled variants with generalized machinery that, given
-# a constant known at build time, generates the optimal (non-)canonicalizing
-# subtractor — e.g. picking the mask form when the constant is power-of-two
-# aligned and falling back to an unrolled borrow chain otherwise.
-_keep = \rest \l List.match [] (\h \t △ h (rest t)) l
-ncsub_x_48 = _keep (_keep (_keep (_keep (\_ []))))                             # c - '0', c in '0'..'9'
-ncsub_x_65 = \c pred (_keep (_keep (_keep (_keep (_keep (_keep (\_ [])))))) c) # c - 'A', c in 'A'..'Z'/'A'..'F'
-ncsub_x_97 = \c pred (_keep (_keep (_keep (_keep (_keep (\_ []))))) c)         # c - 'a', c in 'a'..'z'/'a'..'f'
-sub_x_48 = \c canonicalize (ncsub_x_48 c)
-sub_x_65 = \c canonicalize (ncsub_x_65 c)
-sub_x_97 = \c canonicalize (ncsub_x_97 c)
-to_string = to_string_base 10 (add '0')
+ncsub_x_48 = ncsub_const_block '0' # c - '0', c in '0'..'9'
+ncsub_x_65 = ncsub_const_block 'A' # c - 'A', c in 'A'..'Z'/'A'..'F'
+ncsub_x_97 = ncsub_const_block 'a' # c - 'a', c in 'a'..'z'/'a'..'f'
+sub_x_48 = sub_const_block '0'
+sub_x_65 = sub_const_block 'A'
+sub_x_97 = sub_const_block 'a'
+to_string = to_string_base 10 (add_const '0')
 to_source = to_string
-to_dstring = \n Bool.match (_to_digits 10 (add '0') n) (△ '0') (is_zero n)
+to_dstring = \n Bool.match (_to_digits 10 (add_const '0') n) (△ '0') (is_zero n)
 # Decimal-string -> nat: subtract '0' from each digit directly. This is the small
 # default. The from_string.lamb sibling defines a [__fastest] variant that
 # memoizes the digit lookup into a table (larger tree, fewer reductions). Keeping
@@ -350,6 +403,33 @@ ncsub_x_65 'C'
 # = 2
 ncsub_x_97 'c'
 # = 2
+
+add_const 0 5
+# = 5
+add_const 9 1
+# = 10
+add_const 3 3
+# = 6
+add_const 10 250
+# = 260
+add_const 100 0
+# = 100
+add_const '0' 7
+# = 55
+sub_const 0 7
+# = 7
+sub_const 1 8
+# = 7
+sub_const 100 255
+# = 155
+sub_const ' ' 'a'
+# = 65
+sub_const 5 5
+# = 0
+sub_const_block 200 201
+# = 1
+sub_const_block 200 255
+# = 55
 
 div__smallest 7   3
 # = 2

@@ -1,10 +1,17 @@
-# Both match branches take the char/nat as an argument, so only the selected
-# range's conversion is computed.
-_from_char = \c Bool.match
-    (\c Bool.match (\c Nat.add 10 (Nat.sub_x_65 c)) (\c Nat.add 10 (Nat.sub_x_97 c)) (Nat.is_lte 'a' c) c)
-    Nat.sub_x_48
-    (Nat.is_lte c '9') c
-_to_char = \n Bool.match (\n Nat.add 'A' $ Nat.sub n 10) (Nat.add '0') (Nat.is_lte n 9) n
+# Both directions read the ASCII layout's bits instead of comparing against
+# range bounds. Char -> value: '0'..'9' (48..57) carry their value in the low
+# nibble, 'A'..'F' (65..70) and 'a'..'f' (97..102) carry value-9 there, and the
+# letter blocks are exactly the code points with bit 6 set — so the value is
+# the low nibble, plus 9 for chars at or past 64, with no comparison chain and
+# no subtraction. Both match branches take the char as an argument, so only the
+# selected range's conversion is computed.
+_nibble = \c Nat.canonicalize (List.take 4 c)
+_from_char = \c Bool.match (\c Nat.add_const 9 (_nibble c)) _nibble (Nat.is_zero (Nat.shr 6 c)) c
+# Value -> char: '0' + n below ten and ('A' - 10) + n from ten up, one constant
+# add either way. A nibble is ten or more exactly when bit 3 and (bit 1 or
+# bit 2) are set — read off the bits rather than compared.
+_is_ge_10 = List.match false (\_ \t List.match false (\b1 \t List.match false (\b2 \t List.match false (\b3 \_ Bool.and b3 (Bool.or b1 b2)) t) t) t)
+_to_char = \n Bool.match (Nat.add_const '0') (Nat.add_const (Nat.sub 'A' 10)) (_is_ge_10 n) n
 from_hex = Nat.from_string_base 16 _from_char
 to_hex = Nat.to_string_pow2 4 _to_char
 byte_to_hex = \byte [ _to_char (Nat.shr 4 byte); _to_char (List.take 4 byte) ]
