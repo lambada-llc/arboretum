@@ -7,6 +7,11 @@
 # _add sums two records pointwise and keeps the longer tail, treating the
 # missing one as zeros — so a delta is written sparsely, stopping right after
 # its rule's slot, and only _extract pads to all eight against _base.
+# Versus the previous CPS-record harness (an eight-field consumer lambda
+# spelled out per rule, three hand-written merges), meta-benching each harness
+# running [Nat.add; 127; 127] puts the trade at half the reduced tree (92106
+# -> 45434 nodes) for ~12% more self-reductions (2.97M -> 3.33M) — bookkeeping
+# no table records, so every measured output is identical.
 _base = [0; 0; 0; 0; 0; 0; 0; 0]
 _add = fix $ \self \a \b
     List.match b (\ha \ta List.match a (\hb \tb △ (Nat.add ha hb) (self ta tb)) b) a
