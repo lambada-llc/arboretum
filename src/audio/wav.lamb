@@ -74,7 +74,7 @@ render = \wave \gap \notes List.concat_map
 # `Music.pitch` names them.
 _sr = 8000
 _step = step _sr
-_wav = \name \samples △ (△ name "audio/wav") (encode _sr samples)
+_wav = \name \samples file name "audio/wav" (encode _sr samples)
 
 # 0.5 s steady square-wave A4.
 _wav "tone.wav" (List.map (square (_step 440000)) (List.range 4000))
