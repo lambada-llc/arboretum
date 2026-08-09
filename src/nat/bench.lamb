@@ -203,21 +203,21 @@ Bench.run [Nat.mod__fastest;  255; 10]
 # and binary.
 _to_string = Nat.to_source
 size Nat.to_string
-# = 4718
+# = 4502
 size Nat.from_string
 # = 2810
 size Nat.from_string__fastest
 # = 14871
 size Nat.to_hex
-# = 4735
+# = 4719
 size Nat.from_hex
-# = 11925
+# = 6221
 size Nat.byte_to_hex
-# = 8184
+# = 8152
 size Nat.to_bin
-# = 1745
+# = 1529
 size Nat.from_bin
-# = 2000
+# = 177
 
 _to_string = id
 Bench.run [Nat.to_string;    0]
@@ -225,10 +225,10 @@ Bench.run [Nat.to_string;    0]
 #    2 | 25 26 49 50  2  1  1 |  51 103
 Bench.run [Nat.to_string;    255]
 # =   oh |   0a   0b    1    2  3a  3b  3c |  alc   red
-#   1048 | 2701 4573 6851 6924 229 209 505 | 7274 14718
+#   1026 | 2609 4358 6553 6628 204 201 467 | 6967 14053
 Bench.run [Nat.to_string;    65535]
 # =   oh |   0a    0b     1     2  3a  3b   3c |   alc   red
-#   2862 | 9210 15824 23376 23699 792 682 1803 | 25034 50352
+#   2824 | 9050 15451 22857 23185 750 667 1737 | 24501 49196
 Bench.run [Nat.from_string;  "0"]
 # = oh | 0a  0b   1   2 3a 3b 3c | alc red
 #   18 | 86 155 200 223 25  2 19 | 241 469
@@ -248,26 +248,26 @@ Bench.run [Nat.from_string__fastest;  "65535"]
 # = oh |  0a  0b    1    2  3a 3b  3c |  alc  red
 #   81 | 474 938 1336 1374 182 91 181 | 1412 3164
 Bench.run [Nat.to_hex;       255]
-# =  oh |  0a   0b    1    2 3a 3b  3c |  alc  red
-#   147 | 896 1476 2241 2244 73 66 197 | 2372 4821
+# = oh |  0a  0b    1    2 3a 3b 3c |  alc  red
+#   53 | 490 692 1127 1128 31 26 83 | 1182 2395
 Bench.run [Nat.to_hex;       65535]
-# =  oh |   0a   0b    1    2  3a  3b  3c |  alc  red
-#   293 | 1776 2932 4447 4452 143 132 393 | 4708 9567
-Bench.run [Nat.from_hex;     "FF"]
-# =  oh |   0a   0b    1    2  3a 3b  3c |  alc  red
-#   311 | 1049 1865 2706 2753 123 74 236 | 2914 5892
-Bench.run [Nat.from_hex;     "FFFF"]
-# =  oh |   0a   0b    1    2  3a  3b  3c |  alc   red
-#   645 | 2309 4149 5926 6049 255 152 540 | 6458 12922
-Bench.run [Nat.byte_to_hex;  171]
 # =  oh |  0a   0b    1    2 3a 3b  3c |  alc  red
-#   111 | 630 1083 1592 1620 74 41 138 | 1713 3465
+#   105 | 964 1364 2219 2220 59 52 165 | 2328 4715
+Bench.run [Nat.from_hex;     "FF"]
+# =  oh |  0a   0b    1    2 3a 3b  3c |  alc  red
+#   123 | 905 1453 2098 2153 57 32 206 | 2358 4546
+Bench.run [Nat.from_hex;     "FFFF"]
+# =  oh |   0a   0b    1    2  3a 3b  3c |  alc   red
+#   269 | 2021 3325 4710 4849 123 68 480 | 5346 10230
+Bench.run [Nat.byte_to_hex;  171]
+# = oh |  0a  0b   1   2 3a 3b 3c | alc  red
+#   27 | 286 423 687 683 24 19 53 | 709 1466
 Bench.run [Nat.to_bin;       255]
-# = oh |  0a  0b    1    2 3a 3b  3c |  alc  red
-#   81 | 632 932 1467 1484 59 24 121 | 1564 3155
+# = oh |  0a  0b    1    2 3a 3b 3c |  alc  red
+#   49 | 520 652 1091 1108 27  8 73 | 1172 2307
 Bench.run [Nat.from_bin;     "11111111"]
-# =  oh |   0a   0b    1    2  3a 3b  3c |  alc  red
-#   163 | 1116 2088 2617 2825 149 23 319 | 3204 5933
+# = oh | 0a  0b   1   2 3a 3b 3c | alc red
+#    8 | 64 120 160 160  1  8 24 | 184 353
 
 # How close is `mul 10` to a function hand-specialized to x10 using only double
 # and add? 10*b = double (b + double (double b)) = double (b + 4b) = double (5b).
@@ -310,3 +310,46 @@ Bench.run [_mul10_const; 200]
 Bench.run [_mul10_spec;  200]
 # = oh |  0a  0b   1   2 3a 3b 3c | alc  red
 #   28 | 200 397 519 534 23  5 70 | 597 1151
+
+# The same comparison for the constant-operand adder/subtractor chains
+# (mul_const above answers it for multiplication): a partial application of the
+# general add/sub drags the whole zip-and-ripple machinery along and re-walks
+# the constant on every call, while add_const/sub_const reduce to a chain of
+# one step per constant bit. Note the tree-size tradeoff on display: the chains
+# roughly halve the reductions, but each owed position embeds both the
+# carry/borrow continuations, so a dense constant's chain (sub_const 100 below)
+# outgrows the shared general form it replaces.
+_add48       = Nat.add '0'
+_add48_const = Nat.add_const '0'
+_sub100       = \a Nat.sub a 100
+_sub100_const = Nat.sub_const 100
+
+_to_string = Nat.to_source
+size _add48
+# = 792
+size _add48_const
+# = 576
+size _sub100
+# = 998
+size _sub100_const
+# = 2111
+
+_to_string = id
+Bench.run [_add48;       9]
+# = oh | 0a  0b   1   2 3a 3b 3c | alc red
+#   10 | 56 113 161 160 13  3 22 | 169 359
+Bench.run [_add48_const; 9]
+# = oh | 0a 0b  1  2 3a 3b 3c | alc red
+#    0 | 12 12 20 20  1  0  4 |  24  45
+Bench.run [_add48;       255]
+# = oh | 0a  0b   1   2 3a 3b 3c | alc red
+#   18 | 86 174 254 245 10 13 33 | 260 555
+Bench.run [_add48_const; 255]
+# = oh | 0a 0b   1   2 3a 3b 3c | alc red
+#    9 | 40 72 102 102  2  6 11 | 112 223
+Bench.run [_sub100;       255]
+# = oh |  0a  0b   1   2 3a 3b 3c | alc  red
+#   46 | 268 526 738 728 14 34 89 | 794 1603
+Bench.run [_sub100_const; 255]
+# = oh |  0a  0b   1   2 3a 3b 3c | alc  red
+#   27 | 172 294 475 450 10 31 50 | 466 1016

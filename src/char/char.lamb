@@ -8,8 +8,8 @@ is_alphanum = Fn.p_or is_alpha is_digit
 is_whitespace = \c Nat.is_lte c ' '
 is_newline = Fn.p_or (equal_const 10) (equal_const 13)
 
-to_lower = \c Bool.match c (Nat.add ' ' c) (is_uppercase c)
-to_upper = \c Bool.match c (Nat.sub c ' ') (is_lowercase c)
+to_lower = \c Bool.match c (Nat.add_const ' ' c) (is_uppercase c)
+to_upper = \c Bool.match c (Nat.sub_const ' ' c) (is_lowercase c)
 
 is_alpha__fastest = Memo.precompute_alt Memo.gen_ascii_high false is_alpha
 is_alphanum__fastest = Memo.precompute_alt Memo.gen_ascii false is_alphanum

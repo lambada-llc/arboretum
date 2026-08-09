@@ -780,7 +780,7 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 7561
 #   Parse:    2430
-#   Lower:    208422
+#   Lower:    208210
 #   Emit:     36255
 
 # Bracket abstraction over an application spine, which used to be exponential in

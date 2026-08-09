@@ -17,19 +17,25 @@ _pair_at = \b Pair.match (Bool.match (\a \b a) (\a \b b) b)
 _alphabet_get = \x0 \x1 \x2 \x3 \x4 \x5
   List.head_or _ $ _pair_at x5 $ _pair_at x4 $ _pair_at x3 $ _pair_at x2 $ _pair_at x1 $ _pair_at x0 _alphabet_tree
 
-# Decoding direction: the alphabet is regular, so a character's index is
-# arithmetic — no lookup table needed. Ranges: A-Z → 0-25, a-z → 26-51,
-# 0-9 → 52-61, '+' → 62, '/' → 63.
+# Decoding direction: the alphabet is regular, so a character's index is read
+# straight off the ASCII layout's bits — no lookup table and no comparison
+# chain. Bit 6 splits the letters from the rest and bit 5 their case:
+#   'A'..'Z' (65..90)  -> 0..25    c - 'A'
+#   'a'..'z' (97..122) -> 26..51   c - ('a' - 26)
+# Below 64, bit 4 splits the digits from the two symbols:
+#   '0'..'9' (48..57)  -> 52..61   c + 4
+#   '+' (43), '/' (47) -> 62, 63   told apart by bit 2.
+_bit = \n \c List.head_or false (Nat.shr n c)
 _b64_index = \c Bool.match
-  (Bool.match
-    (Bool.match
-      (Bool.match 62 63 (Nat.is_lte '/' c))
-      (Nat.add 52 (Nat.sub c '0'))
-      (Nat.is_lte '0' c))
-    (Nat.sub c 'A')
-    (Nat.is_lte 'A' c))
-  (Nat.add 26 (Nat.sub c 'a'))
-  (Nat.is_lte 'a' c)
+  (\c Bool.match
+    (\_ Bool.match 62 63 (_bit 2 c))
+    (Nat.add_const 4)
+    (_bit 4 c) c)
+  (\c Bool.match
+    (Nat.ncsub_const_block 'A')
+    (Nat.ncsub_const_block (Nat.sub 'a' 26))
+    (_bit 5 c) c)
+  (_bit 6 c) c
 _of_base64 = List.foldr
   (\b64 \res List.concat (List.take 6 $ List.concat (_b64_index b64) [false;false;false;false;false;false]) res)
   []
