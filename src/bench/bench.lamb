@@ -1,58 +1,48 @@
-_base = \f f 0 0 0 0 0 0 0 0
+# A cost record is a list of eight counters in column order
+# [0a; 0b; 1; 2; 3a; 3b; 3c; oh]: the two allocation rules (0a stem, 0b fork),
+# the five reduction rules (1 K, 2 S, 3a/3b/3c triage), and last the overhead —
+# work that went into results a K-like function then discarded. Each _eval case
+# pairs its result with a record transformer `_add subtotal`, where the subtotal
+# is the case's own one-rule delta plus the child transformers applied to it.
+# _add sums two records pointwise and keeps the longer tail, treating the
+# missing one as zeros — so a delta is written sparsely, stopping right after
+# its rule's slot, and only _extract pads to all eight against _base.
+_base = [0; 0; 0; 0; 0; 0; 0; 0]
+_add = fix $ \self \a \b
+    List.match b (\ha \ta List.match a (\hb \tb △ (Nat.add ha hb) (self ta tb)) b) a
 
 _eval = fix $ \self
     triage
-      (\z △ (△ z) (△
-        (\f f $ \as \af \nk \ns \t1 \t2 \t3 \oh \f f (Nat.succ as) af nk ns t1 t2 t3 oh)
-        1))
-      (\y \z △ (△ y z) (△
-        (\f f $ \as \af \nk \ns \t1 \t2 \t3 \oh \f f as (Nat.succ af) nk ns t1 t2 t3 oh)
-        1))
+      (\z △ (△ z) (△ (_add [1]) 1))
+      (\y \z △ (△ y z) (△ (_add [0; 1]) 1))
       (triage
-        (\y \z △ y (△
-          (\f f $ \as \af \nk \ns \t1 \t2 \t3 \oh \f f as af (Nat.succ nk) ns t1 t2 t3 oh)
-          1))
+        (\y \z △ y (△ (_add [0; 0; 1]) 1))
         (\x \y \z
           Pair.let (self x z) $ \r1 \cd1 Pair.let cd1 $ \c1 \l1
           Pair.let (self y z) $ \r2 \cd2 Pair.let cd2 $ \c2 \l2
           Pair.let (self r1 r2) $ \r \cd  Pair.let cd  $ \c  \l
           let (triage false (\_ false) (\xx \_ triage true (\_ false) (\_ \_ false) xx) r1) $ \is_k
-          let (Bool.match 0 l2 is_k) $ \extra_oh
-          let (Nat.succ (Nat.add l1 (Nat.add (Bool.match l2 0 is_k) l))) $ \new_l
           △ r (△
-            ((c1 $ c2 $ c _base) $ \a \b \k \n \u1 \u2 \u3 \h
-              \f f $ \as \af \nk \ns \t1 \t2 \t3 \oh
-                \f f (Nat.add as a) (Nat.add af b) (Nat.add nk k) (Nat.succ (Nat.add ns n)) (Nat.add t1 u1) (Nat.add t2 u2) (Nat.add t3 u3) (Nat.add oh (Nat.add h extra_oh)))
-            new_l))
+            (_add $ c1 $ c2 $ c [0; 0; 0; 1; 0; 0; 0; Bool.match 0 l2 is_k])
+            (Nat.succ (Nat.add l1 (Nat.add (Bool.match l2 0 is_k) l)))))
         (\w \x \y \z
           triage
-            (△ w (△
-              (\f f $ \as \af \nk \ns \t1 \t2 \t3 \oh \f f as af nk ns (Nat.succ t1) t2 t3 oh)
-              1))
+            (△ w (△ (_add [0; 0; 0; 0; 1]) 1))
             (\a
                 Pair.let (self x a) $ \r \cd Pair.let cd $ \c \l
-                △ r (△
-                  ((c _base) $ \a \b \k \n \u1 \u2 \u3 \h
-                    \f f $ \as \af \nk \ns \t1 \t2 \t3 \oh
-                      \f f (Nat.add as a) (Nat.add af b) (Nat.add nk k) (Nat.add ns n) (Nat.add t1 u1) (Nat.succ (Nat.add t2 u2)) (Nat.add t3 u3) (Nat.add oh h))
-                  (Nat.succ l)))
+                △ r (△ (_add $ c [0; 0; 0; 0; 0; 1]) (Nat.succ l)))
             (\a \b
                 Pair.let (self y a) $ \r  \cd1 Pair.let cd1 $ \c1 \l1
                 Pair.let (self r b) $ \r  \cd2 Pair.let cd2 $ \c2 \l2
-                △ r (△
-                  ((c1 $ c2 _base) $ \a \b \k \n \u1 \u2 \u3 \h
-                    \f f $ \as \af \nk \ns \t1 \t2 \t3 \oh
-                      \f f (Nat.add as a) (Nat.add af b) (Nat.add nk k) (Nat.add ns n) (Nat.add t1 u1) (Nat.add t2 u2) (Nat.succ (Nat.add t3 u3)) (Nat.add oh h))
-                  (Nat.succ (Nat.add l1 l2))))
+                △ r (△ (_add $ c1 $ c2 [0; 0; 0; 0; 0; 0; 1]) (Nat.succ (Nat.add l1 l2))))
             z))
 
-_extract = \cost_data Pair.match (\cost \_l
-  cost (\f f 0 0 0 0 0 0 0 0) $ \as \af \nk \ns \t1 \t2 \t3 \oh
-    [Nat.to_string oh; "|";
-     Nat.to_string as; Nat.to_string af; Nat.to_string nk; Nat.to_string ns;
-     Nat.to_string t1; Nat.to_string t2; Nat.to_string t3; "|";
-     Nat.to_string (Nat.add as af);
-     Nat.to_string (Nat.sum [nk; ns; t1; t2; t3])]) cost_data
+_extract = \cost_data Pair.let cost_data $ \cost \_l
+    let (cost _base) $ \totals
+    let (List.take 7 totals) $ \counts
+    List.concat [Nat.to_string (List.nth_or 0 7 totals); "|"] $
+    List.concat (List.map Nat.to_string counts)
+      ["|"; Nat.to_string (Nat.sum (List.take 2 counts)); Nat.to_string (Nat.sum (List.drop 2 counts))]
 
 _collect = fix $ \self \current List.match
     []
