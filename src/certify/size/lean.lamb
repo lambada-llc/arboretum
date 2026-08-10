@@ -49,7 +49,7 @@ _fvar_lookup = \n fix $ \self List.match Option.none (\h \tl Pair.let h $ \arg \
 # [some (△ st (△ value proof))], or none where reduction blocks on anything
 # but the loop value or a minted function. Applying the loop value mints a
 # hypothesis; applying a minted f-variable yields its stack specification.
-# Fuelled, so a program whose eager reduction does not return — the __lazy
+# Fuelled, so a program whose eager reduction does not return — the __wn
 # family — costs a none rather than an answer that never comes.
 _fuel = Snat.from_nat 3000
 _emit = \selfq fix $ \self \fuel \st \a \b

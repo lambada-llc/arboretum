@@ -23,5 +23,5 @@ Option.match △ id (Certify.Size.lean_size_proof "SizeProof103.lean" Snat.size_
 # Exporting the lazy certificates would take small-step semantics and their
 # phase structure (CUT, ABSTRACT), which this emitter does not cover.
 _to_string = Option.match "none" (\_ "a module")
-Certify.Size.lean_size_proof "SizeProof100.lean" Snat.size__lazy_100
+Certify.Size.lean_size_proof "SizeProof100.lean" Snat.size__wn_100
 # = none
