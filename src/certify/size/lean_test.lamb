@@ -17,8 +17,9 @@ Option.match △ id (Certify.Size.lean_size_proof "SizeProof118.lean" Snat.size_
 Option.match △ id (Certify.Size.lean_size_proof "SizeProof103.lean" Snat.size__eager_103)
 # = SizeProof103.lean sha256:e9112963626f243a9dfd353270499b5dec22ae73e02f268d138cad12020dad18
 
-# No module for a program with no eager derivation: the lazy 100 converges in
-# normal order only, so there is no big-step computation to replay — every
+# No module for a program with no eager derivation: the weakly normalizing
+# 100 converges in normal order only — as do Nathan Farlow's 78 and 95, the
+# records of that family — so there is no big-step computation to replay; every
 # derivation of the relation the modules define evaluates all its premises.
 # Exporting the lazy certificates would take small-step semantics and their
 # phase structure (CUT, ABSTRACT), which this emitter does not cover.
