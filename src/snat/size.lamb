@@ -28,9 +28,10 @@ size__eager_125 = \x (fix__wait _functional_smallest) x Snat.zero
 # Smaller and still eager: a knot that costs 37 nodes where fix__wait's costs 44.
 # Where fix__wait keeps re-entry delayed behind wait — a 17-node unfolder,
 # paid twice — the knot below is a quine: the loop rebuilds itself from the
-# copy it carries, and stays eager-safe because the rebuild only ever
-# happens under the input constructor just consumed, one unfolding per
-# node. Every intermediate term is a value; nothing here waits. The step is
+# copy it carries, and applications of it stay strongly normalizing because
+# the rebuild only ever happens under the input constructor just consumed,
+# one unfolding per node. Every intermediate term is a value; nothing here
+# waits. The step is
 # _functional_smallest, unchanged: only the knot around it is new, and the
 # certificates below are the same machine-checked ones the 125 above
 # carries. That knot generalizes, and is now core's `fix` — so
@@ -66,7 +67,8 @@ size__eager_118 = \x (△ (△ _k) (△ _code)) x △
 # filter — the same deletion-and-replacement spirit as #20, pointed at the
 # eager family — first as a 110 tied with fix__wait's knot, then reformulated
 # through the compiler and retied with _k. Every unfolding consumes one
-# node of state, so reduction terminates in every order — but recursion on
+# node of state, so reduction terminates in every order — the application
+# strongly normalizes — but recursion on
 # a rebuilt chain is not recursion on a subtree, which no structural FOLD
 # closes. The eager certifier carries size-measure rules for exactly this
 # shape (RGEN and GEN-TREE, src/certify/size): the chain becomes a
@@ -76,7 +78,8 @@ size__eager_118 = \x (△ (△ _k) (△ _code)) x △
 # and its false stays the conservative false the header describes. Of the
 # weakly normalizing records further down, the 78, the 95 and the 100
 # undercut the eager ones.
-# _chain_step self t n ⟶ △ (case t of  △ ⟶ n;  △ u ⟶ self u n;  △ u v ⟶ self (self u v) n)
+# _chain_step self t n ⟶ △ (case t of  △ ⟶ n;  △ u ⟶ self u n;
+#                                       △ u v ⟶ self (self u v) n)
 _chain_step = \self \x compose Snat.succ $ triage id self (\u \v self (self u v)) x
 # ties self := △ (△ _k) (△ _chain_code):  self z ⟶ _chain_step self z
 _chain_code = \sq _chain_step (△ (△ _k) sq)
@@ -84,7 +87,7 @@ size__eager_103 = \x (△ (△ _k) (△ _chain_code)) x △
 
 # The record, and the smallest of these this repository can run under its own
 # rule — so it is what __smallest names. (size__smallest__wn further down is
-# the normal-order record, at 78 nodes.)
+# the weakly normalizing record, at 78 nodes.)
 # Smallest is not cheapest: the chain it recurses on is rebuilt rather than
 # taken apart, and it pays five to six times `size`'s reductions for it, so it
 # is the record and not the default — see src/snat/bench.lamb.
@@ -112,17 +115,18 @@ Certify.Size.computes_size_eagerly size__eager_103
 Certify.Size.computes_size size__eager_103
 # = false
 
-# Smaller still, once the program no longer has to terminate under eager
-# evaluation. Nathan Farlow found all of these by search: the six older ones
+# Smaller still, once the program no longer has to strongly normalize.
+# Nathan Farlow found all of these by search: the six older ones
 # by deleting subtrees of a known program — sometimes several at once — and
 # looking for smaller replacements (lambada-llc/tree-calculus#20); then the 95
 # from a 103 by replacing single subtrees, and the 78 from the 95 by replacing
 # two at a time, candidates enumerated on a GPU some 270 times faster than the
 # CPU searches behind #20 (#23). Every one of them hangs an eager evaluator,
-# which is what __wn marks — weakly normalizing: the normal form exists, but
-# eager reduction never reaches it — so they are applied through
-# Reflect.lazy_eval. They are named by node count rather than by rank, so
-# that finding a smaller one adds a line instead of renumbering the rest.
+# which is what __wn marks — weakly but not strongly normalizing: the normal
+# form exists, but the eager order never reaches it — so they are applied
+# through Reflect.lazy_eval. They are named by node count rather than by
+# rank, so that finding a smaller one adds a line instead of renumbering the
+# rest.
 #
 # Search results are not obliged to decompose, but these do. Written as trees
 # the eight are walls of triangles; taken apart they are two builds of one
@@ -142,7 +146,7 @@ Certify.Size.computes_size size__eager_103
 _fork_self = \f △ f (△ f) (△ f)
 # △ (△ (△ (△ △) △)) △, seven nodes: a fork handed to its own right branch,
 # nothing delaying the re-application — which is exactly why nothing built
-# on it terminates eagerly. The six older programs tie their loops with it;
+# on it strongly normalizes. The six older programs tie their loops with it;
 # the record pair spends it on the door instead.
 
 # The record pair, the 78 and the 95, came in one report (#23): one machine,
@@ -225,16 +229,16 @@ equal _step_95 _chain_step
 # size__eager_111 t ⟶ _step_95 self' t (const △ t),  a value
 #   self' := wait _dup code',  self' z ⟶ _dup code' z ⟶ _step_95 self' z
 size__eager_111 = \t _dispatch (△ (_s (const _step_95) (wait _dup)) t) (const △ t)
-# The weak record made eager-legal: the same machine, wait _dup seated
-# where _dup sat, nothing else changed — the divergent application is now a
-# value, and each unfolding waits for a constructor of the input. Sixteen
-# nodes of wait around the nine of _dup make 111 — eight over the record
-# from the other side, since retying the same step with _k is
+# The weak record made strongly normalizing: the same machine, wait _dup
+# seated where _dup sat, nothing else changed — the divergent application is
+# now a value, and each unfolding waits for a constructor of the input.
+# Sixteen nodes of wait around the nine of _dup make 111 — eight over the
+# record from the other side, since retying the same step with _k is
 # size__eager_103 itself, node for node. Nor is there a leaner knot for the
 # seat: every tree to sixteen nodes fails in it, under this step and the
-# 78's both — 490912 candidates — so eager legality by this route starts at
-# the record's own 103, if a seventeen-node knot exists at all, and wait's
-# twenty-five is the only one known. The 78's step survives no knot but its
+# 78's both — 490912 candidates — so strong normalization by this route
+# starts at the record's own 103, if a seventeen-node knot exists at all,
+# and wait's twenty-five is the only one known. The 78's step survives no knot but its
 # own: with _k seated it assembles an 86-node program that miscounts —
 # _flat reads a whnf shape only _dup has — and no tree of thirteen nodes or
 # fewer repairs _flat's seat.
@@ -400,9 +404,11 @@ Certify.Size.certify_size size__eager_125
 _to_string = Bool.to_source
 
 # Certify.Size.computes_size_eagerly proves that and more: that reduction terminates
-# in every order, so these are `size` for an evaluator that reduces arguments
-# before it uses them, which is what this repository's rule asks of them. The
-# five above are written to that rule and pass.
+# in every order — applied to any tree, the program strongly normalizes
+# (src/certify/size spells out why its one order covers all) — so these are
+# `size` for an evaluator that reduces arguments before it uses them, which
+# is what this repository's rule asks of them. The six above are written to
+# that rule and pass.
 Certify.Size.computes_size_eagerly size
 # = true
 Certify.Size.computes_size_eagerly size__fastest
@@ -413,8 +419,9 @@ Certify.Size.computes_size_eagerly size__eager_125
 # And it is what the __wn ones fail, on the very first state: reducing them
 # eagerly under a variable input spends the whole budget without reaching a
 # normal form, which is the same wall an eager evaluator hits on a real one.
-# That is what separates the two families here, read off the programs rather
-# than taken on faith.
+# That is what separates the two families here — the strongly from the
+# merely weakly normalizing — read off the programs rather than taken on
+# faith.
 Certify.Size.computes_size_eagerly size__wn_78
 # = false
 Certify.Size.computes_size_eagerly size__wn_95
