@@ -386,7 +386,7 @@ Certify.Size.computes_size_eagerly size__wn_113
 # = false
 
 # Certify.Size.computes_size asks only for the count, in normal order, and its
-# extended rule system (src/certify/size) closes over two of the eight: the
+# extended rule system (src/certify/size) closes over two of them: the
 # induction abstracts away the input copies their states drag one constructor
 # behind the live one, and a tail atom caps the spec their left-nested forks
 # would otherwise grow without bound. A true is a proof that the program

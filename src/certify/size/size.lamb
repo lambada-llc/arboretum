@@ -70,13 +70,13 @@
 # the constructor it emits, so their states have no normal form at all — head
 # reduction returns, normalizing what it returns does not, and the head is
 # what NORMALIZE hands the rules. The lazy certifier's three extensions are
-# what close an induction over such heads, for two of the eight.
+# what close an induction over such heads.
 #
 # That the budget can be spent at all is what src/quoted/spine.lamb is for. Its
 # reduction rewrites the front of an argument list, so what a rule drops is
 # dropped as a list element and an eager evaluator never looks inside it —
 # where the term-rebuilding [Quoted.eval] makes an eager host pay for every
-# term the reduction walks past, which on two of the `__wn` programs is a
+# term the reduction walks past, which on some of the `__wn` programs is a
 # price this repository cannot pay. The analysis is a program here like any
 # other, and it has to hold to the same rule as its subject matter.
 #
