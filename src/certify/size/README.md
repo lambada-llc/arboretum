@@ -28,12 +28,11 @@ tactic script.
 [`expect-test-out/`](./expect-test-out/) —
 `SizeProof125.lean` (the superseded `size__eager_125`), `SizeProof118.lean`,
 and `SizeProof103.lean` — the last of these is `size__smallest`, the eager
-record. The weakly normalizing
-100 gets `none` rather than a module: it converges in normal order only, so
-there is no big-step computation to replay; exporting the lazy certificates
+record. The weakly normalizing programs — the 100, and the `__wn` records
+proper, Nathan Farlow's 78 and 95 (lambada-llc/arboretum#23) — get `none`
+rather than a module: they converge in normal order only, so there is no
+big-step computation to replay; exporting the lazy certificates
 (CUT/ABSTRACT phase structure over small-step semantics) is future work.
-The `__wn` records proper — Nathan Farlow's 78 and 95
-(lambada-llc/arboretum#23) — are in the same boat.
 
 ## Checking a module
 
