@@ -181,10 +181,11 @@ _step_95 = \self \t \k Snat.succ $ triage id self (compose (compose self) self) 
 # own node's succ and says where the rest comes from: a leaf finishes at k;
 # a stem recurses on its child; a fork counts its left child onto its right
 # — self u v is △^|u| v — and recurses on that chain, one node shorter than
-# the fork it replaces. Hold it against _chain_step above: the same
-# triage, the same chain, compose Snat.succ traded for a k threaded through,
-# and the same 61 nodes. All that differs is the knot around it, and that
-# difference is 103 against 95.
+# the fork it replaces. Hold it against _chain_step above: the same triage,
+# the same chain, compose Snat.succ traded for a k threaded through — and
+# not merely the same 61 nodes but the same tree: the two spellings compile
+# to one term, checked below. The 95 is the eager record's own step retied
+# with _dup, and the whole 103-against-95 difference is the knot.
 size__wn_95 = _wn_size _step_95
 _step_78 = \self \t \k _flat k $ triage id self (_s self (const self)) t k
 # Seventeen nodes carved out of the 95's step, and the generality gone with
@@ -208,6 +209,20 @@ Serialize.ternary_encode size__wn_78
 # = "212120220021210001212021201120112200212010021212001211002121200010212101010200"
 Serialize.ternary_encode size__wn_95
 # = "21212022002121000121202120112011200212120012110021212021202120001021202120001021100212101010200"
+
+# The step identity, checked: the 95 drives the eager record's step, tree
+# for tree.
+_to_string = Bool.to_source
+equal _step_95 _chain_step
+# = true
+
+# That identity is also why no cheap delay squeezes an eager record out of
+# the pair. Delay is bought per knot: retying this step behind wait lands
+# at 116 nodes, and retying it with _k rebuilds size__eager_103 itself,
+# node for node. The 78's step survives no retie at all — with _k in
+# _dup's seat it assembles an 86-node program that miscounts, _flat reading
+# a whnf shape only the _dup knot has, and no tree of thirteen nodes or
+# fewer repairs _flat's seat. Its last seventeen nodes belong to the knot.
 
 # The six the pair supersedes, three architectures tied with _fork_self.
 # Their loop:
