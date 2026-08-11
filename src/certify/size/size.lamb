@@ -70,7 +70,7 @@
 # the constructor it emits, so their states have no normal form at all — head
 # reduction returns, normalizing what it returns does not, and the head is
 # what NORMALIZE hands the rules. The lazy certifier's three extensions are
-# what close an induction over such heads, for two of the six.
+# what close an induction over such heads, for two of the eight.
 #
 # That the budget can be spent at all is what src/quoted/spine.lamb is for. Its
 # reduction rewrites the front of an argument list, so what a rule drops is
@@ -82,14 +82,14 @@
 #
 # Which order it diverges under is the other question a reader of a program can
 # settle, since tree calculus prescribes none and `size` can be written to
-# converge in only one of them — the `__wn` programs in src/snat/size.lamb are
-# exactly that, and smaller for it. NORMALIZE is where the difference lives, so
-# it is the only thing [computes_size_eagerly] changes: it normalizes both
-# halves of an application before letting a rule fire on it, so a rule only ever
-# discards a term that is already a normal form. Discarding a normal form
-# discards nothing that could have diverged, and discarding is the only way one
-# order can converge where another does not, so a program that terminates under
-# this order terminates under every one: [p t] strongly normalizes.
+# converge in only one of them — the `__wn` programs are exactly that, and
+# smaller for it. NORMALIZE is where the difference lives, so it is the only
+# thing [computes_size_eagerly] changes: it normalizes both halves of an
+# application before letting a rule fire on it, so a rule only ever discards a
+# term that is already a normal form. Discarding a normal form discards
+# nothing that could have diverged, and discarding is the only way one order
+# can converge where another does not, so a program that terminates under this
+# order terminates under every one: [p t] strongly normalizes.
 #
 # That one is on a budget too, of rule applications rather than head
 # reductions, and outrunning it is what an eagerly divergent program does — so
@@ -323,10 +323,9 @@ computes_size_eagerly = _certify _eagerly
 
 # ── The lazy certifier ────────────────────────────────────────────────────────
 # Everything below is [computes_size]: the prover above, extended until the
-# __wn programs in src/snat/size.lamb admit certificates, and returning a
-# proof tree that a second pass re-checks. The eager certificate keeps the
-# prover above unchanged, because one extension below is sound in normal
-# order only.
+# __wn programs admit certificates, and returning a proof tree that a second
+# pass re-checks. The eager certificate keeps the prover above unchanged,
+# because one extension below is sound in normal order only.
 #
 # The judgment is the same   Γ ⊢ s ⊨ E   and the base rules carry over:
 #

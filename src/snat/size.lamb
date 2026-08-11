@@ -82,7 +82,7 @@ size__eager_103 = \x (△ (△ _k) (△ _chain_code)) x △
 
 # The record, and the smallest of these this repository can run under its own
 # rule — so it is what __smallest names. (size__smallest__wn further down is
-# the normal-order record, 78, and needs Reflect.lazy_eval to run at all.)
+# the normal-order record, at 78 nodes.)
 # Smallest is not cheapest: the chain it recurses on is rebuilt rather than
 # taken apart, and it pays five to six times `size`'s reductions for it, so it
 # is the record and not the default — see src/snat/bench.lamb.
@@ -119,11 +119,8 @@ Certify.Size.computes_size size__eager_103
 # CPU searches behind #20 (#23). Every one of them hangs an eager evaluator,
 # which is what __wn marks — weakly normalizing: the normal form exists, but
 # eager reduction never reaches it — so they are applied through
-# Reflect.lazy_eval: it reduces in normal order and so returns on anything
-# that has a normal form at all, while terminating eagerly itself, which is
-# what lets this repository keep its rule and still run them. They are named
-# by node count rather than by rank, so that finding a smaller one adds a
-# line instead of renumbering the rest.
+# Reflect.lazy_eval. They are named by node count rather than by rank, so
+# that finding a smaller one adds a line instead of renumbering the rest.
 #
 # Search results are not obliged to decompose, but these do. Written as trees
 # the eight are walls of triangles; taken apart they are two builds of one
@@ -370,8 +367,7 @@ Certify.Size.computes_size_eagerly size__eager_125
 # eagerly under a variable input spends the whole budget without reaching a
 # normal form, which is the same wall an eager evaluator hits on a real one.
 # That is what separates the two families here, read off the programs rather
-# than taken on faith — and what the naming, the lazy_eval below and the node
-# counts at the bottom are all about.
+# than taken on faith.
 Certify.Size.computes_size_eagerly size__wn_78
 # = false
 Certify.Size.computes_size_eagerly size__wn_95
@@ -621,7 +617,7 @@ Reflect.lazy_eval size__wn_108 id
 Reflect.lazy_eval size__wn_113 id
 # = 5
 
-# Node counts, which is what the __eager and __wn ones are named after.
+# Node counts.
 size size__eager_103
 # = 103
 size size__eager_118
