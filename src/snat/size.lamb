@@ -43,7 +43,10 @@ size__eager_125 = \x (fix__wait _functional_smallest) x Snat.zero
 # certificates below are the same machine-checked ones the 125 above carries.
 # That knot generalizes, and is now core's `fix` — so size__eager_118 is
 # exactly \x (fix _functional_smallest) x Snat.zero. It stays spelled out here
-# because size__eager_103 below builds on _k too.
+# because size__eager_103 below builds on _k too. Fourteen nodes is also as
+# small as _k's seat gets: substituted into both copies at once, every tree
+# of thirteen nodes or fewer fails — for this step and the 103's both — by
+# the same kind of enumeration that established the 125's minimality.
 _selfstem = \q q (△ q)
 _k = const (triage △ △ _selfstem)
 _code = \sq _functional_smallest (△ (△ _k) sq)
@@ -71,14 +74,15 @@ size__eager_118 = \x (△ (△ _k) (△ _code)) x △
 # variable, and the induction closes — so the certificate below is as
 # machine-checked as the record's. The lazy certifier has no such rules,
 # and its false stays the conservative false the header describes. Of the
-# lazy records further down, only the 100 still undercuts the eager ones.
+# weakly normalizing records further down, the 78, the 95 and the 100
+# undercut the eager ones.
 _chain_step = \self \x compose Snat.succ $ triage id self (\u \v self (self u v)) x
 _chain_code = \sq _chain_step (△ (△ _k) sq)
 size__eager_103 = \x (△ (△ _k) (△ _chain_code)) x △
 
 # The record, and the smallest of these this repository can run under its own
-# rule — so it is what __smallest names. (size__smallest__lazy further down is
-# the normal-order record, 100, and needs Reflect.lazy_eval to run at all.)
+# rule — so it is what __smallest names. (size__smallest__wn further down is
+# the normal-order record, 78, and needs Reflect.lazy_eval to run at all.)
 # Smallest is not cheapest: the chain it recurses on is rebuilt rather than
 # taken apart, and it pays five to six times `size`'s reductions for it, so it
 # is the record and not the default — see src/snat/bench.lamb.
@@ -107,34 +111,114 @@ Certify.Size.computes_size size__eager_103
 # = false
 
 # Smaller still, once the program no longer has to terminate under eager
-# evaluation. Nathan Farlow found these by deleting subtrees of a known program
-# — sometimes several at once — and searching for smaller replacements
-# (lambada-llc/tree-calculus#20). Every one of them hangs an eager evaluator,
-# which is what __lazy marks, so they are applied through Reflect.lazy_eval: it
-# reduces in normal order and so returns on anything that has a normal form at
-# all, while terminating eagerly itself, which is what lets this repository keep
-# its rule and still run them. They are named by node count rather than by rank,
-# so that finding a smaller one adds a line instead of renumbering the rest.
+# evaluation. Nathan Farlow found all of these by search: the six older ones
+# by deleting subtrees of a known program — sometimes several at once — and
+# looking for smaller replacements (lambada-llc/tree-calculus#20); then the 95
+# from a 103 by replacing single subtrees, and the 78 from the 95 by replacing
+# two at a time, candidates enumerated on a GPU some 270 times faster than the
+# CPU searches behind #20 (#23). Every one of them hangs an eager evaluator,
+# which is what __wn marks — weakly normalizing: the normal form exists, but
+# eager reduction never reaches it — so they are applied through
+# Reflect.lazy_eval: it reduces in normal order and so returns on anything
+# that has a normal form at all, while terminating eagerly itself, which is
+# what lets this repository keep its rule and still run them. They are named
+# by node count rather than by rank, so that finding a smaller one adds a
+# line instead of renumbering the rest.
 #
 # Search results are not obliged to decompose, but these do. Written as trees
-# the six are walls of triangles; taken apart they share one skeleton — a
-# recursive loop tied without any delay, entered through a small dispatch, on
-# an input packed into a fork — and differ in the step the loop drives and in
-# how the input reaches it. The parts below rebuild each record tree node for
-# node: every definition in this section terminates eagerly and reduces to
-# exactly the tree the search found, so the counts at the bottom of this file
-# are still the search's counts. Only running them needs normal order.
+# the eight are walls of triangles; taken apart they are two builds of one
+# idea — a recursive loop tied without any delay, entered through a small
+# dispatch, on an input packed into a fork — the older six differing in the
+# step the loop drives and in how the input reaches it, the record pair in
+# how little of everything else is left. The parts below rebuild each record
+# tree node for node: every definition in this section terminates eagerly and
+# reduces to exactly the tree the search found, so the counts at the bottom
+# of this file are still the search's counts. Only running them needs normal
+# order.
 #
-# The knot. Where fix__wait above keeps its recursion delayed behind wait — the 44
-# nodes size__eager_125 pays, its unfolder twice included — these pay 7 once:
+# First the tree all eight lean on. Where fix__wait above keeps its recursion
+# delayed behind wait — the 44 nodes size__eager_125 pays, its unfolder twice
+# included — this section's delay budget is zero:
 _fork_self = \f △ f (△ f) (△ f)
 # _fork_self is △ (△ (△ (△ △) △)) △: applied to a fork it hands the fork to
 # its own right branch — △ u v ↦ v (△ u v). Nothing delays that
 # re-application, which is exactly why nothing built on it terminates eagerly.
+# The six older programs tie their loops with it; the record pair spends it
+# on the door instead.
+
+# The record pair, the 78 and the 95, came in one report (#23): the machine
+# is one and the steps differ, and the machine is this section's own parts
+# reassembled. Its knot:
+_dup = \w △ w (△ △ w) (△ △ w)
+# _dup is △ (△ (△ (△ △) (△ △))) (△ △), nine nodes: applied to a fork w it
+# reduces to w w — self-application, bare. Set it beside a step as
+#   code = _s (const step) _dup
+# and the loop ties itself: code z reduces to step (_dup z), so
+#   self := _dup code  ⟶  code code  ⟶  step self.
+# Re-entry is the nine nodes above, paid once. The delay fix__wait buys with
+# 44 nodes and fix with 37 — one unfolding per input constructor consumed —
+# _dup simply does not buy, and an eager evaluator handed any input unfolds
+# self without end.
+_pack = \step △ (_s (const step) _dup)
+# The stem over code: _pack step applied to an input t is the fork △ code t,
+# code and input side by side, waiting to be spilled.
+_dispatch = triage △ △ _fork_self
+# The door, and it is the six's knot re-hired for it: the fork case hands
+# code to _fork_self, which hands it to its own right branch — that is
+# _dup code = self — and the input follows it in:
+#   _dispatch (△ code t) k  ⟶  _fork_self code t k  ⟶  self t k.
+# (No input reaches the leaf and stem cases; △ and △ are the cheapest trees
+# to hold the seats.)
+_wn_size = \step \t _dispatch (_pack step t) (const △ t)
+# The machine: thirty-four nodes of harness around whatever step arrives —
+# where size__eager_103 pays 42 and size__eager_125 pays 49 — with Snat.zero
+# supplied lazily at the end of the spine, as const △ t, three nodes the step
+# only ever forces down to △.
+_flat = triage △ △ (\m \n △ m)
+# Identity on a count arriving — △ ↦ △, △ m ↦ △ m — and on a fork the stem
+# of its left half, the right half dropped. Eleven nodes whose work shows up
+# only in the 78.
+_step_95 = \self \t \k Snat.succ $ triage id self (compose (compose self) self) t k
+# The eager record's step with the count's destination spelled out:
+# self w k reduces to △ⁿ k for n = |w|, whatever k is. Each case emits its
+# own node's succ and says where the rest comes from: a leaf finishes at k;
+# a stem recurses on its child; a fork counts its left child onto its right
+# — self u v is △^|u| v — and recurses on that chain, one node shorter than
+# the fork it replaces. Hold it against _chain_step above: the same
+# triage, the same chain, compose Snat.succ traded for a k threaded through,
+# and the same 61 nodes. All that differs is the knot around it, and that
+# difference is 103 against 95.
+size__wn_95 = _wn_size _step_95
+_step_78 = \self \t \k _flat k $ triage id self (_s self (const self)) t k
+# Seventeen nodes carved out of the 95's step, and the generality gone with
+# them. Leaf and stem answer as the 95's do, _flat k standing in for
+# Snat.succ; the fork case _s self (const self) sends u v to self u self v —
+# the left child's count is built over the loop itself, so what comes back is
+# no number but a state that, applied on to v and k, resumes counting:
+# self u self v △ reduces to △^(|u|+|v|) △, read off a run rather than any
+# rule. Those states drag junk in their right halves, and _flat is the
+# disposal, keeping of a state the half that continues the count. The 95's
+# self w k law holds for every k; the 78's holds for the two k's its own loop
+# ever passes — △ and self — and those seventeen nodes are the price of the
+# difference.
+size__wn_78 = _wn_size _step_78
+size__smallest__wn = size__wn_78
+
+# The trees, read back out and held against the strings the search reported
+# (#23):
+_to_string = String.to_source
+Serialize.ternary_encode size__wn_78
+# = "212120220021210001212021201120112200212010021212001211002121200010212101010200"
+Serialize.ternary_encode size__wn_95
+# = "21212022002121000121202120112011200212120012110021212021202120001021202120001021100212101010200"
+
+# The six the pair supersedes, three architectures tied with _fork_self.
+# Their loop:
 _loop = \step _s (const step) _fork_self
-# _loop step = △ (△ (△ △ step)) _fork_self: a plain value, no recursion in it
-# yet. Write c for it. c z reduces to step (_fork_self z), and _fork_self
-# applied to the fork △ △ c is c (△ △ c) over again — so
+# _loop step = △ (△ (△ △ step)) _fork_self — the pair's code with _fork_self
+# in _dup's seat: a plain value, no recursion in it yet. Write c for it.
+# c z reduces to step (_fork_self z), and _fork_self applied to the fork
+# △ △ c is c (△ △ c) over again — so
 #   X := c (const c)   reduces to   step X,
 # a fixpoint that unfolds once per demand in normal order, and without end
 # under eager evaluation.
@@ -146,8 +230,8 @@ _tie_open = \c _s △ c (const c)
 # _tie_open c = △ (const c) (_tie c): a fork, so applied to a packed input
 # △ a b it spills both halves into the knot — X a b. (Read off the fork, its
 # leaf and stem cases are △ and c; no input below ever reaches them.)
-_lazy_size = \tie \loop \t const tie t loop (const t)
-# The skeleton of the four smallest: _lazy_size tie loop, applied to t,
+_lagged_size = \tie \loop \t const tie t loop (const t)
+# Four of the six share a skeleton: _lagged_size tie loop, applied to t,
 # reduces to tie loop (△ △ t) — enter the loop through tie, handing it the
 # input dragged one constructor behind. The states the loops then chew on are
 # built the same way: counts in progress, stems over a fork lagging what is
@@ -172,11 +256,11 @@ _step_100 = \loop triage △ △ (_lag2 loop _park)
 _loop_counted = \step _s (const step) (compose (compose Snat.succ) _fork_self)
 # _loop with one count folded into the knot itself: re-entry is
 # compose Snat.succ X rather than X, each unfolding's stem already emitted.
-size__lazy_100 = _lazy_size _tie (_loop_counted _step_100)
+size__wn_100 = _lagged_size _tie (_loop_counted _step_100)
 _step_104 = \loop triage △ △ (compose (compose Snat.succ) (_lag2 loop _park))
 # The same step emitting that count itself — compose Snat.succ composed onto
 # the fork case — which costs the four nodes the 100 saves.
-size__lazy_104 = _lazy_size _tie (_loop _step_104)
+size__wn_104 = _lagged_size _tie (_loop _step_104)
 
 # The 103 and the 106 share their count ladder — and nothing else:
 _recount = \w △ (△ (compose Snat.succ (compose Snat.succ Snat.succ w)))
@@ -188,12 +272,12 @@ _step_103 = \loop _state_103 loop (loop △)
 _tie_lagged = \c _s △ c (const (compose _b2 c))
 # _tie_open, except the knot closes over const (compose _b2 c): the 103's
 # loop never sees itself bare — every re-entry reduces to _b2 X.
-size__lazy_103 = _lazy_size _tie_lagged (_loop _step_103)
+size__wn_103 = _lagged_size _tie_lagged (_loop _step_103)
 _state_106 = \w △ (△ (_s _recount (const (_b2 w))))
 _step_106 = \loop _state_106 loop (_b2 loop △)
 # As the 103 with both slots pushed through _b2: X reduces to
 # _state_106 X (_b2 X △), and _b2 X △ is X composed after △.
-size__lazy_106 = _lazy_size _tie_open (_loop _step_106)
+size__wn_106 = _lagged_size _tie_open (_loop _step_106)
 
 # The 108 and the 113 drive one step, and it is not theirs: it is, node for
 # node, the 76-node body size__eager_125's fix__wait knot drives — the expect test
@@ -211,15 +295,14 @@ _carved = \z △ (triage Snat.two △ z) (_carved_states z (compose const z))
 _step_carved = \loop compose (compose Snat.succ) (_carved loop)
 # X reduces to compose (compose Snat.succ) (_carved X): one more count
 # composed onto everything the machinery underneath returns.
-size__lazy_108 = \t const _tie_open t (_loop _step_carved) (△ t △)
+size__wn_108 = \t const _tie_open t (_loop _step_carved) (△ t △)
 # The skeleton again, but the input packed the other way around — △ t △ — so
 # _tie_open spills it into the knot as X t △.
-size__lazy_113 = \t _s _tie (const t) (_loop _step_carved) △
+size__wn_113 = \t _s _tie (const t) (_loop _step_carved) △
 # No dispatch at all: the head builds _s _tie (const t), which applied to the
 # loop reduces to X t, and the trailing △ completes the same X t △ call the
 # 108 makes. The assembled tree is size__eager_125's own, with one cut: its
 # 19-node delayed re-entry replaced by the 7-node _fork_self.
-size__smallest__lazy = size__lazy_100
 
 # The carved-from claim, checked: the step the 108 and the 113 loop over sits
 # whole inside size__eager_125 — left, left, right, right, left, left, right
@@ -283,43 +366,51 @@ Certify.Size.computes_size_eagerly size__fastest
 Certify.Size.computes_size_eagerly size__eager_125
 # = true
 
-# And it is what the __lazy ones fail, on the very first state: reducing them
+# And it is what the __wn ones fail, on the very first state: reducing them
 # eagerly under a variable input spends the whole budget without reaching a
 # normal form, which is the same wall an eager evaluator hits on a real one.
 # That is what separates the two families here, read off the programs rather
 # than taken on faith — and what the naming, the lazy_eval below and the node
 # counts at the bottom are all about.
-Certify.Size.computes_size_eagerly size__lazy_100
+Certify.Size.computes_size_eagerly size__wn_78
 # = false
-Certify.Size.computes_size_eagerly size__lazy_103
+Certify.Size.computes_size_eagerly size__wn_95
 # = false
-Certify.Size.computes_size_eagerly size__lazy_104
+Certify.Size.computes_size_eagerly size__wn_100
 # = false
-Certify.Size.computes_size_eagerly size__lazy_106
+Certify.Size.computes_size_eagerly size__wn_103
 # = false
-Certify.Size.computes_size_eagerly size__lazy_108
+Certify.Size.computes_size_eagerly size__wn_104
 # = false
-Certify.Size.computes_size_eagerly size__lazy_113
+Certify.Size.computes_size_eagerly size__wn_106
+# = false
+Certify.Size.computes_size_eagerly size__wn_108
+# = false
+Certify.Size.computes_size_eagerly size__wn_113
 # = false
 
 # Certify.Size.computes_size asks only for the count, in normal order, and its
-# extended rule system (src/certify/size) closes over two of them: the
+# extended rule system (src/certify/size) closes over two of the eight: the
 # induction abstracts away the input copies their states drag one constructor
 # behind the live one, and a tail atom caps the spec their left-nested forks
 # would otherwise grow without bound. A true is a proof that the program
 # returns its argument's node count on every tree — which is more than any
 # run of it below can say.
-Certify.Size.computes_size size__lazy_100
+Certify.Size.computes_size size__wn_78
+# = false
+Certify.Size.computes_size size__wn_95
+# = false
+Certify.Size.computes_size size__wn_100
 # = true
-Certify.Size.computes_size size__lazy_103
+Certify.Size.computes_size size__wn_103
 # = false
-Certify.Size.computes_size size__lazy_104
+Certify.Size.computes_size size__wn_104
 # = true
-Certify.Size.computes_size size__lazy_106
+Certify.Size.computes_size size__wn_106
 # = false
-Certify.Size.computes_size size__lazy_108
+Certify.Size.computes_size size__wn_108
 # = false
-Certify.Size.computes_size size__lazy_113
+Certify.Size.computes_size size__wn_113
 # = false
 
 # The 100's certificate, drawn. This is what the extended rules exist for —
@@ -327,7 +418,7 @@ Certify.Size.computes_size size__lazy_113
 # recording where a phase stopped, an ABSTRACT stripping lag junk, or a
 # FOLD* whose borrowed tail the second pass re-checked.
 _to_string = Option.match "no proof" Certify.Size.render
-Certify.Size.certify_size size__lazy_100
+Certify.Size.certify_size size__wn_100
 # = SPLIT t
 #     PEEL
 #       ZERO
@@ -492,48 +583,64 @@ Certify.Size.certify_size size__lazy_100
 _to_string = Bool.to_source
 
 # The remaining falses are the certifier being conservative, not a finding:
-# false has always meant "no proof within bounds" here, and the 103, 106, 108
-# and 113 defeat its junk and continuation heuristics within its depth. All
-# six run at all only because the certifier reduces over spines
-# (src/quoted/spine.lamb): reading the 103 and the 106 through the
-# term-rebuilding evaluator did not come back under this build's eager
-# runner, which made the analysis a program this repository could not run on
-# its own subject matter.
+# false has always meant "no proof within bounds" here. The 103, the 106, the
+# 108 and the 113 defeat its junk and continuation heuristics within its
+# depth; the record pair recurses on chains — what RGEN and GEN-TREE close in
+# the eager system, which the pair's divergence keeps it out of — and the 78
+# passes the loop itself for an accumulator besides. All eight run at all
+# only because the certifier reduces over spines (src/quoted/spine.lamb):
+# reading the 103 and the 106 through the term-rebuilding evaluator did not
+# come back under this build's eager runner, which made the analysis a
+# program this repository could not run on its own subject matter.
 #
-# For the 100 and the 104 the count claim is proven above. For the other four
-# nothing here establishes they are `size`; what is left of that claim is one
-# input apiece below, which is a smoke test and not much more — `_deep_bug`
-# in src/certify/test.lamb is not `size`, and returns 5 on it too.
+# For the 100 and the 104 the count claim is proven above. For the other six
+# nothing here establishes they are `size`; what is left of that claim is a
+# smoke test or two apiece below — `_deep_bug` in src/certify/test.lamb is
+# not `size`, and returns 5 on id too. The record pair stands additionally on
+# being, node for node, the trees #23 reports fuzz-tested, which the ternary
+# readbacks above pin down.
 _to_string = Snat.to_string
-Reflect.lazy_eval size__smallest__lazy id
+Reflect.lazy_eval size__smallest__wn id
 # = 5
-Reflect.lazy_eval size__lazy_103 id
+Reflect.lazy_eval size__wn_78 _fork_self
+# = 7
+Reflect.lazy_eval size__wn_95 id
 # = 5
-Reflect.lazy_eval size__lazy_104 id
+Reflect.lazy_eval size__wn_95 _fork_self
+# = 7
+Reflect.lazy_eval size__wn_100 id
 # = 5
-Reflect.lazy_eval size__lazy_106 id
+Reflect.lazy_eval size__wn_103 id
 # = 5
-Reflect.lazy_eval size__lazy_108 id
+Reflect.lazy_eval size__wn_104 id
 # = 5
-Reflect.lazy_eval size__lazy_113 id
+Reflect.lazy_eval size__wn_106 id
+# = 5
+Reflect.lazy_eval size__wn_108 id
+# = 5
+Reflect.lazy_eval size__wn_113 id
 # = 5
 
-# Node counts, which is what the __eager and __lazy ones are named after.
+# Node counts, which is what the __eager and __wn ones are named after.
 size size__eager_103
 # = 103
 size size__eager_118
 # = 118
 size size__eager_125
 # = 125
-size size__lazy_100
+size size__wn_78
+# = 78
+size size__wn_95
+# = 95
+size size__wn_100
 # = 100
-size size__lazy_103
+size size__wn_103
 # = 103
-size size__lazy_104
+size size__wn_104
 # = 104
-size size__lazy_106
+size size__wn_106
 # = 106
-size size__lazy_108
+size size__wn_108
 # = 108
-size size__lazy_113
+size size__wn_113
 # = 113

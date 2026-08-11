@@ -45,7 +45,7 @@ _qtriage = \apply \ounk \ot \os \of fix $ \self \x
 # to it stays an unreduced [△ f x] until something asks for its shape. Reducing
 # it here instead would make this strict in a position the calculus is not, and
 # a program whose operand is a self-application it never looks at — which is how
-# the __lazy size programs in src/snat/size.lamb are built — would not come back.
+# the __wn size programs in src/snat/size.lamb are built — would not come back.
 apply = fix $ \self \a \b
   _qtriage self
     (\a \blocker \b △ (△ a b) $ △ blocker)

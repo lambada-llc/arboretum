@@ -97,10 +97,11 @@ applied, and `fix` is built on it, so a recursive definition unfolds one step
 per call instead of ahead of itself. Anything else that must not be evaluated
 yet is delayed the same way, explicitly.
 
-A program worth keeping that only converges in normal order carries a `__lazy`
-suffix. Nothing applies one directly: `Reflect.lazy_eval` evaluates it, and
-terminates eagerly itself, so the rule above still holds of everything the build
-runs.
+A program worth keeping that only converges in normal order carries a `__wn`
+suffix — weakly normalizing: it has a normal form, but not every reduction
+order reaches it. Nothing applies one directly: `Reflect.lazy_eval` evaluates
+it, and terminates eagerly itself, so the rule above still holds of everything
+the build runs.
 
 ## Writing [expect tests](https://blog.janestreet.com/the-joy-of-expect-tests/)
 

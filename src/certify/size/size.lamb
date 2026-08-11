@@ -65,7 +65,7 @@
 # converts at the end, so the induction never closes over the unary spec.
 #
 # NORMALIZE runs on a budget, so a term with no normal form costs a fallback
-# rather than an answer that never comes. The `__lazy` programs in
+# rather than an answer that never comes. The `__wn` programs in
 # src/snat/size.lamb are the ones that spend it: their recursion unfolds under
 # the constructor it emits, so their states have no normal form at all — head
 # reduction returns, normalizing what it returns does not, and the head is
@@ -76,13 +76,13 @@
 # reduction rewrites the front of an argument list, so what a rule drops is
 # dropped as a list element and an eager evaluator never looks inside it —
 # where the term-rebuilding [Quoted.eval] makes an eager host pay for every
-# term the reduction walks past, which on two of the `__lazy` programs is a
+# term the reduction walks past, which on two of the `__wn` programs is a
 # price this repository cannot pay. The analysis is a program here like any
 # other, and it has to hold to the same rule as its subject matter.
 #
 # Which order it diverges under is the other question a reader of a program can
 # settle, since tree calculus prescribes none and `size` can be written to
-# converge in only one of them — the `__lazy` programs in src/snat/size.lamb are
+# converge in only one of them — the `__wn` programs in src/snat/size.lamb are
 # exactly that, and smaller for it. NORMALIZE is where the difference lives, so
 # it is the only thing [computes_size_eagerly] changes: it normalizes both
 # halves of an application before letting a rule fire on it, so a rule only ever
@@ -323,7 +323,7 @@ computes_size_eagerly = _certify _eagerly
 
 # ── The lazy certifier ────────────────────────────────────────────────────────
 # Everything below is [computes_size]: the prover above, extended until the
-# __lazy programs in src/snat/size.lamb admit certificates, and returning a
+# __wn programs in src/snat/size.lamb admit certificates, and returning a
 # proof tree that a second pass re-checks. The eager certificate keeps the
 # prover above unchanged, because one extension below is sound in normal
 # order only.
@@ -345,7 +345,7 @@ computes_size_eagerly = _certify _eagerly
 #   ──────────────────────────────────────────────────────── GENERALIZE
 #   Γ ⊢ s ⊨ E   from   Γ ⊢ s[c:=n] ⊨ (E − σEₕ) ⊎ [n]
 #
-# Three additions, each forced by a measured obstruction of the __lazy
+# Three additions, each forced by a measured obstruction of the __wn
 # programs, none needed by the eager ones:
 #
 # SPEC-SPLIT. A lazy program emits successors before consulting its input, so
