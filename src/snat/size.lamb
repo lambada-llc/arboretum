@@ -43,10 +43,16 @@ size__eager_125 = \x (fix__wait _functional_smallest) x Snat.zero
 # certificates below are the same machine-checked ones the 125 above carries.
 # That knot generalizes, and is now core's `fix` — so size__eager_118 is
 # exactly \x (fix _functional_smallest) x Snat.zero. It stays spelled out here
-# because size__eager_103 below builds on _k too. Fourteen nodes is also as
-# small as _k's seat gets: substituted into both copies at once, every tree
-# of thirteen nodes or fewer fails — for this step and the 103's both — by
-# the same kind of enumeration that established the 125's minimality.
+# because size__eager_103 below builds on _k too. The knot is also as tight
+# as enumeration reaches, assuming nothing about its shape: read the whole
+# program as \x (△ P (△ (compose step R))) x △, with P = △ _k and R = △ P
+# the twice-paid pieces. Every tree to fourteen nodes fails in P's seat —
+# forks included, not just stems over a quine core, and every core to
+# thirteen inside _k fails too, for this step and the 103's both — and
+# every tree to fifteen fails in R's: of the 180340 candidates none so much
+# as rebuilds △ P (△ x), so rule (2)'s duplication cannot construct the
+# carried copy cheaper than carrying it. The same kind of enumeration that
+# established the 125's minimality, pointed at the knot.
 _selfstem = \q q (△ q)
 _k = const (triage △ △ _selfstem)
 _code = \sq _functional_smallest (△ (△ _k) sq)
