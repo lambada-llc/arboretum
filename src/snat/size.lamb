@@ -1,9 +1,12 @@
 # size :: tree -> snat (count of nodes)
+# _s a b c ⟶ a c (b c)
 _s = \a \b \c a c $ b c
+# _triage self:  △ ⟶ id;  △ u ⟶ self u;  △ u v ⟶ compose (self v) (self u)
 _triage = \self triage id self $ \u
       _s
         (\v compose (self v))
         (\v self u)
+# _functional_smallest self t n ⟶ △ (_triage self t n)
 _functional_smallest = \self \x compose Snat.succ $ _triage self x
 size__eager_125 = \x (fix__wait _functional_smallest) x Snat.zero
 
@@ -25,36 +28,30 @@ size__eager_125 = \x (fix__wait _functional_smallest) x Snat.zero
 # Smaller and still eager: a knot that costs 37 nodes where fix__wait's costs 44.
 # Where fix__wait keeps re-entry delayed behind wait — a 17-node unfolder,
 # paid twice — the knot below is a quine: the loop rebuilds itself from the
-# copy it carries, and what keeps that eager-safe is that the rebuild only
-# ever happens under the input constructor just consumed, one unfolding per
-# node. _k is const of a triage: it drops an argument, splits a fork, and
-# applies the code found inside to that code's own stem —
-#   _k z (△ q z)  ⟶  q (△ q) z
-# — fourteen nodes, paid twice like fix__wait's unfolder, plus nine of wiring. Tie
-#   self = △ (△ _k) (△ q).
-# Rule (2) sends an application self z to _k z (△ q z) — the code and the
-# input packed into a fork — so self z ⟶ q (△ q) z, and a code value that
-# rebuilds self over its own stem closes the loop: _code below reduces
-# q (△ q) to step (△ (△ _k) (△ q)), which is step self, so
-#   self z  ⟶  step self z.
-# Every intermediate term is a value; nothing here waits, and nothing
-# unfolds except into the next constructor of the input. The step is
+# copy it carries, and stays eager-safe because the rebuild only ever
+# happens under the input constructor just consumed, one unfolding per
+# node. Every intermediate term is a value; nothing here waits. The step is
 # _functional_smallest, unchanged: only the knot around it is new, and the
-# certificates below are the same machine-checked ones the 125 above carries.
-# That knot generalizes, and is now core's `fix` — so size__eager_118 is
-# exactly \x (fix _functional_smallest) x Snat.zero. It stays spelled out here
-# because size__eager_103 below builds on _k too. The knot is also as tight
-# as enumeration reaches, assuming nothing about its shape: read the whole
-# program as \x (△ P (△ (compose step R))) x △, with P = △ _k and R = △ P
-# the twice-paid pieces. Every tree to fourteen nodes fails in P's seat —
-# forks included, not just stems over a quine core, and every core to
-# thirteen inside _k fails too, for this step and the 103's both — and
-# every tree to fifteen fails in R's: of the 180340 candidates none so much
-# as rebuilds △ P (△ x), so rule (2)'s duplication cannot construct the
-# carried copy cheaper than carrying it. The same kind of enumeration that
-# established the 125's minimality, pointed at the knot.
+# certificates below are the same machine-checked ones the 125 above
+# carries. That knot generalizes, and is now core's `fix` — so
+# size__eager_118 is exactly \x (fix _functional_smallest) x Snat.zero. It
+# stays spelled out here because size__eager_103 below builds on _k too.
+# The knot is also as tight as enumeration reaches, assuming nothing about
+# its shape: read the whole program as \x (△ P (△ (compose step R))) x △,
+# with P = △ _k and R = △ P the twice-paid pieces. Every tree to fourteen
+# nodes fails in P's seat — forks included, not just stems over a quine
+# core, and every core to thirteen inside _k fails too, for this step and
+# the 103's both — and every tree to fifteen fails in R's: of the 180340
+# candidates none so much as rebuilds △ P (△ x), so rule (2)'s duplication
+# cannot construct the carried copy cheaper than carrying it. The same kind
+# of enumeration that established the 125's minimality, pointed at the knot.
+# _selfstem q ⟶ q (△ q)
 _selfstem = \q q (△ q)
+# _k z ⟶ triage △ △ _selfstem — fourteen nodes, paid twice, plus nine of
+# wiring — so on the packed fork rule (2) builds:  _k z (△ q z) ⟶ q (△ q) z
 _k = const (triage △ △ _selfstem)
+# ties self := △ (△ _k) (△ _code):
+#   self z ⟶ _k z (△ _code z) ⟶ _code (△ _code) z ⟶ _functional_smallest self z
 _code = \sq _functional_smallest (△ (△ _k) sq)
 size__eager_118 = \x (△ (△ _k) (△ _code)) x △
 
@@ -64,10 +61,7 @@ size__eager_118 = \x (△ (△ _k) (△ _code)) x △
 # child — self u v reduces to △ⁿ v for n = |u| — and recursing on that
 # chain, which is one node smaller than △ u v was. Its fork case is two
 # bare applications of self where the record step pays compose twice and a
-# shared S to spell them:
-#   leaf   ⟶ [n] △ n
-#   △ u    ⟶ [n] △ (self u n)
-#   △ u v  ⟶ [n] △ (self (self u v) n)
+# shared S to spell them.
 # Found by annealing over whole trees with an eager evaluator as the
 # filter — the same deletion-and-replacement spirit as #20, pointed at the
 # eager family — first as a 110 tied with fix__wait's knot, then reformulated
@@ -82,7 +76,9 @@ size__eager_118 = \x (△ (△ _k) (△ _code)) x △
 # and its false stays the conservative false the header describes. Of the
 # weakly normalizing records further down, the 78, the 95 and the 100
 # undercut the eager ones.
+# _chain_step self t n ⟶ △ (case t of  △ ⟶ n;  △ u ⟶ self u n;  △ u v ⟶ self (self u v) n)
 _chain_step = \self \x compose Snat.succ $ triage id self (\u \v self (self u v)) x
+# ties self := △ (△ _k) (△ _chain_code):  self z ⟶ _chain_step self z
 _chain_code = \sq _chain_step (△ (△ _k) sq)
 size__eager_103 = \x (△ (△ _k) (△ _chain_code)) x △
 
@@ -141,70 +137,67 @@ Certify.Size.computes_size size__eager_103
 #
 # First the tree all eight lean on. Where fix__wait above keeps its recursion
 # delayed behind wait — the 44 nodes size__eager_125 pays, its unfolder twice
-# included — this section's delay budget is zero:
+# included — this section's delay budget is zero.
+# _fork_self f ⟶ △ f (△ f) (△ f);  on a fork:  _fork_self (△ u v) ⟶ v (△ u v)
 _fork_self = \f △ f (△ f) (△ f)
-# _fork_self is △ (△ (△ (△ △) △)) △: applied to a fork it hands the fork to
-# its own right branch — △ u v ↦ v (△ u v). Nothing delays that
-# re-application, which is exactly why nothing built on it terminates eagerly.
-# The six older programs tie their loops with it; the record pair spends it
-# on the door instead.
+# △ (△ (△ (△ △) △)) △, seven nodes: a fork handed to its own right branch,
+# nothing delaying the re-application — which is exactly why nothing built
+# on it terminates eagerly. The six older programs tie their loops with it;
+# the record pair spends it on the door instead.
 
-# The record pair, the 78 and the 95, came in one report (#23): the machine
-# is one and the steps differ, and the machine is this section's own parts
-# reassembled. Its knot:
+# The record pair, the 78 and the 95, came in one report (#23): one machine,
+# two steps, and the machine is this section's own parts reassembled.
+# _dup w ⟶ △ w (△ △ w) (△ △ w);  on a fork:  _dup (△ u v) ⟶ △ u v (△ u v)
 _dup = \w △ w (△ △ w) (△ △ w)
-# _dup is △ (△ (△ (△ △) (△ △))) (△ △), nine nodes: applied to a fork w it
-# reduces to w w — self-application, bare. Set it beside a step as
-#   code = _s (const step) _dup
-# and the loop ties itself: code z reduces to step (_dup z), so
-#   self := _dup code  ⟶  code code  ⟶  step self.
+# △ (△ (△ (△ △) (△ △))) (△ △), nine nodes: self-application, bare. Set it
+# beside a step as  code := _s (const step) _dup,  and the loop ties itself:
+#   code z ⟶ step (_dup z),   so   self := _dup code ⟶ code code ⟶ step self.
 # Re-entry is the nine nodes above, paid once. The delay fix__wait buys with
 # 44 nodes and fix with 37 — one unfolding per input constructor consumed —
 # _dup simply does not buy, and an eager evaluator handed any input unfolds
 # self without end.
+# _pack step t ⟶ △ code t
 _pack = \step △ (_s (const step) _dup)
-# The stem over code: _pack step applied to an input t is the fork △ code t,
-# code and input side by side, waiting to be spilled.
+# The stem over code: code and input side by side, waiting to be spilled.
+# _dispatch (△ code t) k ⟶ _fork_self code t k ⟶ _dup code t k ⟶ step self t k
 _dispatch = triage △ △ _fork_self
-# The door, and it is the six's knot re-hired for it: the fork case hands
-# code to _fork_self, which hands it to its own right branch — that is
-# _dup code = self — and the input follows it in:
-#   _dispatch (△ code t) k  ⟶  _fork_self code t k  ⟶  self t k.
-# (No input reaches the leaf and stem cases; △ and △ are the cheapest trees
-# to hold the seats.)
+# The door, the six's knot re-hired: its fork case hands code to _fork_self,
+# whose right branch is _dup, and the input follows self into the loop. (No
+# input reaches the leaf and stem cases; △ and △ are the cheapest trees to
+# hold the seats.)
+# _wn_size step t ⟶ step self t k,  where k = const △ t reduces to △ only
+# when the step forces it
 _wn_size = \step \t _dispatch (_pack step t) (const △ t)
-# The machine: thirty-four nodes of harness around whatever step arrives —
-# where size__eager_103 pays 42 and size__eager_125 pays 49 — with Snat.zero
-# supplied lazily at the end of the spine, as const △ t, three nodes the step
-# only ever forces down to △.
+# The machine: thirty-four nodes of harness around whatever step arrives,
+# where size__eager_103 pays 42 and size__eager_125 pays 49.
+# _flat △ ⟶ △;   _flat (△ m) ⟶ △ m;   _flat (△ m n) ⟶ △ m
 _flat = triage △ △ (\m \n △ m)
-# Identity on a count arriving — △ ↦ △, △ m ↦ △ m — and on a fork the stem
-# of its left half, the right half dropped. Eleven nodes whose work shows up
-# only in the 78.
+# Identity on a count arriving, prune on anything else. Eleven nodes whose
+# work shows up only in the 78.
+# _step_95 self t k:  △ ⟶ △ k;  △ u ⟶ △ (self u k);  △ u v ⟶ △ (self (self u v) k)
+# giving  self w k ⟶ △ⁿ k,  n = |w|,  for every k whatsoever
 _step_95 = \self \t \k Snat.succ $ triage id self (compose (compose self) self) t k
-# The eager record's step with the count's destination spelled out:
-# self w k reduces to △ⁿ k for n = |w|, whatever k is. Each case emits its
-# own node's succ and says where the rest comes from: a leaf finishes at k;
-# a stem recurses on its child; a fork counts its left child onto its right
-# — self u v is △^|u| v — and recurses on that chain, one node shorter than
-# the fork it replaces. Hold it against _chain_step above: the same triage,
-# the same chain, compose Snat.succ traded for a k threaded through — and
-# not merely the same 61 nodes but the same tree: the two spellings compile
-# to one term, checked below. The 95 is the eager record's own step retied
-# with _dup, and the whole 103-against-95 difference is the knot.
+# Each case emits its own node's succ; a fork counts its left child onto its
+# right — self u v is △^|u| v — and recurses on that chain, one node shorter
+# than the fork it replaces. Not merely _chain_step's 61 nodes but its very
+# tree: the two spellings compile to one term, checked below, so the whole
+# 103-against-95 difference is the knot.
 size__wn_95 = _wn_size _step_95
+# _step_78 self t k:  △ ⟶ _flat k k;  △ u ⟶ _flat k (self u k);
+#                     △ u v ⟶ _flat k (self u self v k)
 _step_78 = \self \t \k _flat k $ triage id self (_s self (const self)) t k
-# Seventeen nodes carved out of the 95's step, and the generality gone with
-# them. Leaf and stem answer as the 95's do, _flat k standing in for
-# Snat.succ; the fork case _s self (const self) sends u v to self u self v —
-# the left child's count is built over the loop itself, so what comes back is
-# no number but a state that, applied on to v and k, resumes counting:
-# self u self v △ reduces to △^(|u|+|v|) △, read off a run rather than any
-# rule. Those states drag junk in their right halves, and _flat is the
-# disposal, keeping of a state the half that continues the count. The 95's
-# self w k law holds for every k; the 78's holds for the two k's its own loop
-# ever passes — △ and self — and those seventeen nodes are the price of the
-# difference.
+# Seventeen nodes carved out of the 95's step by handing the loop itself in
+# as the accumulator: k is only ever △ — where _flat k is Snat.succ — or
+# self. On self the pruning closes a small algebra, SA := △ (△ △ (△ (△ _flat))):
+#   whnf self        =  △ SA …            (… the live half, pruned away below)
+#   _flat self       ⟶  △ SA
+#   △ SA X v         ⟶  △ (△ _flat) (X v)
+#   △ (△ _flat) Y k  ⟶  _flat k (Y k)
+# so the fork case's self u self stacks |u| such layers, each spending one
+# _flat k — one succ — as the rest of the input and finally the zero arrive:
+# self u self v △ ⟶ △^(|u|+|v|) △. The 95's law holds for every k, the 78's
+# only for its own loop's two, and those seventeen nodes are the price of
+# the difference.
 size__wn_78 = _wn_size _step_78
 size__smallest__wn = size__wn_78
 
@@ -229,20 +222,22 @@ equal _step_95 _chain_step
 # the rest sit where the machine reads trees as data, so the wrapped tree
 # is different data and the count comes out wrong. The 95 absorbs it in
 # exactly one seat, _dup's own, and what that buys is worth keeping:
+# size__eager_111 t ⟶ _step_95 self' t (const △ t),  a value
+#   self' := wait _dup code',  self' z ⟶ _dup code' z ⟶ _step_95 self' z
 size__eager_111 = \t _dispatch (△ (_s (const _step_95) (wait _dup)) t) (const △ t)
 # The weak record made eager-legal: the same machine, wait _dup seated
-# where _dup sat, nothing else changed. wait _dup code is a value where
-# _dup code was the divergent application, so each unfolding now waits for
-# a constructor of the input. Sixteen nodes of wait around the nine of
-# _dup make 111 — eight over the record from the other side, since retying
-# the same step with _k is size__eager_103 itself, node for node. Nor is
-# there a leaner knot for the seat: every tree to sixteen nodes fails in
-# it, under this step and the 78's both — 490912 candidates — so eager
-# legality by this route starts at the record's own 103, if a seventeen-
-# node knot exists at all, and wait's twenty-five is the only one known.
-# The 78's step survives no knot but its own: with _k seated it assembles
-# an 86-node program that miscounts — _flat reads a whnf shape only _dup
-# has — and no tree of thirteen nodes or fewer repairs _flat's seat.
+# where _dup sat, nothing else changed — the divergent application is now a
+# value, and each unfolding waits for a constructor of the input. Sixteen
+# nodes of wait around the nine of _dup make 111 — eight over the record
+# from the other side, since retying the same step with _k is
+# size__eager_103 itself, node for node. Nor is there a leaner knot for the
+# seat: every tree to sixteen nodes fails in it, under this step and the
+# 78's both — 490912 candidates — so eager legality by this route starts at
+# the record's own 103, if a seventeen-node knot exists at all, and wait's
+# twenty-five is the only one known. The 78's step survives no knot but its
+# own: with _k seated it assembles an 86-node program that miscounts —
+# _flat reads a whnf shape only _dup has — and no tree of thirteen nodes or
+# fewer repairs _flat's seat.
 _to_string = Snat.to_string
 size__eager_111 (△ (△ △) (△ △))
 # = 5
@@ -253,70 +248,75 @@ Certify.Size.computes_size size__eager_111
 # = false
 
 # The six the pair supersedes, three architectures tied with _fork_self.
-# Their loop:
+# _loop step z ⟶ step (_fork_self z);  writing c := _loop step:
+#   X := c (const c) ⟶ step X
 _loop = \step _s (const step) _fork_self
 # _loop step = △ (△ (△ △ step)) _fork_self — the pair's code with _fork_self
-# in _dup's seat: a plain value, no recursion in it yet. Write c for it.
-# c z reduces to step (_fork_self z), and _fork_self applied to the fork
-# △ △ c is c (△ △ c) over again — so
-#   X := c (const c)   reduces to   step X,
-# a fixpoint that unfolds once per demand in normal order, and without end
-# under eager evaluation.
+# in _dup's seat: a fixpoint that unfolds once per demand in normal order,
+# and without end under eager evaluation.
+# _tie c ⟶ c (const c)
 _tie = \c c (const c)
 # _tie c is that X. The programs never reduce it while being built: _tie and
 # the loop sit side by side as values, and only the input's arrival at run
 # time applies one to the other.
+# _tie_open c ⟶ △ (const c) (_tie c);  _tie_open c (△ a b) ⟶ _tie c a b
 _tie_open = \c _s △ c (const c)
-# _tie_open c = △ (const c) (_tie c): a fork, so applied to a packed input
-# △ a b it spills both halves into the knot — X a b. (Read off the fork, its
-# leaf and stem cases are △ and c; no input below ever reaches them.)
+# A fork, so a packed input spills both halves into the knot. (Its leaf and
+# stem cases are △ and c; no input below ever reaches them.)
+# _lagged_size tie loop t ⟶ tie loop (△ △ t)
 _lagged_size = \tie \loop \t const tie t loop (const t)
-# Four of the six share a skeleton: _lagged_size tie loop, applied to t,
-# reduces to tie loop (△ △ t) — enter the loop through tie, handing it the
-# input dragged one constructor behind. The states the loops then chew on are
-# built the same way: counts in progress, stems over a fork lagging what is
-# left of the input. Their workhorse is _b2: _b2 w reduces to △ (△ (△ △ w)) —
-# count two, then the lag — which is also exactly what compose w reduces to.
-# One tree being both "add two" and "compose" is why it was one of the 125's
-# same-size substitution sites, and why the searches below keep rediscovering
-# it.
+# Four of the six share this skeleton: enter the loop through tie, handing
+# it the input dragged one constructor behind. The states the loops then
+# chew on are built the same way: counts in progress, stems over a fork
+# lagging what is left of the input. Their workhorse:
+# _b2 w ⟶ △ (△ (△ △ w))  — count two, then the lag — = compose w, the same tree
 _b2 = △ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △))
+# One tree being both "add two" and "compose" is why it was one of the
+# 125's same-size substitution sites, and why the searches below keep
+# rediscovering it.
 
 # The 100 and the 104 are one architecture. Their step triages the state — a
 # leaf answers △, a stem answers itself — and a fork spills into _park and
-# _lag2, one half swallowed, the count redone:
+# _lag2, one half swallowed, the count redone.
+# _park w ⟶ triage w (△ w) (compose Snat.succ (△ w))
 _park = \w △ (△ w (△ w)) (compose Snat.succ (△ w))
-# _park w reduces to triage w (△ w) (compose Snat.succ (△ w)): w parked as
-# the answer for a leaf, grafted under whatever arrives instead otherwise.
+# w parked as the answer for a leaf, grafted under whatever arrives instead.
+# _lag2 w ⟶ △ (△ (△ △ (_b2 w)))  — _b2 after _b2, spelled as one chain
 _lag2 = \w △ (△ (const (_b2 w)))
-# _lag2 w = △ (△ (△ △ (_b2 w))) — count two, lag, count two, lag: _b2 after
-# _b2, spelled as one chain.
+# _step_100 loop ⟶ triage △ △ (compose (_b2 loop) _park)
 _step_100 = \loop triage △ △ (_lag2 loop _park)
-# The fork case, _lag2 loop _park, reduces to compose (_b2 loop) _park.
+# _loop_counted step z ⟶ step (compose Snat.succ (_fork_self z))
 _loop_counted = \step _s (const step) (compose (compose Snat.succ) _fork_self)
-# _loop with one count folded into the knot itself: re-entry is
-# compose Snat.succ X rather than X, each unfolding's stem already emitted.
+# _loop with one count folded into the knot itself: each unfolding's stem
+# already emitted.
 size__wn_100 = _lagged_size _tie (_loop_counted _step_100)
+# _step_104 loop ⟶ triage △ △ (compose (compose Snat.succ) (compose (_b2 loop) _park))
 _step_104 = \loop triage △ △ (compose (compose Snat.succ) (_lag2 loop _park))
-# The same step emitting that count itself — compose Snat.succ composed onto
-# the fork case — which costs the four nodes the 100 saves.
+# The same step emitting that count itself, which costs the four nodes the
+# 100 saves.
 size__wn_104 = _lagged_size _tie (_loop _step_104)
 
 # The 103 and the 106 share their count ladder — and nothing else:
+# _recount w ⟶ △ (△ (compose Snat.succ (compose Snat.succ Snat.succ w)))
 _recount = \w △ (△ (compose Snat.succ (compose Snat.succ Snat.succ w)))
 # Two counts, then one more composed over w pushed two counts further on.
+# _state_103 w ⟶ △ (△ (_s _recount (const w)))
 _state_103 = \w △ (△ (_s _recount (const w)))
+# _step_103 loop ⟶ _state_103 loop (loop △)
 _step_103 = \loop _state_103 loop (loop △)
-# X reduces to _state_103 X (X △): the state rebuilt around the loop, applied
-# to the loop restarted at a bare leaf.
+# So X ⟶ _state_103 X (X △): the state rebuilt around the loop, applied to
+# the loop restarted at a bare leaf.
+# _tie_lagged c ⟶ △ K (c K),  K ⟶ const (compose _b2 c)
 _tie_lagged = \c _s △ c (const (compose _b2 c))
-# _tie_open, except the knot closes over const (compose _b2 c): the 103's
-# loop never sees itself bare — every re-entry reduces to _b2 X.
+# _tie_open, except the knot closes over K: the 103's loop never sees
+# itself bare — every re-entry reduces to _b2 X.
 size__wn_103 = _lagged_size _tie_lagged (_loop _step_103)
+# _state_106 w ⟶ △ (△ (_s _recount (const (_b2 w))))
 _state_106 = \w △ (△ (_s _recount (const (_b2 w))))
+# _step_106 loop ⟶ _state_106 loop (_b2 loop △)
 _step_106 = \loop _state_106 loop (_b2 loop △)
-# As the 103 with both slots pushed through _b2: X reduces to
-# _state_106 X (_b2 X △), and _b2 X △ is X composed after △.
+# As the 103 with both slots pushed through _b2, and _b2 X △ is X composed
+# after △.
 size__wn_106 = _lagged_size _tie_open (_loop _step_106)
 
 # The 108 and the 113 drive one step, and it is not theirs: it is, node for
@@ -324,37 +324,41 @@ size__wn_106 = _lagged_size _tie_open (_loop _step_106)
 # below reads it back out of size__eager_125 — with everything around it
 # re-carved. That is the sense in which #20's deletions started from the
 # eager program.
+# _b2__left w ⟶ compose Snat.succ Snat.succ (const w)
 _b2__left = \w compose Snat.succ Snat.succ (const w)
-# _b2 once more — count two, then lag — as the search spelled it here: the
-# same function and the same 12 nodes with the composition leaning the other
-# way, so a different tree.
+# _b2 once more — count two, then lag — the same function and the same 12
+# nodes with the composition leaning the other way, so a different tree.
 _carved_states = \w _b2__left (compose Snat.succ Snat.succ (compose _b2__left w))
+# _carved z:  △ ⟶ △ Snat.two △;  △ w ⟶ z w;  △ u v ⟶ _carved_states z (compose const z) u v
 _carved = \z △ (triage Snat.two △ z) (_carved_states z (compose const z))
-# _carved z dispatches the next state: a leaf answers △ Snat.two △, a stem w
-# re-enters the loop as z w, a fork falls to the states beside it.
+# A leaf answers, a stem re-enters the loop, a fork falls to the states.
+# _step_carved loop ⟶ compose (compose Snat.succ) (_carved loop)
 _step_carved = \loop compose (compose Snat.succ) (_carved loop)
-# X reduces to compose (compose Snat.succ) (_carved X): one more count
-# composed onto everything the machinery underneath returns.
+# One more count composed onto everything the machinery underneath returns.
+# size__wn_108 t ⟶ _tie_open (_loop _step_carved) (△ t △) ⟶ X t △
 size__wn_108 = \t const _tie_open t (_loop _step_carved) (△ t △)
-# The skeleton again, but the input packed the other way around — △ t △ — so
-# _tie_open spills it into the knot as X t △.
+# The skeleton again, but the input packed the other way around — △ t △.
+# size__wn_113 t ⟶ _tie (_loop _step_carved) t △ — the same X t △ call
 size__wn_113 = \t _s _tie (const t) (_loop _step_carved) △
-# No dispatch at all: the head builds _s _tie (const t), which applied to the
-# loop reduces to X t, and the trailing △ completes the same X t △ call the
-# 108 makes. The assembled tree is size__eager_125's own, with one cut: its
-# 19-node delayed re-entry replaced by the 7-node _fork_self.
+# No dispatch at all. The assembled tree is size__eager_125's own, with one
+# cut: its 19-node delayed re-entry replaced by the 7-node _fork_self.
 
 # The carved-from claim, checked: the step the 108 and the 113 loop over sits
 # whole inside size__eager_125 — left, left, right, right, left, left, right
 # from the top.
+# _left:  △ ⟶ △;  △ u ⟶ u;  △ u v ⟶ u        _right:  △ u v ⟶ v
 _left = triage △ id const
 _right = triage △ id (const id)
 _to_string = Bool.to_source
 equal _step_carved (_right (_left (_left (_right (_right (_left (_left size__eager_125)))))))
 # = true
 
+# _size_body self t n ⟶ △ (case t of  △ ⟶ n;  △ u ⟶ self self u n;
+#                                     △ u v ⟶ self self v (self self u n))
 _size_body = \self \x compose △ $ triage (\self id) (\u \self self self u) (\v \u \self compose (self self u) (self self v)) x self
+# size__fastest t ⟶ _size_body _size_body t △
 size__fastest = \x (self_apply _size_body) x △
+# size t ⟶ the same, the self-application held behind wait until t arrives
 size = \x (wait self_apply _size_body) x △
 
 # Certify.Size.computes_size proves a program returns its argument's node count for
