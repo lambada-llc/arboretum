@@ -222,13 +222,35 @@ _to_string = Bool.to_source
 equal _step_95 _chain_step
 # = true
 
-# That identity is also why no cheap delay squeezes an eager record out of
-# the pair. Delay is bought per knot: retying this step behind wait lands
-# at 116 nodes, and retying it with _k rebuilds size__eager_103 itself,
-# node for node. The 78's step survives no retie at all — with _k in
-# _dup's seat it assembles an 86-node program that miscounts, _flat reading
-# a whnf shape only the _dup knot has, and no tree of thirteen nodes or
-# fewer repairs _flat's seat. Its last seventeen nodes belong to the knot.
+# That identity is also why delay does not squeeze an eager record out of
+# the pair, and the failure has been mapped seat by seat. Wrap any single
+# subtree of either record in wait — all 173 positions — and the 78 absorbs
+# it nowhere: most wraps leave the self-application bare and diverge, and
+# the rest sit where the machine reads trees as data, so the wrapped tree
+# is different data and the count comes out wrong. The 95 absorbs it in
+# exactly one seat, _dup's own, and what that buys is worth keeping:
+size__eager_111 = \t _dispatch (△ (_s (const _step_95) (wait _dup)) t) (const △ t)
+# The weak record made eager-legal: the same machine, wait _dup seated
+# where _dup sat, nothing else changed. wait _dup code is a value where
+# _dup code was the divergent application, so each unfolding now waits for
+# a constructor of the input. Sixteen nodes of wait around the nine of
+# _dup make 111 — eight over the record from the other side, since retying
+# the same step with _k is size__eager_103 itself, node for node. Nor is
+# there a leaner knot for the seat: every tree to sixteen nodes fails in
+# it, under this step and the 78's both — 490912 candidates — so eager
+# legality by this route starts at the record's own 103, if a seventeen-
+# node knot exists at all, and wait's twenty-five is the only one known.
+# The 78's step survives no knot but its own: with _k seated it assembles
+# an 86-node program that miscounts — _flat reads a whnf shape only _dup
+# has — and no tree of thirteen nodes or fewer repairs _flat's seat.
+_to_string = Snat.to_string
+size__eager_111 (△ (△ △) (△ △))
+# = 5
+_to_string = Bool.to_source
+Certify.Size.computes_size_eagerly size__eager_111
+# = true
+Certify.Size.computes_size size__eager_111
+# = false
 
 # The six the pair supersedes, three architectures tied with _fork_self.
 # Their loop:
@@ -641,6 +663,8 @@ Reflect.lazy_eval size__wn_113 id
 # Node counts.
 size size__eager_103
 # = 103
+size size__eager_111
+# = 111
 size size__eager_118
 # = 118
 size size__eager_125
