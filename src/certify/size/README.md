@@ -26,7 +26,7 @@ tactic script.
 
 [`lean_test.lamb`](./lean_test.lamb) demonstrates it as file-style expect tests; the modules land in
 [`expect-test-out/`](./expect-test-out/) —
-`SizeProof125.lean` (the superseded `size__eager_125`), `SizeProof118.lean`,
+`SizeProof125.lean` (the superseded `size__125`), `SizeProof118.lean`,
 and `SizeProof103.lean` — the last of these is `size__smallest`, the eager
 record. The weakly normalizing programs — the 100, and the `__wn` records
 proper, Nathan Farlow's 78 and 95 (lambada-llc/arboretum#23) — get `none`
@@ -61,7 +61,7 @@ convergence and the answer; order-independence additionally rests on
 confluence of the calculus, which is argued in the repository and not
 formalized here.
 
-This covers `size__eager_103` as well, whose chain recursion is no subtree
+This covers `size__103` as well, whose chain recursion is no subtree
 recursion: the strong induction on node count that closes it here is the
 same measure the certifier's RGEN/GEN-TREE rules encode — the Lean export
 and the certifier extension were built against each other.

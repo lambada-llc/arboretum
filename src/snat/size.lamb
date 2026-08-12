@@ -8,7 +8,7 @@ _triage = \self triage id self $ \u
         (\v self u)
 # _functional_smallest self t n ⟶ △ (_triage self t n)
 _functional_smallest = \self \x compose Snat.succ $ _triage self x
-size__eager_125 = \x (fix__wait _functional_smallest) x Snat.zero
+size__125 = \x (fix__wait _functional_smallest) x Snat.zero
 
 # Pinned to fix__wait, the knot it was searched against — core's `fix` is now
 # the quine knot below, which would silently shrink it to 118 and invalidate the
@@ -35,8 +35,8 @@ size__eager_125 = \x (fix__wait _functional_smallest) x Snat.zero
 # _functional_smallest, unchanged: only the knot around it is new, and the
 # certificates below are the same machine-checked ones the 125 above
 # carries. That knot generalizes, and is now core's `fix` — so
-# size__eager_118 is exactly \x (fix _functional_smallest) x Snat.zero. It
-# stays spelled out here because size__eager_103 below builds on _k too.
+# size__118 is exactly \x (fix _functional_smallest) x Snat.zero. It
+# stays spelled out here because size__103 below builds on _k too.
 # The knot is also as tight as enumeration reaches, assuming nothing about
 # its shape: read the whole program as \x (△ P (△ (compose step R))) x △,
 # with P = △ _k and R = △ P the twice-paid pieces. Every tree to fourteen
@@ -54,7 +54,7 @@ _k = const (triage △ △ _selfstem)
 # ties self := △ (△ _k) (△ _code):
 #   self z ⟶ _k z (△ _code z) ⟶ _code (△ _code) z ⟶ _functional_smallest self z
 _code = \sq _functional_smallest (△ (△ _k) sq)
-size__eager_118 = \x (△ (△ _k) (△ _code)) x △
+size__118 = \x (△ (△ _k) (△ _code)) x △
 
 # The same knot around a different step reaches 103. The record step
 # composes the two child counts; this one owns no composition machinery at
@@ -83,7 +83,7 @@ size__eager_118 = \x (△ (△ _k) (△ _code)) x △
 _chain_step = \self \x compose Snat.succ $ triage id self (\u \v self (self u v)) x
 # ties self := △ (△ _k) (△ _chain_code):  self z ⟶ _chain_step self z
 _chain_code = \sq _chain_step (△ (△ _k) sq)
-size__eager_103 = \x (△ (△ _k) (△ _chain_code)) x △
+size__103 = \x (△ (△ _k) (△ _chain_code)) x △
 
 # The record, and the smallest of these this repository can run under its own
 # rule — so it is what __smallest names. (size__smallest__wn further down is
@@ -91,28 +91,28 @@ size__eager_103 = \x (△ (△ _k) (△ _chain_code)) x △
 # Smallest is not cheapest: the chain it recurses on is rebuilt rather than
 # taken apart, and it pays five to six times `size`'s reductions for it, so it
 # is the record and not the default — see src/snat/bench.lamb.
-size__smallest = size__eager_103
+size__smallest = size__103
 
 _to_string = Snat.to_string
-size__eager_118 (△ (△ △) (△ △))
+size__118 (△ (△ △) (△ △))
 # = 5
-size__eager_103 (△ (△ △) (△ △))
+size__103 (△ (△ △) (△ △))
 # = 5
-size__eager_118 size__eager_103
+size__118 size__103
 # = 103
-size__eager_103 size__eager_118
+size__103 size__118
 # = 118
-size__eager_103 size__eager_103
+size__103 size__103
 # = 103
 
 _to_string = Bool.to_source
-Certify.Size.computes_size_eagerly size__eager_118
+Certify.Size.computes_size_eagerly size__118
 # = true
-Certify.Size.computes_size size__eager_118
+Certify.Size.computes_size size__118
 # = true
-Certify.Size.computes_size_eagerly size__eager_103
+Certify.Size.computes_size_eagerly size__103
 # = true
-Certify.Size.computes_size size__eager_103
+Certify.Size.computes_size size__103
 # = false
 
 # Smaller still, once the program no longer has to strongly normalize.
@@ -140,7 +140,7 @@ Certify.Size.computes_size size__eager_103
 # order.
 #
 # First the tree all eight lean on. Where fix__wait above keeps its recursion
-# delayed behind wait — the 44 nodes size__eager_125 pays, its unfolder twice
+# delayed behind wait — the 44 nodes size__125 pays, its unfolder twice
 # included — this section's delay budget is zero.
 # _fork_self f ⟶ △ f (△ f) (△ f);  on a fork:  _fork_self (△ u v) ⟶ v (△ u v)
 _fork_self = \f △ f (△ f) (△ f)
@@ -173,7 +173,7 @@ _dispatch = triage △ △ _fork_self
 # when the step forces it
 _wn_size = \step \t _dispatch (_pack step t) (const △ t)
 # The machine: thirty-four nodes of harness around whatever step arrives,
-# where size__eager_103 pays 42 and size__eager_125 pays 49.
+# where size__103 pays 42 and size__125 pays 49.
 # _flat △ ⟶ △;   _flat (△ m) ⟶ △ m;   _flat (△ m n) ⟶ △ m
 _flat = triage △ △ (\m \n △ m)
 # Identity on a count arriving, prune on anything else. Eleven nodes whose
@@ -226,15 +226,15 @@ equal _step_95 _chain_step
 # the rest sit where the machine reads trees as data, so the wrapped tree
 # is different data and the count comes out wrong. The 95 absorbs it in
 # exactly one seat, _dup's own, and what that buys is worth keeping:
-# size__eager_111 t ⟶ _step_95 self' t (const △ t),  a value
+# size__111 t ⟶ _step_95 self' t (const △ t),  a value
 #   self' := wait _dup code',  self' z ⟶ _dup code' z ⟶ _step_95 self' z
-size__eager_111 = \t _dispatch (△ (_s (const _step_95) (wait _dup)) t) (const △ t)
+size__111 = \t _dispatch (△ (_s (const _step_95) (wait _dup)) t) (const △ t)
 # The weak record made strongly normalizing: the same machine, wait _dup
 # seated where _dup sat, nothing else changed — the divergent application is
 # now a value, and each unfolding waits for a constructor of the input.
 # Sixteen nodes of wait around the nine of _dup make 111 — eight over the
 # record from the other side, since retying the same step with _k is
-# size__eager_103 itself, node for node. Nor is there a leaner knot for the
+# size__103 itself, node for node. Nor is there a leaner knot for the
 # seat: every tree to sixteen nodes fails in it, under this step and the
 # 78's both — 490912 candidates — so strong normalization by this route
 # starts at the record's own 103, if a seventeen-node knot exists at all,
@@ -243,12 +243,12 @@ size__eager_111 = \t _dispatch (△ (_s (const _step_95) (wait _dup)) t) (const 
 # _flat reads a whnf shape only _dup has — and no tree of thirteen nodes or
 # fewer repairs _flat's seat.
 _to_string = Snat.to_string
-size__eager_111 (△ (△ △) (△ △))
+size__111 (△ (△ △) (△ △))
 # = 5
 _to_string = Bool.to_source
-Certify.Size.computes_size_eagerly size__eager_111
+Certify.Size.computes_size_eagerly size__111
 # = true
-Certify.Size.computes_size size__eager_111
+Certify.Size.computes_size size__111
 # = false
 
 # The six the pair supersedes, three architectures tied with _fork_self.
@@ -324,8 +324,8 @@ _step_106 = \loop _state_106 loop (_b2 loop △)
 size__wn_106 = _lagged_size _tie_open (_loop _step_106)
 
 # The 108 and the 113 drive one step, and it is not theirs: it is, node for
-# node, the 76-node body size__eager_125's fix__wait knot drives — the expect test
-# below reads it back out of size__eager_125 — with everything around it
+# node, the 76-node body size__125's fix__wait knot drives — the expect test
+# below reads it back out of size__125 — with everything around it
 # re-carved. That is the sense in which #20's deletions started from the
 # eager program.
 # _b2__left w ⟶ compose Snat.succ Snat.succ (const w)
@@ -344,17 +344,17 @@ size__wn_108 = \t const _tie_open t (_loop _step_carved) (△ t △)
 # The skeleton again, but the input packed the other way around — △ t △.
 # size__wn_113 t ⟶ _tie (_loop _step_carved) t △ — the same X t △ call
 size__wn_113 = \t _s _tie (const t) (_loop _step_carved) △
-# No dispatch at all. The assembled tree is size__eager_125's own, with one
+# No dispatch at all. The assembled tree is size__125's own, with one
 # cut: its 19-node delayed re-entry replaced by the 7-node _fork_self.
 
 # The carved-from claim, checked: the step the 108 and the 113 loop over sits
-# whole inside size__eager_125 — left, left, right, right, left, left, right
+# whole inside size__125 — left, left, right, right, left, left, right
 # from the top.
 # _left:  △ ⟶ △;  △ u ⟶ u;  △ u v ⟶ u        _right:  △ u v ⟶ v
 _left = triage △ id const
 _right = triage △ id (const id)
 _to_string = Bool.to_source
-equal _step_carved (_right (_left (_left (_right (_right (_left (_left size__eager_125)))))))
+equal _step_carved (_right (_left (_left (_right (_right (_left (_left size__125)))))))
 # = true
 
 # _size_body self t n ⟶ △ (case t of  △ ⟶ n;  △ u ⟶ self self u n;
@@ -372,7 +372,7 @@ Certify.Size.computes_size size
 # = true
 Certify.Size.computes_size size__fastest
 # = true
-Certify.Size.computes_size size__eager_125
+Certify.Size.computes_size size__125
 # = true
 
 # A true stands on a proof, and the proof is an induction tree that can be
@@ -382,7 +382,7 @@ Certify.Size.computes_size size__eager_125
 # successor, GEN naming a subterm's count, FOLD closing an instance of an
 # induction hypothesis.
 _to_string = Option.match "no proof" Certify.Size.render
-Certify.Size.certify_size size__eager_125
+Certify.Size.certify_size size__125
 # = SPLIT t
 #     PEEL
 #       ZERO
@@ -413,7 +413,7 @@ Certify.Size.computes_size_eagerly size
 # = true
 Certify.Size.computes_size_eagerly size__fastest
 # = true
-Certify.Size.computes_size_eagerly size__eager_125
+Certify.Size.computes_size_eagerly size__125
 # = true
 
 # And it is what the __wn ones fail, on the very first state: reducing them
@@ -672,13 +672,13 @@ Reflect.lazy_eval size__wn_113 id
 # = 5
 
 # Node counts.
-size size__eager_103
+size size__103
 # = 103
-size size__eager_111
+size size__111
 # = 111
-size size__eager_118
+size size__118
 # = 118
-size size__eager_125
+size size__125
 # = 125
 size size__wn_78
 # = 78
