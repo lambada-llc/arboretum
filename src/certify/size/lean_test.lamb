@@ -10,11 +10,11 @@
 # GEN-TREE's minted arguments, and every App constructor one NORMALIZE step,
 # replayed from the program's eager reduction.
 
-Option.match △ id (Certify.Size.lean_size_proof "SizeProof125.lean" Snat.size__eager_125)
+Option.match △ id (Certify.Size.lean_size_proof "SizeProof125.lean" Snat.size__125)
 # = SizeProof125.lean sha256:b4518a23a403a5eaec87ba4c98639e21cfd0b054aa89a11b78da75417aa52737
-Option.match △ id (Certify.Size.lean_size_proof "SizeProof118.lean" Snat.size__eager_118)
+Option.match △ id (Certify.Size.lean_size_proof "SizeProof118.lean" Snat.size__118)
 # = SizeProof118.lean sha256:4dc4508b78188005929817db43c6bd16289a05bf9acb730e68d8210cc20ffb66
-Option.match △ id (Certify.Size.lean_size_proof "SizeProof103.lean" Snat.size__eager_103)
+Option.match △ id (Certify.Size.lean_size_proof "SizeProof103.lean" Snat.size__103)
 # = SizeProof103.lean sha256:e9112963626f243a9dfd353270499b5dec22ae73e02f268d138cad12020dad18
 
 # No module for a program with no eager derivation: the weakly normalizing
