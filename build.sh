@@ -10,6 +10,10 @@ cd "$(dirname "$0")"
 # Use the pinned submodule rather than a published runtime.
 export LAMBADA_TREE_CALCULUS="$PWD/submodules/tree-calculus"
 export TREE_CALCULUS_RUNNER=eager
+# Where the runtime keeps what reduction it has already done: evaluated
+# modules, and per-term results the expect tests below are answered from.
+# Content-addressed, so a stale entry cannot exist — only a missing one.
+export TREE_CALCULUS_CACHE="$PWD/.cache/tree-calculus"
 lambada="node submodules/lambada/bin/lambada.js"
 dag="node submodules/tree-calculus/bin/dag.js"
 
@@ -23,8 +27,12 @@ $lambada compile --root src --cache .cache/lambada
 $dag link $(find src -name '.*.dag' | sort) \
   | $dag canonicalize > src/.dag-bundle-canonical
 
-# Evaluate the top-level expressions, recording results in the sources
+# Evaluate the top-level expressions, recording results in the sources.
+# The warm pass computes the answers that are not in the cache yet, on every
+# core; expect-test then finds each one already written. Skipping the warm
+# pass changes nothing but the time this takes.
 >&2 echo "Running tests"
+node tools/warm-expect-tests.js src/.dag-bundle-canonical
 $lambada expect-test src/.dag-bundle-canonical --root src
 
 # Take the compiler back out of the bundle it is part of, so that the lambada
