@@ -13,6 +13,15 @@ equal (Lambada.compile (String.to_source "")) ""
 # = true
 equal (Lambada.compile (String.to_source "abc")) "abc"
 # = true
+# The characters [to_source] has to make a decision about: the two it escapes
+# because a literal cannot hold them as they are, the two it escapes because
+# they would not be visible, and the line break it leaves alone.
+equal (Lambada.compile (String.to_source "quote \" backslash \\")) "quote \" backslash \\"
+# = true
+equal (Lambada.compile (String.to_source "tab \t return \r")) "tab \t return \r"
+# = true
+equal (Lambada.compile (String.to_source "two\nlines")) "two\nlines"
+# = true
 
 equal (Lambada.compile (Serialize.to_source △)) △
 # = true

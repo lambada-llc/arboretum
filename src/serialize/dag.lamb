@@ -45,13 +45,25 @@ Pair.snd $ to_dag id
 Pair.fst $ to_dag △
 # = ""
 Pair.fst $ to_dag true
-# = "0 △ △\n"
+# = "0 △ △
+#   "
 Pair.fst $ to_dag false
 # = ""
 Pair.fst $ to_dag id
-# = "0 △ △\n1 △ 0\n01 △ 1\n11 01 △\n"
+# = "0 △ △
+#   1 △ 0
+#   01 △ 1
+#   11 01 △
+#   "
 Pair.fst $ to_dag Bool.not
-# = "0 △ △\n1 △ 0\n01 △ △\n11 01 △\n001 1 11\n101 △ 001\n011 101 △\n"
+# = "0 △ △
+#   1 △ 0
+#   01 △ △
+#   11 01 △
+#   001 1 11
+#   101 △ 001
+#   011 101 △
+#   "
 
 _to_string = Bool.to_source
 equal △ (from_dag "")
