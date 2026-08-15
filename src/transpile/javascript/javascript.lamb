@@ -38,7 +38,7 @@ of_stdin_stdout = \program List.concat_list ["arg => {
       else if (c.length === 1) f.push(c[0], ...a[0]);
       else if (c.length === 2) f.push(c[0], c[1], ...b);
   }
-  // Turn result into string and print
+  // Turn result into string
   const toB = f => !!f?.length;
   const toL = f => { let l = []; while (f?.length) { l.push(f[1]); f = f[0]; } return l };
   const toN = f => toL(f).reduceRight((acc, b) => 2 * acc + (toB(b) ? 1 : 0), 0);
@@ -57,4 +57,4 @@ to_array id
 
 # The identity program is cat.
 △ (△ "cat.js" "text/javascript") $ of_stdin_stdout id
-# = cat.js sha256:011db5a870eaa540705a1f06b39fd35482667c5d9eb68066d5ec43d15d414d5e
+# = cat.js sha256:89553a6861ffce81c15d43384178b17f6bb68cbb22bad3f0908dd668ce55ab1c

@@ -1,6 +1,6 @@
 #!/bin/bash
   set -euo pipefail
-  program=001010111 # this environment here does not support escaping, meaning we can'³ write double quotes in string constants; so we use " for quotes
+  program=001010111
   # Runtime
   function reduce {
     # 00011ab -> a

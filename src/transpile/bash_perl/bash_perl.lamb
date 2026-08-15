@@ -10,9 +10,9 @@
 _bits = \program List.map (Bool.match '0' '1') $ Serialize.bitstr_encode program
 _quotes = String.replace_char '&' '"'
 
-of_stdin_stdout = \program List.concat_list [[35]; "!/bin/bash
+of_stdin_stdout = \program List.concat_list ["#!/bin/bash
   set -euo pipefail
-  program="; _bits program; _quotes " # this environment here does not support escaping, meaning we can'△ write double quotes in string constants; so we use & for quotes
+  program="; _bits program; _quotes "
   # Runtime
   function reduce {
     # 00011ab -> a
@@ -48,4 +48,4 @@ of_stdin_stdout = \program List.concat_list [[35]; "!/bin/bash
 
 # The identity program is cat.
 △ (△ "cat.sh" "text/x-shellscript") $ of_stdin_stdout id
-# = cat.sh sha256:0eab7cd45f435c4a12d8dddb9ef59a7efa1657d329b6173384642091dc78670b
+# = cat.sh sha256:29d7bfc07c0e2ab280a2419851624af58323475bf9f75fabb5e43c1e5b064800

@@ -25,7 +25,7 @@ arg => {
       else if (c.length === 1) f.push(c[0], ...a[0]);
       else if (c.length === 2) f.push(c[0], c[1], ...b);
   }
-  // Turn result into string and print
+  // Turn result into string
   const toB = f => !!f?.length;
   const toL = f => { let l = []; while (f?.length) { l.push(f[1]); f = f[0]; } return l };
   const toN = f => toL(f).reduceRight((acc, b) => 2 * acc + (toB(b) ? 1 : 0), 0);
