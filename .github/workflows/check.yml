@@ -31,12 +31,13 @@ jobs:
         with:
           node-version: '22'
 
-      # The chunk cache is content-addressed (compiler hash + chunk source), so
-      # a restored entry can only miss, never serve the wrong output for changed
+      # Both caches are content-addressed — compiler hash + chunk source for
+      # compiled chunks, term fingerprints for reduction results — so a
+      # restored entry can only miss, never serve the wrong output for changed
       # input. PR runs write to their own cache scope, not the base branch's.
       - uses: actions/cache@v4
         with:
-          path: .cache/lambada
+          path: .cache
           key: lambada-chunks-${{ hashFiles('src/**/*.lamb', '.gitmodules') }}
           restore-keys: lambada-chunks-
 
