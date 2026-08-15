@@ -20,14 +20,14 @@ Lambada.compile_to_dag_bench "'a'"
 #   Lower:    307
 #   Emit:     1361
 Lambada.compile_to_dag_bench ['"'; 'h'; 'i'; '"']
-# = Tokenize: 715
-#   Parse:    527
+# = Tokenize: 914
+#   Parse:    535
 #   Lower:    307
 #   Emit:     3417
 
-Lambada.compile_to_dag_bench "\x x"
+Lambada.compile_to_dag_bench "\\x x"
 # = Tokenize: 1128
-#   Parse:    1343
+#   Parse:    1345
 #   Lower:    1474
 #   Emit:     213
 Lambada.compile_to_dag_bench "(x)"

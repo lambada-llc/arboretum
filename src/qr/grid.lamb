@@ -46,7 +46,7 @@ grid_height = List.length
 # Render grid as string (for debugging)
 # Takes a cell-to-char function
 grid_to_str = \cell_to_str \grid
-  List.join [10] $ List.map (\row List.concat_map cell_to_str row) grid
+  List.join "\n" $ List.map (\row List.concat_map cell_to_str row) grid
 
 # Tests
 _to_string = Nat.to_source

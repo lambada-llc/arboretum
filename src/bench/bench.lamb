@@ -65,7 +65,7 @@ _widths = List.foldr
 _format_table = \rows
     let (△ _header rows) $ \all_rows
     let (_widths all_rows) $ \widths
-    List.join [10]
+    List.join "\n"
       (List.map (\row List.join " " (List.zip_with (\w String.pad_left w ' ') widths row)) all_rows)
 
 run = List.match "" $ \hd \tl

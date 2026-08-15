@@ -2,17 +2,12 @@
 # stdout. The program travels as Serialize.bitstr_encode's bitstring; Perl
 # does the reduction, as five PCRE substitutions — in that encoding, each
 # reduction rule is a literal string rewrite.
-#
-# String literals here have no escape sequences, so the script is written
-# with & wherever it needs a double quote, and the quotes are swapped in at
-# the end.
 
 _bits = \program List.map (Bool.match '0' '1') $ Serialize.bitstr_encode program
-_quotes = String.replace_char '&' '"'
 
 of_stdin_stdout = \program List.concat_list ["#!/bin/bash
   set -euo pipefail
-  program="; _bits program; _quotes "
+  program="; _bits program; "
   # Runtime
   function reduce {
     # 00011ab -> a
@@ -25,24 +20,24 @@ of_stdin_stdout = \program List.concat_list ["#!/bin/bash
   # Conversions: string <=> encoded tree
   function of_list () {
     while read -r line; do
-      echo -n &001$line&
+      echo -n \"001$line\"
     done
     echo 1
   }
   function to_list () {
-    sed 's/1$//' | perl -pe &s/0(1|0(?1)(?1))/\1\n/g& | sed -e 's/^01//g;$d'
+    sed 's/1$//' | perl -pe \"s/0(1|0(?1)(?1))/\\1\\n/g\" | sed -e 's/^01//g;$d'
   }
   function of_string () {
-    perl -ne 'printf &%vb\n&, $_'  | tr . '\n' | rev | sed 's/0/a/g;s/1/001011/g;s/a/0011/g;s/$/1/' | of_list
+    perl -ne 'printf \"%vb\\n\", $_'  | tr . '\\n' | rev | sed 's/0/a/g;s/1/001011/g;s/a/0011/g;s/$/1/' | of_list
   }
   function to_string () {
-    to_list | sed 's/1$//;s/0011/a/g;s/001011/1/g;s/a/0/g' | rev | echo &ibase=2;$(cat)& | bc | while read -r N; do printf &\\$(printf '%03o' &$N&)&; done
+    to_list | sed 's/1$//;s/0011/a/g;s/001011/1/g;s/a/0/g' | rev | echo \"ibase=2;$(cat)\" | bc | while read -r N; do printf \"\\\\$(printf '%03o' \"$N\")\"; done
   }
   
   fifo=$(mktemp -u)
-  mkfifo &$fifo&
-  (echo -n 0$program; of_string) | reduce &$fifo& | to_string
-  rm -f &$fifo&
+  mkfifo \"$fifo\"
+  (echo -n 0$program; of_string) | reduce \"$fifo\" | to_string
+  rm -f \"$fifo\"
  "
  ]
 

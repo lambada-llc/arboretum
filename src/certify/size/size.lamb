@@ -834,7 +834,7 @@ _render_spec = \env \e List.concat "["
 # contributes its list of lines, prefixed by the indentation it was handed;
 # a child gets two more spaces.
 render = \pf let (_number_names (_names_in pf)) $ \env
-  List.join [10] $ (fix $ \self \ind \p
+  List.join "\n" $ (fix $ \self \ind \p
   let (List.concat "  " ind) $ \ind2
   _pf_case p
   (\_ [List.concat ind "ZERO"])

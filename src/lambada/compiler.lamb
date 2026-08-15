@@ -82,7 +82,7 @@ schar_eq =
 Token = Token_special_char schar     # schar
       | Token_identifier name        # string
       | Token_identifier_adt name    # string
-      | Token_const_str value        # string
+      | Token_const_str value escapes # string nat
       | Token_const_nat value        # nat
       | Token_comment value          # string
 
@@ -123,10 +123,41 @@ parse_special_char = parse_char_map
             '}': Schar_curly_close;
         }
 _is_quot = equal_const '"'
+# Escape sequences, JSON's simple ones and only those. Anything else after a
+# backslash has no meaning here and fails the parse: reading it as the character
+# itself would turn a mistyped escape into a silent one.
+_parse_escaped_char = parse_char_map
+        {
+            '"': '"';
+            '\': '\';
+            'n': 10;
+            't': 9;
+            'r': 13;
+        }
+# What a string body holds verbatim — everything but the closing delimiter and
+# the backslash that opens an escape.
+_is_str_char = Memo.precompute_alt Memo.gen_ascii true $ Fn.p_not $ Fn.p_or _is_quot (equal_const '\')
+# The body of a string literal, escapes decoded, paired with how many of them
+# there were. That count is the one thing the decoded value cannot answer for
+# itself — a newline in it may have been spelled [\n] or written out — and
+# without it [_token_text_len] has no way to tell how wide the token was in the
+# source. Verbatim runs are still taken in one [take_while], so a body without
+# escapes costs what it always did.
+_parse_str_body = fix $ \self Parser.compose_dep (Parser.take_while _is_str_char) $ \chunk \rest
+    List.match Parser.fail_result (\c \tl
+        Bool.match
+            (\chunk \rest \tl \self Parser.map_result
+                (Pair.match $ \value \escapes △ (List.concat chunk value) escapes)
+                (Parser.seq
+                    (\ch Pair.match $ \value \escapes △ (△ ch value) (Nat.succ escapes))
+                    _parse_escaped_char self tl))
+            (\chunk \rest \tl \self Parser.return (△ chunk 0) rest)
+            (_is_quot c) chunk rest tl self
+    ) rest
 # The first-char dispatch only routes here once the opening delimiter (or '#')
 # has already matched, so the opener is consumed with [one] rather than checked
 # a second time. The closing-delimiter satisfy stays — it is a real check.
-parse_str  = Parser.map Token_const_str (Parser.seq_snd Parser.one (Parser.seq_fst (Parser.take_until _is_quot) (Parser.satisfy _is_quot)))
+parse_str  = Parser.map (Pair.match Token_const_str) (Parser.seq_snd Parser.one (Parser.seq_fst _parse_str_body (Parser.satisfy _is_quot)))
 _is_quot = equal_const '''
 parse_char  = Parser.map Token_const_nat (Parser.seq_snd Parser.one (Parser.seq_fst Parser.one (Parser.satisfy _is_quot)))
 parse_nat  = Parser.map Token_const_nat parse_nat
@@ -169,7 +200,7 @@ _token_text_len = \tok tok
     (\schar 1)
     (\name List.length name)
     (\name List.length name)
-    (\value Nat.add 2 $ List.length value)
+    (\value \escapes Nat.add escapes $ Nat.add 2 $ List.length value)
     (\value List.length $ Nat.to_string value)
     (\value Nat.succ $ List.length value)
 
@@ -320,7 +351,7 @@ parse__expr = \e
                     (parse_adt_tail literal e)
                     (Parser.return (Syntax_identifier literal))
             )
-            (\value \e Parser.return $ Syntax_const_str value)
+            (\value \escapes \e Parser.return $ Syntax_const_str value)
             (\value \e Parser.return $ Syntax_const_nat value)
             (\_ \e Parser.fail)
             e
@@ -416,7 +447,7 @@ _p__expr = \e \ptoks
           (_plist_tail e) Parser.fail (_pmap_tail e) Parser.fail)
       (\literal Parser.either (_passign_tail literal e) (Parser.return [Syntax_identifier literal]))
       (\literal Parser.either (_padt_tail literal e) (Parser.return [Syntax_identifier literal]))
-      (\value Parser.return $ [Syntax_const_str value])
+      (\value \escapes Parser.return $ [Syntax_const_str value])
       (\value Parser.return $ [Syntax_const_nat value])
       (\_ Parser.fail)
   ) ptoks)
@@ -726,10 +757,10 @@ compile_to_dag_bench = \s
   let (Reflect.count_eval_steps compiler_emit_dag s) $ \n_emit
   let (_compiler_emit_dag s) $ \s
   List.concat_list [
-    "Tokenize: "; Nat.to_string n_tokenize; [10];
-    "Parse:    "; Nat.to_string n_parse; [10];
-    "Lower:    "; Nat.to_string n_lower; [10];
-    "Emit:     "; Nat.to_string n_emit; [10];
+    "Tokenize: "; Nat.to_string n_tokenize; "\n";
+    "Parse:    "; Nat.to_string n_parse; "\n";
+    "Lower:    "; Nat.to_string n_lower; "\n";
+    "Emit:     "; Nat.to_string n_emit; "\n";
   ]
 
 _to_string = id
@@ -757,9 +788,9 @@ compile_to_dag_bench "[42]"
 #   Lower:    494
 #   Emit:     2520
 
-compile_to_dag_bench "\x x"
+compile_to_dag_bench "\\x x"
 # = Tokenize: 1128
-#   Parse:    1343
+#   Parse:    1345
 #   Lower:    1474
 #   Emit:     213
 
@@ -789,9 +820,9 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # through four — and this one expression was ~6s of the build. Deciding each
 # application from what abstracting its sides already returned made it linear:
 # the same five now cost 22674, 29212, 35750, 42288, 48826, a flat 6538 apiece.
-compile_to_dag_bench "\d \a \i i d (\x \x a) a a a a"
+compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 # = Tokenize: 7141
-#   Parse:    8572
+#   Parse:    8582
 #   Lower:    48814
 #   Emit:     28350
 
@@ -800,8 +831,8 @@ compile_to_dag_bench "\d \a \i i d (\x \x a) a a a a"
 # 5096 and 61021). Emitting is where the bulk is, because every character
 # becomes its own run of DAG lines — one per bit, plus two for the cons.
 compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
-# = Tokenize: 9334
-#   Parse:    527
+# = Tokenize: 10121
+#   Parse:    535
 #   Lower:    307
 #   Emit:     118850
 
@@ -845,7 +876,7 @@ compile "[65,123,65,]"
 # = [65; 123; 65]
 
 _to_string = Serialize.to_source
-compile "\x x"
+compile "\\x x"
 # = (△ (△ (△ △)) △)
 
 # Map literals lower to Map.set over the empty map, so what comes back is a

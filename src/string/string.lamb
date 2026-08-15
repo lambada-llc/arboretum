@@ -1,4 +1,11 @@
-to_source = \s △ '"' $ List.concat s ['"']
+# Escaped on the way out: what has no other spelling inside a literal (the
+# delimiter and the backslash) and what would otherwise be invisible (tab,
+# carriage return). A line break is left as one — a multi-line string reads
+# better across lines than escaped onto a single one — and [Lambada] takes all
+# of it back, so [compile (to_source s)] is [s] for any string.
+_escapes = [△ '"' "\\\""; △ '\' "\\\\"; △ 9 "\\t"; △ 13 "\\r"]
+_escape_char = \c List.foldr (\e \rest Bool.match rest (Pair.snd e) (equal (Pair.fst e) c)) [c] _escapes
+to_source = \s List.concat "\"" $ List.foldr (\c \acc List.concat (_escape_char c) acc) "\"" s
 
 _length = List.foldr (\_ Nat.succ) 0
 pad_left = \width \pad_char \s
