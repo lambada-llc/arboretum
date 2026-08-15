@@ -1,7 +1,6 @@
 # XML building blocks: attributes and elements as strings.
 # Values are emitted verbatim — callers must pass XML-safe content.
-_quote = [34]
-attr = Pair.match $ \k \v List.concat_list [" "; k; "="; _quote; v; _quote]
+attr = Pair.match $ \k \v List.concat_list [" "; k; "=\""; v; "\""]
 attrs = compose List.concat_list (List.map attr)
 element = \tag \as \children List.concat_list
   ["<"; tag; attrs as;

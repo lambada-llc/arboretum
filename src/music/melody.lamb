@@ -37,7 +37,7 @@ note = \duration \name △ duration (pitch name)
 # with a dot after it, which is exactly how the table below spells it.
 _symbols = [△ 16 "𝅝"; △ 12 "𝅗𝅥."; △ 8 "𝅗𝅥"; △ 6 "♩."; △ 4 "♩"; △ 3 "♪."; △ 2 "♪"; △ 1 "𝅘𝅥𝅯"]
 _note_string = Pair.match \d \p List.concat (List.lookup_or "?" d _symbols) (_name p)
-to_string = \melody List.join [10] (List.map (List.concat_map _note_string) melody)
+to_string = \melody List.join "\n" (List.map (List.concat_map _note_string) melody)
 
 # Sound: at `bpm` quarter notes per minute a sixteenth lasts sr*60/(4*bpm)
 # samples. Each note sounds for its slot minus a gap that articulates it (see
