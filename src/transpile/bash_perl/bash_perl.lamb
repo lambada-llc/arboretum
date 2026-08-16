@@ -1,7 +1,9 @@
 # Transpile a program into a self-contained bash script mapping stdin to
 # stdout. The program travels as Serialize.bitstr_encode's bitstring; Perl
-# does the reduction, as five PCRE substitutions — in that encoding, each
-# reduction rule is a literal string rewrite.
+# does the reduction, as PCRE substitutions — one literal string rewrite per
+# reduction rule, plus three shortcuts that fuse an S step with the K step
+# that follows when an operand is K-shaped, so an argument is only copied at
+# genuine fan-out.
 
 _bits = \program List.map (Bool.match '0' '1') $ Serialize.bitstr_encode program
 
@@ -15,7 +17,11 @@ of_stdin_stdout = \program List.concat_list ["#!/bin/bash
     # 0001001abc1 -> a
     # 0001001abc01 -> 0b
     # 0001001abc001 -> 00c
-    perl -pe 'while($_=~/000/){s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))001/00$3/g;s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))01/0$2/g;s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))1/$1/g;s/000101(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))/00$1${3}0$2$3/g;s/00011(1|0(?1)(?1))(1|0(?2)(?2))/$1/g}'
+    # Shortcuts (S fused with a K eliminator, i.e. rule 2 composed with rule 1):
+    # 000101011bc -> c
+    # 0001010011abc -> 0a0bc
+    # 000101a0011bc -> 00acb
+    perl -pe 'while($_=~/000/){s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))001/00$3/g;s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))01/0$2/g;s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))1/$1/g;s/000101011(1|0(?1)(?1))(1|0(?2)(?2))/${2}/g;s/0001010011(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))/0${1}0${2}${3}/g;s/000101(1|0(?1)(?1))0011(1|0(?2)(?2))(1|0(?3)(?3))/00${1}${3}${2}/g;s/000101(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))/00$1${3}0$2$3/g;s/00011(1|0(?1)(?1))(1|0(?2)(?2))/$1/g}'
   }
   # Conversions: string <=> encoded tree
   function of_list () {
@@ -43,4 +49,4 @@ of_stdin_stdout = \program List.concat_list ["#!/bin/bash
 
 # The identity program is cat.
 △ (△ "cat.sh" "text/x-shellscript") $ of_stdin_stdout id
-# = cat.sh sha256:29d7bfc07c0e2ab280a2419851624af58323475bf9f75fabb5e43c1e5b064800
+# = cat.sh sha256:55190358d0022c24eff020930d8f8ad7b071ff098ba1625fedbd4a1baaea6142
