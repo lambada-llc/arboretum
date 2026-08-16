@@ -1,17 +1,9 @@
 #!/bin/bash
   set -euo pipefail
   program=001010111
-  # Runtime
+  # Runtime: each substitution is one reduction rule, rewriting the encoding
+  # itself. leaf is 1, stem 01x, fork 001xy, and applying f to x is 0fx.
   function reduce {
-    # 00011ab -> a
-    # 000101abc -> 00ac0bc
-    # 0001001abc1 -> a
-    # 0001001abc01 -> 0b
-    # 0001001abc001 -> 00c
-    # Shortcuts (S fused with a K eliminator, i.e. rule 2 composed with rule 1):
-    # 000101011bc -> c
-    # 0001010011abc -> 0a0bc
-    # 000101a0011bc -> 00acb
     perl -pe 'while($_=~/000/){s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))001/00$3/g;s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))01/0$2/g;s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))1/$1/g;s/000101011(1|0(?1)(?1))(1|0(?2)(?2))/${2}/g;s/0001010011(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))/0${1}0${2}${3}/g;s/000101(1|0(?1)(?1))0011(1|0(?2)(?2))(1|0(?3)(?3))/00${1}${3}${2}/g;s/000101(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))/00$1${3}0$2$3/g;s/00011(1|0(?1)(?1))(1|0(?2)(?2))/$1/g}'
   }
   # Conversions: string <=> encoded tree
