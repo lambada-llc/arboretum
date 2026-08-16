@@ -1,21 +1,39 @@
 # Transpile a program into a self-contained bash script mapping stdin to
 # stdout. The program travels as Serialize.bitstr_encode's bitstring; Perl
-# does the reduction, as five PCRE substitutions — in that encoding, each
-# reduction rule is a literal string rewrite.
+# does the reduction, as one PCRE substitution per rule below.
 
 _bits = \program List.map (Bool.match '0' '1') $ Serialize.bitstr_encode program
+
+# A subterm is self-delimiting, so a capture group can match one by plain
+# regex recursion; _a, _b and _c are such captures, valid when a rule uses
+# them in that order.
+_a = "(1|0(?1)(?1))"
+_b = "(1|0(?2)(?2))"
+_c = "(1|0(?3)(?3))"
+_rule = \lhs \rhs List.concat_list ["s/"; List.concat_list lhs; "/"; rhs; "/g"]
+# The reduction rules. The middle three are shortcuts, S fused with the K
+# eliminator that consumes its copy, ordered before the general S rule they
+# specialize so an argument is only copied at genuine fan-out. A pattern
+# consumes just the constructor prefix it dispatches on, so an argument's
+# children — u and v below — are never matched and simply stay in place.
+_reduce = List.join ";"
+  [ _rule ["0001001"; _a; _b; _c; "001"] "00$3"            # △ (△ a b) c (△ u v) → c u v
+  ; _rule ["0001001"; _a; _b; _c; "01"] "0$2"              # △ (△ a b) c (△ u)   → b u
+  ; _rule ["0001001"; _a; _b; _c; "1"] "$1"                # △ (△ a b) c △       → a
+  ; _rule ["000101011"; _a; _b] "${2}"                     # △ (△ (△ △)) a b     → b
+  ; _rule ["0001010011"; _a; _b; _c] "0${1}0${2}${3}"      # △ (△ (△ △ a)) b c   → a (b c)
+  ; _rule ["000101"; _a; "0011"; _b; _c] "00${1}${3}${2}"  # △ (△ a) (△ △ b) c   → a c b
+  ; _rule ["000101"; _a; _b; _c] "00$1${3}0$2$3"           # △ (△ a) b c         → a c (b c)
+  ; _rule ["00011"; _a; _b] "$1"                           # △ △ a b             → a
+  ]
 
 of_stdin_stdout = \program List.concat_list ["#!/bin/bash
   set -euo pipefail
   program="; _bits program; "
-  # Runtime
+  # Runtime: each substitution is one reduction rule, rewriting the encoding
+  # itself. leaf is 1, stem 01x, fork 001xy, and applying f to x is 0fx.
   function reduce {
-    # 00011ab -> a
-    # 000101abc -> 00ac0bc
-    # 0001001abc1 -> a
-    # 0001001abc01 -> 0b
-    # 0001001abc001 -> 00c
-    perl -pe 'while($_=~/000/){s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))001/00$3/g;s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))01/0$2/g;s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))1/$1/g;s/000101(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))/00$1${3}0$2$3/g;s/00011(1|0(?1)(?1))(1|0(?2)(?2))/$1/g}'
+    perl -pe 'while($_=~/000/){"; _reduce; "}'
   }
   # Conversions: string <=> encoded tree
   function of_list () {
@@ -43,4 +61,4 @@ of_stdin_stdout = \program List.concat_list ["#!/bin/bash
 
 # The identity program is cat.
 △ (△ "cat.sh" "text/x-shellscript") $ of_stdin_stdout id
-# = cat.sh sha256:29d7bfc07c0e2ab280a2419851624af58323475bf9f75fabb5e43c1e5b064800
+# = cat.sh sha256:88ce82de015a94b6ae6569ffde21ab61fb5ad8c2351f2aa5b8a83e8572f00e0d
