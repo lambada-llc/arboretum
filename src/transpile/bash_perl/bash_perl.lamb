@@ -7,6 +7,27 @@
 
 _bits = \program List.map (Bool.match '0' '1') $ Serialize.bitstr_encode program
 
+# The reducer, one PCRE substitution per rule. A subterm is self-delimiting,
+# so a capture group can match one by plain regex recursion; _a, _b, _c are
+# such subterm captures, valid when a rule uses them in that order. The five
+# reduction rules first (children of the argument's constructor stay in place,
+# so a triage rule consumes only its prefix), then the three fused shortcuts,
+# ordered before the general S rule they specialize.
+_a = "(1|0(?1)(?1))"
+_b = "(1|0(?2)(?2))"
+_c = "(1|0(?3)(?3))"
+_rule = \lhs \rhs List.concat_list ["s/"; List.concat_list lhs; "/"; rhs; "/g"]
+_reduce = List.join ";"
+  [ _rule ["0001001"; _a; _b; _c; "001"] "00$3"
+  ; _rule ["0001001"; _a; _b; _c; "01"] "0$2"
+  ; _rule ["0001001"; _a; _b; _c; "1"] "$1"
+  ; _rule ["000101011"; _a; _b] "${2}"
+  ; _rule ["0001010011"; _a; _b; _c] "0${1}0${2}${3}"
+  ; _rule ["000101"; _a; "0011"; _b; _c] "00${1}${3}${2}"
+  ; _rule ["000101"; _a; _b; _c] "00$1${3}0$2$3"
+  ; _rule ["00011"; _a; _b] "$1"
+  ]
+
 of_stdin_stdout = \program List.concat_list ["#!/bin/bash
   set -euo pipefail
   program="; _bits program; "
@@ -21,7 +42,7 @@ of_stdin_stdout = \program List.concat_list ["#!/bin/bash
     # 000101011bc -> c
     # 0001010011abc -> 0a0bc
     # 000101a0011bc -> 00acb
-    perl -pe 'while($_=~/000/){s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))001/00$3/g;s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))01/0$2/g;s/0001001(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))1/$1/g;s/000101011(1|0(?1)(?1))(1|0(?2)(?2))/${2}/g;s/0001010011(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))/0${1}0${2}${3}/g;s/000101(1|0(?1)(?1))0011(1|0(?2)(?2))(1|0(?3)(?3))/00${1}${3}${2}/g;s/000101(1|0(?1)(?1))(1|0(?2)(?2))(1|0(?3)(?3))/00$1${3}0$2$3/g;s/00011(1|0(?1)(?1))(1|0(?2)(?2))/$1/g}'
+    perl -pe 'while($_=~/000/){"; _reduce; "}'
   }
   # Conversions: string <=> encoded tree
   function of_list () {
