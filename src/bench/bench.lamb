@@ -1,46 +1,27 @@
 # A cost record is a list of eight counters in column order
 # [0a; 0b; 1; 2; 3a; 3b; 3c; oh]: the two allocation rules (0a stem, 0b fork),
 # the five reduction rules (1 K, 2 S, 3a/3b/3c triage), and last the overhead —
-# work that went into results a K-like function then discarded. Each _eval case
-# pairs its result with a record transformer `_add subtotal`, where the subtotal
-# is the case's own one-rule delta plus the child transformers applied to it.
-# _add sums two records pointwise and keeps the longer tail, treating the
-# missing one as zeros — so a delta is written sparsely, stopping right after
-# its rule's slot, and only _extract pads to all eight against _base.
+# work that went into results a K-like function then discarded.
+#
+# The reduction itself is Reflect.evaluator, the annotated eager reducer every
+# other measurement in this repository is also an instance of; a table is that
+# evaluator run with the annotation A = (record transformer, reductions
+# charged). The transformer is `_add subtotal`, where the subtotal is the
+# rule's own one-rule delta plus the transformers of the reductions it
+# recursed into. _add sums two records pointwise and keeps the longer tail,
+# treating the missing one as zeros — so a delta is written sparsely, stopping
+# right after its rule's slot, and only _extract pads to all eight against
+# _base. The charged count travels alongside because rule 2 needs it: when the
+# left result is K-like, the right one's reductions were spent on something
+# discarded, so they move to the overhead column and leave the total.
 # Versus the previous CPS-record harness (an eight-field consumer lambda
 # spelled out per rule, three hand-written merges), meta-benching each harness
 # running [Nat.add; 127; 127] puts the trade at half the reduced tree (92106
-# -> 45434 nodes) for ~12% more self-reductions (2.97M -> 3.33M) — bookkeeping
+# -> 45377 nodes) for ~11% more self-reductions (2.97M -> 3.31M) — bookkeeping
 # no table records, so every measured output is identical.
 _base = [0; 0; 0; 0; 0; 0; 0; 0]
 _add = fix $ \self \a \b
     List.match b (\ha \ta List.match a (\hb \tb △ (Nat.add ha hb) (self ta tb)) b) a
-
-_eval = fix $ \self
-    triage
-      (\z △ (△ z) (△ (_add [1]) 1))
-      (\y \z △ (△ y z) (△ (_add [0; 1]) 1))
-      (triage
-        (\y \z △ y (△ (_add [0; 0; 1]) 1))
-        (\x \y \z
-          Pair.let (self x z) $ \r1 \cd1 Pair.let cd1 $ \c1 \l1
-          Pair.let (self y z) $ \r2 \cd2 Pair.let cd2 $ \c2 \l2
-          Pair.let (self r1 r2) $ \r \cd  Pair.let cd  $ \c  \l
-          let (triage false (\_ false) (\xx \_ triage true (\_ false) (\_ \_ false) xx) r1) $ \is_k
-          △ r (△
-            (_add $ c1 $ c2 $ c [0; 0; 0; 1; 0; 0; 0; Bool.match 0 l2 is_k])
-            (Nat.succ (Nat.add l1 (Nat.add (Bool.match l2 0 is_k) l)))))
-        (\w \x \y \z
-          triage
-            (△ w (△ (_add [0; 0; 0; 0; 1]) 1))
-            (\a
-                Pair.let (self x a) $ \r \cd Pair.let cd $ \c \l
-                △ r (△ (_add $ c [0; 0; 0; 0; 0; 1]) (Nat.succ l)))
-            (\a \b
-                Pair.let (self y a) $ \r  \cd1 Pair.let cd1 $ \c1 \l1
-                Pair.let (self r b) $ \r  \cd2 Pair.let cd2 $ \c2 \l2
-                △ r (△ (_add $ c1 $ c2 [0; 0; 0; 0; 0; 0; 1]) (Nat.succ (Nat.add l1 l2))))
-            z))
 
 _extract = \cost_data Pair.let cost_data $ \cost \_l
     let (cost _base) $ \totals
@@ -49,12 +30,39 @@ _extract = \cost_data Pair.let cost_data $ \cost \_l
     List.concat (List.map Nat.to_string counts)
       ["|"; Nat.to_string (Nat.sum (List.take 2 counts)); Nat.to_string (Nat.sum (List.drop 2 counts))]
 
+# The annotation of a rule that fires once and recurses into nothing.
+_rule = \delta △ (_add delta) 1
+# Is this result a K — △ △ y, which drops the argument it is about to be
+# handed, along with everything that went into computing it?
+_is_k = triage false (\_ false) (\x \_ triage true (\_ false) (\_ \_ false) x)
+
+# One application, measured: its result paired with the table row for it.
+_run_one = Reflect.evaluator (\result \cost_data △ result (_extract cost_data))
+    (_rule [1])
+    (_rule [0; 1])
+    (_rule [0; 0; 1])
+    (\r1 \a1 \a2 \a
+        Pair.let a1 $ \c1 \l1
+        Pair.let a2 $ \c2 \l2
+        Pair.let a  $ \c  \l
+        let (_is_k r1) $ \is_k
+        △ (_add $ c1 $ c2 $ c [0; 0; 0; 1; 0; 0; 0; Bool.match 0 l2 is_k])
+          (Nat.succ (Nat.add l1 (Nat.add (Bool.match l2 0 is_k) l))))
+    (_rule [0; 0; 0; 0; 1])
+    (\a Pair.let a $ \c \l
+        △ (_add $ c [0; 0; 0; 0; 0; 1]) (Nat.succ l))
+    (\a1 \a2
+        Pair.let a1 $ \c1 \l1
+        Pair.let a2 $ \c2 \l2
+        △ (_add $ c1 $ c2 [0; 0; 0; 0; 0; 0; 1]) (Nat.succ (Nat.add l1 l2)))
+
+# One row per argument, each measuring the application of what the row above
+# reduced to — which the evaluator already handed back, so no application is
+# reduced twice.
 _collect = fix $ \self \current List.match
     []
-    (\next \rest
-        triage _ _ (\_ \cost_data △ (_extract cost_data) (self (current next) rest))
-        $ _eval current next
-    )
+    (\next \rest Pair.let (_run_one current next) $ \result \row
+        △ row (self result rest))
 
 _header = ["oh"; "|"; "0a"; "0b"; "1"; "2"; "3a"; "3b"; "3c"; "|"; "alc"; "red"]
 
