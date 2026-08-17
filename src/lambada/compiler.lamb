@@ -489,9 +489,7 @@ nativeS = Native_identifier ":s"
 
 _dT = Dlist.cons ':' (Dlist.single 't')
 _dListEmpty = _dT
-_dFalse = _dT
 _dTrue = Dlist.cons ':' (Dlist.single 'k')
-_dBool = Bool.match _dFalse _dTrue
 # A cons cell is [△ head tail], and a DAG line applies one name to at most two
 # others, so spelling one takes two lines: the stem [△ head], then that stem
 # applied to the tail. For the bits of a nat the head is a boolean, so there are
