@@ -116,7 +116,6 @@ _input = _fresh Snat.zero
 _one = △              # a literal successor
 _sz = \v △ v          # the size of tree variable v
 _val = \v △ △ v       # the value of Snat variable v
-_atom = \o1 \osz \oval triage o1 osz (\_ oval)
 
 # A fourth atom, for the size-measure induction: [△ (△ △) r] is ⟨r⟩, "then
 # the tree r" — a state owing E ⊎ [⟨r⟩] must evaluate to the value of r under
@@ -312,7 +311,7 @@ _prove = \nf fix $ \self \depth \g \asms \e \q
 _budget = Snat.from_nat 1000            # rule applications, eagerly
 _head_budget = Snat.from_nat 40000      # head reductions, in normal order
 _lazily = Quoted.normalize_lazy _head_budget
-_eagerly = \q Option.bind (Quoted.normalize_lazy _head_budget) $ Quoted.normalize_eager _budget q
+_eagerly = \q Option.bind _lazily $ Quoted.normalize_eager _budget q
 
 _certify = \nf \p _prove nf _depth Snat.one [] [_sz _input] $ _app (Reflect.quote p) (_var _input)
 
