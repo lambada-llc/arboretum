@@ -1,9 +1,22 @@
 
+# The eager reducer, with an annotation of type A riding along: each rule
+# hands out the annotation of the step it just took, built from the
+# annotations of the reductions it recursed into, and [finalize] sees the
+# normal form together with the annotation of the whole reduction. Everything
+# below is this evaluator under a different A — a step count, an allocation
+# count, a pair of both — and so is Bench's per-rule cost table.
+#
+# Rule 2 duplicates its argument into two subterms and applies the left result
+# to the right one, so it alone can have made work that the result then
+# discards: it is handed [r1], the left result, which is the one thing about a
+# reduction an annotation can depend on beyond which rule fired. (Bench's
+# overhead column reads it; the counters here take it and drop it.)
+#
 # :: finalize:(T -> A -> R)
 # -> rule0a:A
 # -> rule0b:A
 # -> rule1:A
-# -> rule2:(A -> A -> A -> A)
+# -> rule2:(T -> A -> A -> A -> A)
 # -> rule3a:A
 # -> rule3b:(A -> A)
 # -> rule3c:(A -> A -> A)
@@ -19,7 +32,7 @@ evaluator = \finalize \rule0a \rule0b \rule1 \rule2 \rule3a \rule3b \rule3c
           Pair.let (self x z) $ \r1 \a1
           Pair.let (self y z) $ \r2 \a2
           Pair.let (self r1 r2) $ \r \a
-          △ r (rule2 a1 a2 a)
+          △ r (rule2 r1 a1 a2 a)
         )
         (\w \x \y \z
           triage
@@ -35,12 +48,17 @@ evaluator = \finalize \rule0a \rule0b \rule1 \rule2 \rule3a \rule3b \rule3c
 
 _compose3 = \f \g \h compose f (compose g h)
 _compose4 = \f \g \h \i compose (compose f g) (compose h i)
-count_eval_steps = evaluator (\_ \cost cost 0) id id Nat.succ (_compose4 Nat.succ) Nat.succ (compose Nat.succ) (_compose3 Nat.succ)
-count_allocs = evaluator (\_ \cost cost 0) Nat.succ Nat.succ id _compose3 id id compose
-count_eval_steps_if_parallel = evaluator (\_ \cost cost) 0 0 1 (\cost1 \cost2 \cost Nat.add (Nat.max cost1 cost2) (Nat.succ cost)) 1 Nat.succ (\cost1 \cost2 Nat.succ (Nat.add cost1 cost2))
-max_parallel_steps = evaluator (\_ \cost cost) 1 1 1 (\cost1 \cost2 \cost Nat.max cost (Nat.add cost1 cost2)) 1 id Nat.max
-eval_with_cost = evaluator Pair.create 0 0 1 (\c1 \c2 \c Nat.succ $ Nat.add c $ Nat.add c1 c2) 1 Nat.succ (\c1 \c2 Nat.succ $ Nat.add c1 c2)
+count_eval_steps = evaluator (\_ \cost cost 0) id id Nat.succ (const $ _compose4 Nat.succ) Nat.succ (compose Nat.succ) (_compose3 Nat.succ)
+count_allocs = evaluator (\_ \cost cost 0) Nat.succ Nat.succ id (const _compose3) id id compose
+count_eval_steps_if_parallel = evaluator (\_ \cost cost) 0 0 1 (\_ \cost1 \cost2 \cost Nat.add (Nat.max cost1 cost2) (Nat.succ cost)) 1 Nat.succ (\cost1 \cost2 Nat.succ (Nat.add cost1 cost2))
+max_parallel_steps = evaluator (\_ \cost cost) 1 1 1 (\_ \cost1 \cost2 \cost Nat.max cost (Nat.add cost1 cost2)) 1 id Nat.max
+eval_with_cost = evaluator Pair.create 0 0 1 (\_ \c1 \c2 \c Nat.succ $ Nat.add c $ Nat.add c1 c2) 1 Nat.succ (\c1 \c2 Nat.succ $ Nat.add c1 c2)
 
+# The same rules once more, with nothing riding along. Spelling them out is
+# what an unannotated reducer costs less to be: [evaluator const △ △ △
+# (\_ \_ \_ \_ △) △ (\_ △) (\_ \_ △)] computes the same normal forms, but
+# pairs a result with an annotation at every node to do it — 1079 nodes
+# against 330, and 2810 reductions against 1440 on [Nat.add 1].
 eval = fix $ \self
     triage
       (\z △ z)
