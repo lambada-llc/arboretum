@@ -39,18 +39,27 @@ Bench.run [is_alpha_char; '3']
 # = oh | 0a 0b 1 2 3a 3b 3c | alc red
 #    0 |  0  0 0 0  7  4  6 |   0  17
 
-parse_whitespace = Parser.take_while is_whitespace_char
-# Only reached via the first-char dispatch table, which fires this parser only
-# when the leading byte is is_alpha_char (true for bytes >= 128 too). The head is
-# therefore always a valid identifier start, so consume it with [one] instead of
-# re-validating it with [satisfy is_alpha_char].
-parse_identifier = Parser.seq_pair Parser.one (Parser.take_while is_identifier_char)
-parse_nat = Parser.map Nat.from_string__fastest $ Parser.seq_pair Parser.one (Parser.take_while is_digit_char)
+# take_while for ASCII-classified characters, with the per-character bool
+# dispatch folded into the table: each entry *is* the stop or consume branch,
+# so a character costs one trie walk that lands directly in the branch to run,
+# instead of a lookup producing a bool that a second dispatch then routes. The
+# two branches are shared closures (the character is threaded, not baked), so
+# the table is two leaves' worth of structure. [alt] plays the classifier
+# table's fallback role for bytes >= 128.
+_scan_stop = \h \self \t △ [] (△ h t)
+_scan_go = \h \self \t Pair.match (\taken \rest △ (△ h taken) rest) (self self t)
+_mk_scanner = \alt \pred
+    let (Memo.precompute_alt Memo.gen_ascii (Bool.match _scan_stop _scan_go alt) (\c Bool.match _scan_stop _scan_go (pred c))) $ \tab
+    self_apply $ \self \l List.match
+        (\_self △ [] [])
+        (\h \t \self tab h h self t)
+        l self
+
+parse_whitespace = _mk_scanner false Char.is_whitespace
+_scan_digits = _mk_scanner false Char.is_digit
+parse_nat = Parser.map Nat.from_string__fastest $ Parser.seq_pair Parser.one _scan_digits
 
 _to_string = id
-Bench.run [parse_identifier; "compiler_tokenize"]
-# = oh |  0a  0b   1   2  3a 3b  3c | alc  red
-#   17 | 282 416 595 628 129 89 165 | 698 1606
 Bench.run [Nat.is_lte 64; 'x']
 # = oh |  0a  0b   1   2 3a 3b 3c | alc red
 #   22 | 121 192 323 318 14 13 13 | 313 681
@@ -94,6 +103,10 @@ Token = Token_special_char schar     # schar
 # Bool.match branches (self_apply style) instead of being captured by a fix
 # closure — both branches receive it as an explicit final argument, so each
 # unfolding pays only the small branch bodies, not the fix machinery.
+# (A fused one-pass scanner that tracked [cand] during the take_while walk was
+# measured and loses ~2.5x: the extra per-character state threads through every
+# branch closure and the K-rule churn of distributing-then-discarding it costs
+# more than the second walk. Don't retry.)
 _is_dot = Memo.precompute_alt Memo.gen_ascii_low false (equal_const '.')
 _local_head = List.match _ $ self_apply $ \self \cand \l List.match cand (\c \rest
     Bool.match
@@ -102,6 +115,20 @@ _local_head = List.match _ $ self_apply $ \self \cand \l List.match cand (\c \re
       (_is_dot c) cand rest self
   ) l
 token_identifier = \name Bool.match Token_identifier Token_identifier_adt (is_uppercase_char (_local_head name)) name
+
+# Only reached via the first-char dispatch table, which fires this parser only
+# when the leading byte is is_alpha_char (true for bytes >= 128 too). The head is
+# therefore always a valid identifier start, so consume it unchecked; the rest of
+# the name comes from one scanner walk, with the seq_pair/map combinator
+# plumbing folded away.
+_scan_identifier = _mk_scanner true is_identifier_char
+_parse_identifier_token = List.match Parser.fail_result $ \c \rest
+    Pair.match (\nm \r2 Parser.return (token_identifier (△ c nm)) r2) (_scan_identifier rest)
+
+_to_string = id
+Bench.run [_parse_identifier_token; "compiler_tokenize"]
+# = oh |  0a  0b    1    2  3a  3b  3c |  alc  red
+#   82 | 475 697 1074 1107 251 134 282 | 1172 2848
 
 parse_char_map = \map List.match Parser.fail_result $ \head \tail Option.match Parser.fail_result (\v Parser.return v tail) $ Map.to_func map head
 
@@ -136,14 +163,14 @@ _parse_escaped_char = parse_char_map
         }
 # What a string body holds verbatim — everything but the closing delimiter and
 # the backslash that opens an escape.
-_is_str_char = Memo.precompute_alt Memo.gen_ascii true $ Fn.p_not $ Fn.p_or _is_quot (equal_const '\')
+_scan_str_chars = _mk_scanner true $ Fn.p_not $ Fn.p_or _is_quot (equal_const '\')
 # The body of a string literal, escapes decoded, paired with how many of them
 # there were. That count is the one thing the decoded value cannot answer for
 # itself — a newline in it may have been spelled [\n] or written out — and
 # without it [_token_text_len] has no way to tell how wide the token was in the
-# source. Verbatim runs are still taken in one [take_while], so a body without
+# source. Verbatim runs are still taken in one scanner walk, so a body without
 # escapes costs what it always did.
-_parse_str_body = fix $ \self Parser.compose_dep (Parser.take_while _is_str_char) $ \chunk \rest
+_parse_str_body = fix $ \self Parser.compose_dep _scan_str_chars $ \chunk \rest
     List.match Parser.fail_result (\c \tl
         Bool.match
             (\chunk \rest \tl \self Parser.map_result
@@ -161,7 +188,7 @@ parse_str  = Parser.map (Pair.match Token_const_str) (Parser.seq_snd Parser.one 
 _is_quot = equal_const '''
 parse_char  = Parser.map Token_const_nat (Parser.seq_snd Parser.one (Parser.seq_fst Parser.one (Parser.satisfy _is_quot)))
 parse_nat  = Parser.map Token_const_nat parse_nat
-parse_comment = Parser.map Token_comment (Parser.seq_snd Parser.one (Parser.take_until Char.is_newline))
+parse_comment = Parser.map Token_comment (Parser.seq_snd Parser.one (_mk_scanner true (Fn.p_not Char.is_newline)))
 
 # Pick the value of the first (predicate, value) pair whose predicate accepts [x],
 # falling back to [default] when none match.
@@ -174,7 +201,6 @@ _first_matching = \default \cases \x
 # selection is precomputed into a table over ASCII, so at runtime dispatch is a
 # single table lookup; bytes >= 128 fall through to the identifier parser (matching
 # is_alpha_char's broad fallback).
-_parse_identifier_token = Parser.map token_identifier parse_identifier
 _parse_token_dispatch = Memo.precompute_alt Memo.gen_ascii _parse_identifier_token $
   _first_matching (Parser.map Token_special_char parse_special_char)
     [ △ is_alpha_char     _parse_identifier_token
@@ -187,9 +213,16 @@ _parse_token_dispatch = Memo.precompute_alt Memo.gen_ascii _parse_identifier_tok
 # Strip only *leading* whitespace per token; the trailing whitespace of each gap
 # is then consumed as the next token's leading whitespace (productive), instead of
 # scanning every gap twice. A single trailing strip in compiler_tokenize handles
-# whitespace after the final token.
-parse_token = Parser.seq_snd parse_whitespace $ \input
-  List.match Parser.fail_result (\c \_ _parse_token_dispatch c input) input
+# whitespace after the final token. Skipping and dispatching are one loop: each
+# gap character costs a table lookup and a step, with no take_while pair or
+# seq_snd plumbing around it.
+parse_token = self_apply $ \self \input List.match
+    (\_self Parser.fail_result)
+    (\c \rest \self Bool.match
+        (\_self \c \rest _parse_token_dispatch c (△ c rest))
+        (\self \_c \rest self self rest)
+        (is_whitespace_char c) self c rest)
+    input self
 
 
 # str => Token list option
@@ -304,6 +337,12 @@ parse_map_tail = \e Parser.seq_fst
                     )
                     (Parser.either parse_curly_close (Parser.seq_fst parse_separator parse_curly_close))
 
+# (Replacing the assignment lookahead with a next-token peek that dispatches
+# straight on Schar_equals was measured and loses ~2.5x on a bare identifier:
+# the nested dispatch closures put the recursive parser and the identifier
+# many lambda layers deep, and distributing them through those layers costs
+# more than the failed equals-parse ever did — which short-circuits at its
+# first List.match anyway. Don't retry.)
 parse_assign_tail = \literal \e Parser.map
                         (\body Syntax_assignment literal body)
                         (Parser.seq_snd parse_equals e)
@@ -499,23 +538,54 @@ _dTrue = Dlist.cons ':' (Dlist.single 'k')
 # and leaves [_dag_nat] with no scratch name left to allocate.
 _dConsFalse = _dTrue
 _dConsTrue = Dlist.from_list ":ct"
-_dCons = Bool.match _dConsFalse _dConsTrue
-_dag_nat = \fresh_res List.foldr
-        (\b \acc Pair.let acc $ \dag \rhs
-          △ (\tl dag $
-            fresh_res$space$_dCons b$space$rhs$newline $ tl)
-          fresh_res)
+# Every bit line applies a stem to the name's own previous value, so after a
+# seed line binds the name to [:i :t] (the leaf, by way of an application — a
+# two-token alias line would declare the scratch name an export), the lines for
+# a literal come in just two shapes — one per bit value — prebuilt once per
+# literal. The fold then carries only the dag and each step selects a prebuilt
+# line, with no pair state and no per-bit line construction.
+_dI = Dlist.cons ':' (Dlist.single 'i')
+_dag_nat = \fresh_res \n List.match
         (△ id _dListEmpty)
-# A string's elements are nats rather than bits, so its cons stems are not shared
-# and each character still costs the [△ char] line plus the cons.
-_dag_str = \fresh_res \fresh_helper List.foldr
-        (\n \acc Pair.let acc $ \dag \rhs
-          Pair.let (_dag_nat fresh_helper n) $ \nat_dag \nat_name
-          △ (\tl dag $ nat_dag $
-            fresh_helper$space$_dT$space$nat_name$newline $
-            fresh_res$space$fresh_helper$space$rhs$newline $ tl)
-          fresh_res)
-        (△ id _dListEmpty)
+        (\_ \_
+          let (\tl fresh_res$space$_dConsFalse$space$fresh_res$newline $ tl) $ \line0
+          let (\tl fresh_res$space$_dConsTrue$space$fresh_res$newline $ tl) $ \line1
+          △ (List.foldr
+              (\b \dag \tl dag $ Bool.match line0 line1 b $ tl)
+              (\tl fresh_res$space$_dI$space$_dT$newline $ tl)
+              n)
+            fresh_res)
+        n
+# A string's elements are nats rather than bits, so its cons stems are not part
+# of the two-stem economy above — but a *run* of the same character shares one:
+# the scratch name [fresh_helper] holds the stem of the most recently emitted
+# character, so a repeat costs a single cons line reusing it, and only a change
+# of character pays the [△ char] line run again. Repeats are detected with a
+# precomputed per-character recognizer (built once per ASCII code point from
+# [equal_const]; bytes >= 128 fall through to never-equal and simply do not
+# dedup), which short-circuits at the first differing bit — far cheaper than a
+# general equality per character. The state threads through the fold as
+# (△ (△ dag rhs) recognizer), and both outcomes take it as trailing arguments
+# so a repeat builds none of the emit path's work.
+_char_rec = Memo.precompute_alt Memo.gen_ascii (\_ false) equal_const
+# Like the bit lines above, every cons line is the same [res helper res] after
+# an alias line seeds [res] with [:t], so it too is prebuilt once per literal
+# and the fold state is just (△ dag recognizer).
+_dag_str_step = \fresh_res \fresh_helper
+    let (\tl fresh_res$space$fresh_helper$space$fresh_res$newline $ tl) $ \line_cons
+    \n \acc
+    Pair.let acc $ \dag \prev_rec
+    Bool.match
+      (\n \dag \_prev
+        Pair.let (_dag_nat fresh_helper n) $ \nat_dag \nat_name
+        △ (\tl dag $ nat_dag $
+              fresh_helper$space$_dT$space$nat_name$newline $
+              line_cons $ tl)
+          (_char_rec n))
+      (\_n \dag \prev
+        △ (\tl dag $ line_cons $ tl) prev)
+      (prev_rec n)
+      n dag prev_rec
 
 quote_nat = \n Native_emit $ \gen_bin
   Pair.let (gen_bin _) $ \fresh_res \gen_bin
@@ -524,8 +594,8 @@ quote_nat = \n Native_emit $ \gen_bin
 quote_str = \s Native_emit $ \gen_bin
   Pair.let (gen_bin _) $ \fresh_res \gen_bin
   Pair.let (gen_bin _) $ \fresh_helper \gen_bin
-  Pair.let (_dag_str fresh_res fresh_helper s) $ \dag \result_name
-    \ontriple ontriple dag result_name gen_bin
+  Pair.let (List.foldr (_dag_str_step fresh_res fresh_helper) (△ (\tl fresh_res$space$_dI$space$_dT$newline $ tl) (\_ false)) s) $ \dag \_prev_rec
+    \ontriple ontriple dag fresh_res gen_bin
 
 
 # SYNTAX => NATIVE
@@ -536,12 +606,17 @@ quote_str = \s Native_emit $ \gen_bin
 # walk instead re-scanned each side from the top at every level: quadratic in the
 # term, and every identifier it passed cost a full string comparison. Now each
 # subterm is walked once, and each name compared once.
+# Every Bool.match outcome below is a closure taking what it needs as trailing
+# arguments, so only the selected combinator form is ever constructed. The
+# previous shape passed the four app-case outcomes (K-wrap, eta-check, C form,
+# S form) as plain data, which the eager host then built at *every* application
+# node before the dispatch discarded three of them.
 _abs = \eq_name self_apply $ \strip \nbody nbody
                 (\literal \strip
                     Bool.match
-                    (△ false $ Native_app nativeK $ Native_identifier literal)
-                    (△ true nativeI)
-                    $ eq_name literal
+                    (\literal △ false $ Native_app nativeK $ Native_identifier literal)
+                    (\_literal △ true nativeI)
+                    (eq_name literal) literal
                 )
                 (\a \b \strip
                     Pair.let (strip strip a) $ \in_a \sa
@@ -549,22 +624,23 @@ _abs = \eq_name self_apply $ \strip \nbody nbody
                     Bool.match
                     (
                         Bool.match
-                        (△ false $ Native_app nativeK $ Native_app a b)
+                        (\a \b \sa \sb △ false $ Native_app nativeK $ Native_app a b)
                         ( # check for: \b a b
-                            △ true $ b
+                            \a \b \sa \sb △ true $ b
                               (\_lit a)
                               (\_a \_b Native_app (Native_app nativeB a) sb)
                               (\_emit _)
                               (\_s \_e \_inner Native_app (Native_app nativeB a) sb)
                         )
+                        in_b
                     )
                     (
                         Bool.match
-                        (△ true $ Native_app (Native_app nativeC sa) b)
-                        (△ true $ Native_app (Native_app nativeS sa) sb)
+                        (\a \b \sa \sb △ true $ Native_app (Native_app nativeC sa) b)
+                        (\a \b \sa \sb △ true $ Native_app (Native_app nativeS sa) sb)
+                        in_b
                     )
-                    in_a
-                    in_b
+                    in_a a b sa sb
                 )
                 (\emit \strip △ false $ Native_app nativeK $ Native_emit emit)
                 (\start \end \inner \strip
@@ -763,43 +839,43 @@ compile_to_dag_bench = \s
 
 _to_string = id
 compile_to_dag_bench "x"
-# = Tokenize: 427
+# = Tokenize: 304
 #   Parse:    672
 #   Lower:    287
 #   Emit:     182
 
 compile_to_dag_bench "42"
-# = Tokenize: 844
+# = Tokenize: 633
 #   Parse:    523
 #   Lower:    307
-#   Emit:     1220
+#   Emit:     890
 
 compile_to_dag_bench "1337"
-# = Tokenize: 2037
+# = Tokenize: 1420
 #   Parse:    523
 #   Lower:    307
-#   Emit:     1946
+#   Emit:     1151
 
 compile_to_dag_bench "[42]"
-# = Tokenize: 1400
+# = Tokenize: 1072
 #   Parse:    1493
 #   Lower:    494
-#   Emit:     2520
+#   Emit:     2190
 
 compile_to_dag_bench "\\x x"
-# = Tokenize: 1128
+# = Tokenize: 837
 #   Parse:    1345
-#   Lower:    1474
+#   Lower:    1429
 #   Emit:     213
 
 compile_to_dag_bench "x = 42"
-# = Tokenize: 1635
+# = Tokenize: 1230
 #   Parse:    1190
 #   Lower:    315
-#   Emit:     1302
+#   Emit:     972
 
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
-# = Tokenize: 20408
+# = Tokenize: 15496
 #   Parse:    27764
 #   Lower:    5387
 #   Emit:     19398
@@ -807,43 +883,49 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 # The only coverage of an ADT declaration: two variants, each emitting a
 # constructor and a *_Dispatch through _syntax_emit_adt.
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
-# = Tokenize: 7561
+# = Tokenize: 5901
 #   Parse:    2430
-#   Lower:    208210
+#   Lower:    152236
 #   Emit:     36255
 
 # Bracket abstraction over an application spine, which used to be exponential in
 # how many applications the bound variable reaches: each further [a] under \a
 # multiplied Lower by ~3.6 — 38428, 126518, 440951, 1618694, 6166765 for zero
 # through four — and this one expression was ~6s of the build. Deciding each
-# application from what abstracting its sides already returned made it linear:
-# the same five now cost 22674, 29212, 35750, 42288, 48826, a flat 6538 apiece.
+# application from what abstracting its sides already returned made it linear,
+# and selecting the app case's four outcome forms behind the dispatch (instead
+# of building all four and discarding three) cut the constant again: the same
+# five now cost 15631, 19588, 23545, 27502, 31459, a flat 3957 apiece.
 compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
-# = Tokenize: 7141
+# = Tokenize: 5350
 #   Parse:    8582
-#   Lower:    48814
+#   Lower:    31459
 #   Emit:     28350
 
-# Literal size. A string literal is linear in both directions: a fixed ~91
-# reductions per character to tokenize and ~1205 to emit (50 characters cost
-# 5096 and 61021). Emitting is where the bulk is, because every character
-# becomes its own run of DAG lines — one per bit, plus two for the cons.
+# Literal size. A string literal is linear in both directions: a fixed ~75
+# reductions per character to tokenize and, in a run of one repeated character,
+# ~200 to emit (50 characters cost 4074 and 10306). A run emits its
+# character's bits once and then one cons line per repeat; each *distinct*
+# character pays its own run of per-bit DAG lines, so mixed text sits between
+# this and the old one-nat-per-character cost (~1205 per character).
 compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
-# = Tokenize: 10121
+# = Tokenize: 7574
 #   Parse:    535
-#   Lower:    307
-#   Emit:     118850
+#   Lower:    297
+#   Emit:     18956
 
 # A nat literal is quadratic to tokenize, and stays that way: Horner's rule has
 # to walk an accumulator that grows by ~3.3 bits per digit, so 5, 10, 20 and 40
-# digits cost 3102, 12806, 53632 and 221280. What was shaved off is the constant
-# — [from_string__fastest] used to spend two traversals and a multiply per digit
-# where one table-driven pass does, which is worth 2.3x here.
+# digits cost 1595, 5266, 19018 and 73289. What keeps shrinking is the constant
+# — [from_string__fastest] takes digits in pairs, halving the accumulator
+# walks, and each walk step lands in a carry-table entry that is the loop body
+# with its outcomes baked in, together worth ~3x here on top of the
+# table-driven pass that replaced two traversals and a multiply per digit.
 compile_to_dag_bench $ List.repeat 100 '1'
-# = Tokenize: 1408628
+# = Tokenize: 447549
 #   Parse:    523
 #   Lower:    307
-#   Emit:     48017
+#   Emit:     17555
 
 _compiler_env =
   Map.pmap_set "△" △ $

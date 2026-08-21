@@ -3,6 +3,12 @@ equal__common = fix $ \self triage
     (\ax triage false (self ax) (\_ \_ false))
     (\ax \ay triage false (\_ false) (\bx \by Bool.and (self ax bx) (self ay by)))
 equal__smallest = equal__common
+# A short-circuiting fork case (compare the right subtrees only when the left
+# ones matched, via Bool.match-deferred branches) was measured and loses: the
+# extra [self ay by] threading through the branch closures makes the matching
+# path ~5x more expensive (equal "x" "x": 149 -> 811 reductions), which no
+# mismatch saving pays back. For a short-circuiting comparison against a value
+# in hand, build a recognizer with [equal_const] instead. Don't retry.
 _equal_body = \self \a triage
     (\self triage true (\_ false) (\_ \_ false))
     (\ax \self triage false (self self ax) (\_ \_ false))
