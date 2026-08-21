@@ -645,7 +645,7 @@ _to_string = Bool.to_source
 #
 # For the 100 and the 104 the count claim is proven above. For the other six
 # nothing here establishes they are `size`; what is left of that claim is a
-# smoke test or two apiece below — `_deep_bug` in src/certify/test.lamb is
+# smoke test or two apiece below — `_deep_bug` in src/certify/size/test.lamb is
 # not `size`, and returns 5 on id too. The record pair stands additionally on
 # being, node for node, the trees #23 reports fuzz-tested, which the ternary
 # readbacks above pin down.
