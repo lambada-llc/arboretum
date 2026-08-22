@@ -45,6 +45,63 @@ _fvar_lookup = \n fix $ \self List.match Option.none (\h \tl Pair.let h $ \arg \
   Pair.let r $ \i \al
   Bool.match (\u self tl) (\u Option.some r) (equal (_fname i) n) △)
 
+# The rule dispatch, and the only place it is written. Both walks below read
+# an application [a b] the same way — the shape of [a] picks the rule, and
+# rule 3 reads the shape of [b] too — and differ only in what they make of
+# each rule. Everything no rule fires on (a variable where a shape is needed,
+# a fork whose head is not △) is none in both, and stays here.
+#
+# Four of the seven rules just name a value; they share one handler, which the
+# dispatch hands the value and the name of the rule that produced it. The
+# other three reduce premises first, so theirs are handed [step] — the walk's
+# own recursion, with everything it carries unchanged already applied — along
+# with [ctx] and the operands to recurse on. [ctx] is what changes as a walk
+# proceeds: the replay's hypothesis state, which is both what a value gets
+# wrapped in and what its first premise starts from. The hunt carries nothing
+# that changes — its avoid-list rides in [step] — so it passes a leaf.
+#
+# Each handler is applied through [_at u] so that the branch not taken
+# computes nothing, which is the staging the nested triages need anyway; and
+# handlers are top-level values, so a dispatch builds none of them.
+#
+# Against the two walks written out in full that this replaces: the emitter's
+# reduced tree drops 586459 -> 545897 nodes, the three certificates below cost
+# what they did, and the refusal — the one path that is dispatch and nothing
+# else, run until the fuel is gone — pays ~13% for the handler applications
+# per step (0.72s -> 0.82s of the Lean tests' 0.9s).
+_dispatch = \on_value \on_var \on_rS \on_r3b \on_r3c \step \ctx \a \b \u
+  triage
+    (\u2 _at u2 on_value ctx (_app △ b) "App.grow0")
+    (\n \u2 _at u2 on_var ctx n b)
+    (\p \q \u2 triage
+      (\u3 _at u3 on_value ctx (_app (_app △ q) b) "App.grow1")
+      (\n \u3 Option.none)
+      (\p2 \q2 \u3 Bool.match (\u4 Option.none) (\u4
+        triage
+          (\u5 _at u5 on_value ctx q "App.rK")
+          (\n \u5 Option.none)
+          (\p3 \q3 \u5 triage
+            (\u6 _at u6 on_rS step ctx q q3 b)
+            (\n \u6 Option.none)
+            (\p4 \q4 \u6 Bool.match (\u7 Option.none) (\u7
+              triage
+                (\u8 _at u8 on_value ctx q4 "App.r3a")
+                (\bn \u8 Option.none)
+                (\bf \bx \u8 triage
+                  (\u9 _at u9 on_r3b step ctx q3 bx)
+                  (\n \u9 Option.none)
+                  (\bf2 \bx2 \u9 Bool.match (\u10 Option.none)
+                    (\u10 _at u10 on_r3c step ctx q bx bx2)
+                    (equal bf2 △) u9)
+                  bf u8)
+                b u7)
+              (equal p4 △) u6)
+            p3 u5)
+          q2 u4)
+        (equal p2 △) u3)
+      p u2)
+    a u
+
 # The replay: one App constructor per reduction rule. [_emit selfq st a b] is
 # [some (△ st (△ value proof))], or none where reduction blocks on anything
 # but the loop value or a minted function. Applying the loop value mints a
@@ -52,58 +109,42 @@ _fvar_lookup = \n fix $ \self List.match Option.none (\h \tl Pair.let h $ \arg \
 # Fuelled, so a program whose eager reduction does not return — the __wn
 # family — costs a none rather than an answer that never comes.
 _fuel = Snat.from_nat 3000
+
+# The replay's handlers. A rule that reduces nothing is its value under the
+# constructor the dispatch named; one that does carries its premises' proofs
+# into that constructor, and threads the state the premises minted.
+_emit_value = \st \v \tag Option.some (△ st (△ v tag))
+_emit_var = \st \n \b
+  Option.match (\u Option.none) (\r \u Pair.let r $ \i \al
+      Option.some (△ st (△
+        (_var (_cats ["(stack (sz "; al; ") "; _lean_q b; ")"]))
+        (_cats ["(hf"; Nat.to_source i; "b "; _lean_q b; ")"]))))
+    (Pair.let st $ \_n2 \hyps _fvar_lookup n hyps) △
+_emit_rS = \step \st \q \q3 \b
+  Option.bind (\r1 Pair.let r1 $ \st1 \vp1 Pair.let vp1 $ \v1 \pr1
+    Option.bind (\r2 Pair.let r2 $ \st2 \vp2 Pair.let vp2 $ \v2 \pr2
+      Option.bind (\r3 Pair.let r3 $ \st3 \vp3 Pair.let vp3 $ \v3 \pr3
+        Option.some (△ st3 (△ v3
+          (_cats ["(App.rS "; pr1; " "; pr2; " "; pr3; ")"]))))
+        (_at pr2 step st2 v1 v2))
+      (_at pr1 step st1 q b))
+    (step st q3 b)
+_emit_r3b = \step \st \q3 \bx
+  Option.bind (\r Pair.let r $ \st1 \vp Pair.let vp $ \v \pr
+      Option.some (△ st1 (△ v (_cats ["(App.r3b "; pr; ")"]))))
+    (step st q3 bx)
+_emit_r3c = \step \st \q \bx \bx2
+  Option.bind (\r1 Pair.let r1 $ \st1 \vp1 Pair.let vp1 $ \v1 \pr1
+      Option.bind (\r2 Pair.let r2 $ \st2 \vp2 Pair.let vp2 $ \v2 \pr2
+        Option.some (△ st2 (△ v2
+          (_cats ["(App.r3c "; pr1; " "; pr2; ")"]))))
+        (_at pr1 step st1 v1 bx))
+    (step st q bx2)
+_emit_rules = _dispatch _emit_value _emit_var _emit_rS _emit_r3b _emit_r3c
+
 _emit = \selfq fix $ \self \fuel \st \a \b
   Snat.match Option.none (\fuel
-  Bool.match (\u
-    triage
-      (\u2 Option.some (△ st (△ (_app △ b) "App.grow0")))
-      (\n \u2 Option.match (\u3 Option.none) (\r \u3 Pair.let r $ \i \al
-          Option.some (△ st (△
-            (_var (_cats ["(stack (sz "; al; ") "; _lean_q b; ")"]))
-            (_cats ["(hf"; Nat.to_source i; "b "; _lean_q b; ")"]))))
-        (Pair.let st $ \n2 \hyps _fvar_lookup n hyps) u2)
-      (\p \q \u2 triage
-        (\u3 Option.some (△ st (△ (_app (_app △ q) b) "App.grow1")))
-        (\n \u3 Option.none)
-        (\p2 \q2 \u3 Bool.match (\u4 Option.none) (\u4
-          triage
-            (\u5 Option.some (△ st (△ q "App.rK")))
-            (\n \u5 Option.none)
-            (\p3 \q3 \u5 triage
-              (\u6 Option.bind (\r1 Pair.let r1 $ \st1 \vp1 Pair.let vp1 $ \v1 \pr1
-                    Option.bind (\r2 Pair.let r2 $ \st2 \vp2 Pair.let vp2 $ \v2 \pr2
-                      Option.bind (\r3 Pair.let r3 $ \st3 \vp3 Pair.let vp3 $ \v3 \pr3
-                        Option.some (△ st3 (△ v3
-                          (_cats ["(App.rS "; pr1; " "; pr2; " "; pr3; ")"]))))
-                        (_at pr2 self fuel st2 v1 v2))
-                      (_at pr1 self fuel st1 q b))
-                    (_at u6 self fuel st q3 b))
-              (\n \u6 Option.none)
-              (\p4 \q4 \u6 Bool.match (\u7 Option.none) (\u7
-                triage
-                  (\u8 Option.some (△ st (△ q4 "App.r3a")))
-                  (\bn \u8 Option.none)
-                  (\bf \bx \u8 triage
-                    (\u9 Option.bind (\r Pair.let r $ \st1 \vp Pair.let vp $ \v \pr
-                          Option.some (△ st1 (△ v (_cats ["(App.r3b "; pr; ")"]))))
-                        (_at u9 self fuel st q3 bx))
-                    (\n \u9 Option.none)
-                    (\bf2 \bx2 \u9 Bool.match (\u10 Option.none) (\u10
-                      Option.bind (\r1 Pair.let r1 $ \st1 \vp1 Pair.let vp1 $ \v1 \pr1
-                          Option.bind (\r2 Pair.let r2 $ \st2 \vp2 Pair.let vp2 $ \v2 \pr2
-                            Option.some (△ st2 (△ v2
-                              (_cats ["(App.r3c "; pr1; " "; pr2; ")"]))))
-                            (_at pr1 self fuel st1 v1 bx))
-                          (_at u10 self fuel st q bx2))
-                      (equal bf2 △) u9)
-                    bf u8)
-                  b u7)
-                (equal p4 △) u6)
-              p3 u5)
-            q2 u4)
-          (equal p2 △) u3)
-        p u2)
-      a u)
+  Bool.match (_emit_rules (self fuel) st a b)
     (\u
       Pair.let st $ \n \hyps
       Option.match
@@ -130,52 +171,29 @@ _case = \selfq \shape
 # Discovery: the loop value, found as the certifier finds the accumulator —
 # semantically. Replay the program on the stem of an opaque variable and
 # return the first closed value that gets applied to a bare variable, the
-# entry application and previously refused candidates excluded. The walk is
-# the same rule dispatch as the replay, without proofs.
+# entry application and previously refused candidates excluded. The same rule
+# dispatch as the replay, with proofs replaced by the search: a handler
+# answers [△ candidate_option value], and a candidate a premise already found
+# is passed up rather than reduced any further — which is all [_found] says.
+# Nothing here needs the context slot, so the walk hands it a leaf.
 _closedq = fix $ \self triage true (\_ false) (\f \x Bool.and (self f) (self x))
+_found = \r \k Pair.let r $ \c \v Option.match (\u _at u k v) (\_c \u Option.some r) c △
+_hunt_value = \_ctx \v \_tag Option.some (△ Option.none v)
+_hunt_var = \_ctx \_n \_b Option.none
+_hunt_rS = \step \_ctx \q \q3 \b
+  Option.bind (\r1 _found r1 $ \v1
+      Option.bind (\r2 _found r2 $ \v2 step v1 v2)
+        (_at v1 step q b))
+    (step q3 b)
+_hunt_r3b = \step \_ctx \q3 \bx step q3 bx
+_hunt_r3c = \step \_ctx \q \bx \bx2
+  Option.bind (\r1 _found r1 $ \v1 step v1 bx)
+    (step q bx2)
+_hunt_rules = _dispatch _hunt_value _hunt_var _hunt_rS _hunt_r3b _hunt_r3c
+
 _hunt = fix $ \self \fuel \avoid \a \b
   Snat.match Option.none (\fuel
-  Bool.match (\u
-    triage
-      (\u2 Option.some (△ Option.none (_app △ b)))
-      (\n \u2 Option.none)
-      (\p \q \u2 triage
-        (\u3 Option.some (△ Option.none (_app (_app △ q) b)))
-        (\n \u3 Option.none)
-        (\p2 \q2 \u3 Bool.match (\u4 Option.none) (\u4
-          triage
-            (\u5 Option.some (△ Option.none q))
-            (\n \u5 Option.none)
-            (\p3 \q3 \u5 triage
-              (\u6 Option.bind (\r1 Pair.let r1 $ \c1 \v1 Option.match
-                    (\u7 Option.bind (\r2 Pair.let r2 $ \c2 \v2 Option.match
-                        (\u8 _at u8 self fuel avoid v1 v2)
-                        (\c \u8 Option.some r2) c2 u7)
-                      (_at v1 self fuel avoid q b))
-                    (\c \u7 Option.some r1) c1 u6)
-                  (_at u6 self fuel avoid q3 b))
-              (\n \u6 Option.none)
-              (\p4 \q4 \u6 Bool.match (\u7 Option.none) (\u7
-                triage
-                  (\u8 Option.some (△ Option.none q4))
-                  (\bn \u8 Option.none)
-                  (\bf \bx \u8 triage
-                    (\u9 _at u9 self fuel avoid q3 bx)
-                    (\n \u9 Option.none)
-                    (\bf2 \bx2 \u9 Bool.match (\u10 Option.none) (\u10
-                      Option.bind (\r1 Pair.let r1 $ \c1 \v1 Option.match
-                          (\u11 _at u11 self fuel avoid v1 bx)
-                          (\c \u11 Option.some r1) c1 u10)
-                        (_at u10 self fuel avoid q bx2))
-                      (equal bf2 △) u9)
-                    bf u8)
-                  b u7)
-                (equal p4 △) u6)
-              p3 u5)
-            q2 u4)
-          (equal p2 △) u3)
-        p u2)
-      a u)
+  Bool.match (_hunt_rules (self fuel avoid) △ a b)
     (\u Option.some (△ (Option.some a) △))
     (Bool.and (_closedq a)
       (Bool.and (triage false (\_ true) (\_ \_ false) b)
