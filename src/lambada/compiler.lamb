@@ -906,7 +906,7 @@ compile_to_dag_bench "[42]"
 # = Tokenize: 1072
 #   Parse:    1493
 #   Lower:    665
-#   Emit:     1964
+#   Emit:     1896
 
 compile_to_dag_bench "\\x x"
 # = Tokenize: 837
@@ -924,7 +924,7 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 # = Tokenize: 15496
 #   Parse:    27764
 #   Lower:    7214
-#   Emit:     17034
+#   Emit:     16116
 
 # An ADT declaration: two variants, each emitting a constructor and a
 # *_Dispatch, generated at the annotation level of the Kiselyov pass (the
@@ -941,8 +941,8 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 5901
 #   Parse:    2430
-#   Lower:    39837
-#   Emit:     33006
+#   Lower:    38977
+#   Emit:     31306
 
 # Abstraction over an application spine, which used to be exponential in how
 # many applications the bound variable reaches: each further [a] under \a
@@ -955,8 +955,8 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 # = Tokenize: 5350
 #   Parse:    8582
-#   Lower:    29486
-#   Emit:     28906
+#   Lower:    29164
+#   Emit:     27478
 
 # Literal size. A string literal is linear in both directions: a fixed ~75
 # reductions per character to tokenize and, in a run of one repeated character,
@@ -968,7 +968,7 @@ compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 # = Tokenize: 7574
 #   Parse:    535
 #   Lower:    308
-#   Emit:     18791
+#   Emit:     18757
 
 # A nat literal is quadratic to tokenize, and stays that way: Horner's rule has
 # to walk an accumulator that grows by ~3.3 bits per digit, so 5, 10, 20 and 40
