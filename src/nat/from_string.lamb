@@ -1,30 +1,34 @@
 # Fast decimal-string -> nat.
 #
 # Horner's rule turns each digit into acc := 10*acc + digit, and what a literal
-# costs is what that step costs. Reaching for [Nat.mul_const 10] and [Nat.add]
-# pays two full traversals of the accumulator per digit — one to zip the
-# operands, one to ripple the carry — plus the doubled copies the multiply
-# builds along the way.
+# costs is dominated by walking the accumulator's bits once per digit — the
+# quadratic term of parsing a literal. Taking digits in *pairs* instead,
+# acc := 100*acc + (10*d1 + d2), halves how many times the accumulator is
+# walked, and that is the whole game: the per-block digit arithmetic (two table
+# lookups and one short add) is noise next to a walk of the accumulator.
 #
-# One traversal is enough. Walk the accumulator's bits from the low end carrying
-# the value still owed at the current position: the amount pending at a bit is
-# [carry + 10*bit], of which the low bit is the answer there and the rest carries
-# into the next position. That carry never exceeds 10 — the fixed point of
-# c -> (c + 10) / 2, entered at a digit, which is at most 9 — so it fits in four
-# bits, and the whole step (carry and bit in, output bit and next carry out) is a
-# lookup in a table small enough to state exhaustively. What is left per bit is
-# that lookup and a cons, with no arithmetic at all.
+# The walk itself carries the value still owed at the current position: the
+# amount pending at a bit is [carry + 100*bit], of which the low bit is the
+# answer there and the rest carries into the next position. That carry never
+# exceeds 100 — the fixed point of c -> (c + 100) / 2, entered at a digit pair,
+# which is at most 99 — so it fits in seven bits, and the whole per-carry step
+# lives in a table small enough to state exhaustively.
 #
-# Emitting the leftover carry as the high end is what keeps the result canonical:
-# the top bit of a canonical accumulator is set, so the carry leaving it is at
-# least 5, and an accumulator of zero emits the digit alone.
+# Emitting the leftover carry as the high end is what keeps the result
+# canonical: the top bit of a canonical accumulator is set, so the carry leaving
+# it is at least 50, and an accumulator of zero emits the digit pair alone.
 #
-# A [Memo] table over accumulators below 64 used to sit in front of this, turning
-# every step of a 1- or 2-digit literal into a single lookup. It is gone: 64
-# accumulators times 10 digits is ~167k nodes to build every time the module is
-# loaded, which costs more than the walk it saved even on sources that are all
-# small literals — and it made this function sixteen times larger than the
-# tokenizer that calls it.
+# An odd-length literal starts with a lone digit: a cheap parity pre-pass
+# decides whether the first block is one digit or two, so the accumulator is
+# seeded before the paired fold and no single-digit step exists at all.
+#
+# A [Memo] table over small *accumulators* used to sit in front of the walk,
+# turning every step of a 1- or 2-digit literal into a single lookup; it was
+# removed because ~167k nodes of build per module load cost more than the walk
+# it saved. Don't bring it back. The per-carry table here is different: carries
+# are bounded by the radix whatever the literal, and its entries share their
+# structure, so the exported compiler grows by ~5% while the recorded [size]
+# (which unfolds that sharing) grows much more.
 #
 # Non-digit characters below 64 contribute their [Nat.sub_x_48] value, chars
 # >= 64 contribute 0 — callers only pass digit characters.
@@ -35,21 +39,53 @@
 # [gen_list]). Keeping it separate makes the file-level dependency graph acyclic
 # (nat -> memo -> from_string) instead of forming a Nat <-> Memo cycle.
 _decimal_digit = Memo.precompute_alt Memo.gen_ascii_low 0 Nat.sub_x_48
-_gen_carry = Memo.gen_list Memo.gen_bool 4
-_ten_plus_step = Memo.precompute_multi [_gen_carry; Memo.gen_bool] (\carry \bit
-    let (Nat.add carry (Bool.match 0 10 bit)) $ \sum
-    △ (List.match false (\hd \_ hd) sum) (Nat.div2 sum))
-# 10 * n + carry, one pass over n's bits, low end first.
-_ten_plus = self_apply $ \self \n \carry List.match
-    (\_self \carry carry)
-    (\hd \tl \self \carry Pair.let (_ten_plus_step carry hd) $ \bit \carry
-        △ bit (self self tl carry))
-    n self carry
-# The inner lambda is applied immediately: it lands [acc] in a single argument
-# slot instead of distributing it through the compiled chain, which measurably
-# cheapens every fold iteration.
-_step = \acc \c (\a _ten_plus a (_decimal_digit c)) acc
-from_string__fastest = List.foldl _step 0
+# A block's high digit becomes an [add_const]-specialized adder for 10*d,
+# straight from the character: the general [Nat.add] costs ~200 reductions even
+# on tiny operands (zip, 3-bit table, carry fold), while the unrolled chain adds
+# 10*d1 to d2 in a handful. The fallback adder [id] contributes 0, matching the
+# 0 the value table yields for bytes >= 64.
+_add_ten_x_digit = Memo.precompute_alt Memo.gen_ascii_low id (\c Nat.add_const (Nat.mul_const 10 (Nat.sub_x_48 c)))
+_gen_carry = Memo.gen_list Memo.gen_bool 7
+# The table entry for a carry IS the loop body for that carry: it matches the
+# next accumulator bit itself, with the output bit and follow-on carry for
+# either bit value baked in as constants. The step then threads only [self] and
+# the tail through its branches — most of a step's cost is the K/S churn of
+# distributing live variables through the compiled branches, so keeping the
+# carry and bit out of that traffic (they live in the table, not the loop)
+# matters more than the trie walk the lookup costs.
+_hundred_plus_tab = Memo.precompute_multi [_gen_carry] (\c
+    let (List.match false (\hd \_ hd) c) $ \o0
+    let (Nat.div2 c) $ \c0
+    let (Nat.add c 100) $ \s1
+    let (List.match false (\hd \_ hd) s1) $ \o1
+    let (Nat.div2 s1) $ \c1
+    \self \n List.match
+      (\_self c)
+      (\hd \tl \self Bool.match
+          (\self \tl △ o0 (self self c0 tl))
+          (\self \tl △ o1 (self self c1 tl))
+          hd self tl)
+      n self)
+# 100 * n + carry, one pass over n's bits, low end first.
+_hundred_plus = \n \carry (self_apply $ \self \c \n _hundred_plus_tab c self n) carry n
+_pair_step = \acc \c1 \c2 _hundred_plus acc (_add_ten_x_digit c1 (_decimal_digit c2))
+# The list is even-length by construction, so the inner match's nil branch is
+# never taken.
+_pairs = self_apply $ \self \acc \l List.match
+    (\_self \acc acc)
+    (\c1 \r1 \self \acc List.match _
+        (\c2 \r2 \self \acc \c1 self self (_pair_step acc c1 c2) r2)
+        r1 self acc c1)
+    l self acc
+_odd_len = self_apply $ \self \l List.match
+    (\_self false)
+    (\_ \t \self List.match true (\_ \t2 self self t2) t)
+    l self
+# Both parity branches are functions of [s], so only the selected one runs.
+from_string__fastest = \s Bool.match
+    (_pairs 0)
+    (List.match 0 (\c1 \r _pairs (_decimal_digit c1) r))
+    (_odd_len s) s
 
 _to_string = Nat.to_source
 from_string__fastest "0"
@@ -60,3 +96,9 @@ from_string__fastest "255"
 # = 255
 from_string__fastest "65535"
 # = 65535
+from_string__fastest ""
+# = 0
+from_string__fastest "007"
+# = 7
+from_string__fastest "1000000"
+# = 1000000
