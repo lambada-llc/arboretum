@@ -605,19 +605,18 @@ _ename = Nat.to_bits_dstring
 # exhausted) and a [\sfx] entry only a span wrapper ever applies. Quotes
 # below build that triple directly; [_kdleaf] and [_kea] (further down) are
 # the identifier and application forms of it.
-quote_nat = \n
-  let (\d
-      let (_ename d) $ \fresh_res
-      Pair.let (_dag_nat fresh_res n) $ \dag \result_name
-        \pair pair dag result_name) $ \em
-  △ em (△ false (\sfx \d em d $ \dag \nm \pair pair dag (Dlist.append nm sfx)))
-quote_str = \s
-  let (\d
-      let (_ename d) $ \fresh_res
-      let (_ename (Nat.succ d)) $ \fresh_helper
-      Pair.let (List.foldr (_dag_str_step fresh_res fresh_helper) (△ (\tl fresh_res$space$_dI$space$_dT$newline $ tl) (\_ false)) s) $ \dag \_prev_rec
-        \pair pair dag fresh_res) $ \em
-  △ em (△ false (\sfx \d em d $ \dag \nm \pair pair dag (Dlist.append nm sfx)))
+_equote_nat = \n \d
+  let (_ename d) $ \fresh_res
+  Pair.let (_dag_nat fresh_res n) $ \dag \result_name
+    \pair pair dag result_name
+_equote_str = \s \d
+  let (_ename d) $ \fresh_res
+  let (_ename (Nat.succ d)) $ \fresh_helper
+  Pair.let (List.foldr (_dag_str_step fresh_res fresh_helper) (△ (\tl fresh_res$space$_dI$space$_dT$newline $ tl) (\_ false)) s) $ \dag \_prev_rec
+    \pair pair dag fresh_res
+_esuffix = \em \sfx \d em d $ \dag \nm \pair pair dag (Dlist.append nm sfx)
+quote_nat = \n let (_equote_nat n) $ \em △ em (△ false (_esuffix em))
+quote_str = \s let (_equote_str s) $ \em △ em (△ false (_esuffix em))
 
 
 _span_suffix = \start \end \tl Dlist.from_list "::" $ Dlist.from_list (Nat.to_string start) $ Dlist.single ',' $ Dlist.from_list (Nat.to_string end) $ tl
@@ -886,12 +885,17 @@ _syntax_emit_adt = \type_name \items
 
 _make_top_level_expr = \syntax_expr [Native_expr (_syntax_to_native syntax_expr)]
 
+# Top-level identifiers and constants skip the abstraction pass entirely: no
+# binder can be in scope, so their lowered form is the plain emitter itself,
+# with none of the machinery triple built just to be unwrapped again. The
+# null statement's lowered form is a constant, so it is spelled as one.
+_native_null = [Native_expr (_emk_leaf ":t")]
 syntax_to_native = \syntax
     syntax
-        (\name       _make_top_level_expr (Syntax_identifier name))
-        (            _make_top_level_expr (Syntax_const_null))
-        (\value      _make_top_level_expr (Syntax_const_nat value))
-        (\value      _make_top_level_expr (Syntax_const_str value))
+        (\name       [Native_expr (_emk_leaf name)])
+        (            _native_null)
+        (\value      [Native_expr (_equote_nat value)])
+        (\value      [Native_expr (_equote_str value)])
         (\list       _make_top_level_expr (Syntax_list list))
         (\kvlist     _make_top_level_expr (Syntax_map kvlist))
         (\name \body _make_top_level_expr (Syntax_abs name body))
@@ -982,19 +986,19 @@ _to_string = id
 compile_to_dag_bench "x"
 # = Tokenize: 304
 #   Parse:    672
-#   Lower:    370
+#   Lower:    248
 #   Emit:     90
 
 compile_to_dag_bench "42"
 # = Tokenize: 633
 #   Parse:    523
-#   Lower:    343
+#   Lower:    212
 #   Emit:     768
 
 compile_to_dag_bench "1337"
 # = Tokenize: 1332
 #   Parse:    523
-#   Lower:    343
+#   Lower:    212
 #   Emit:     1029
 
 compile_to_dag_bench "[42]"
@@ -1062,7 +1066,7 @@ compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 # = Tokenize: 7574
 #   Parse:    535
-#   Lower:    333
+#   Lower:    204
 #   Emit:     18737
 
 # A nat literal is quadratic to tokenize, and stays that way: Horner's rule has
@@ -1076,7 +1080,7 @@ compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 compile_to_dag_bench $ List.repeat 100 '1'
 # = Tokenize: 303115
 #   Parse:    523
-#   Lower:    343
+#   Lower:    212
 #   Emit:     17433
 
 _compiler_env =
