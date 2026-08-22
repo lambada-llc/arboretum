@@ -12,7 +12,6 @@ is_whitespace_char = Char.is_whitespace__fastest
 is_uppercase_char = Char.is_uppercase__fastest
 is_digit_char = Char.is_digit__fastest
 is_alpha_char = Memo.precompute_alt Memo.gen_ascii true is_alpha_char
-is_alphanum_char = Memo.precompute_alt Memo.gen_ascii true is_alphanum_char
 is_identifier_char = Memo.precompute_alt Memo.gen_ascii true is_identifier_char
 
 _to_string = Bool.to_source

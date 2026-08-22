@@ -41,15 +41,13 @@ $lambada expect-test src/.dag-bundle-canonical --root src
 # brick the next build: extract first, probe, and only then install.
 >&2 echo "Exporting compiler"
 compiler=submodules/lambada/compiler
-for symbol in compile compile_to_dag; do
-  $dag extract --symbol "Lambada.$symbol" src/.dag-bundle-canonical \
-    | $dag canonicalize > "$compiler/$symbol.dag.new"
-done
+$dag extract --symbol Lambada.compile_to_dag src/.dag-bundle-canonical \
+  | $dag canonicalize > "$compiler/compile_to_dag.dag.new"
 
 probe=$(node submodules/tree-calculus/bin/main.js \
   -dag -file "$compiler/compile_to_dag.dag.new" -string 'x = △' -string 2>/dev/null || true)
 case "$probe" in
-  ':t '*) for symbol in compile compile_to_dag; do mv "$compiler/$symbol.dag.new" "$compiler/$symbol.dag"; done ;;
+  ':t '*) mv "$compiler/compile_to_dag.dag.new" "$compiler/compile_to_dag.dag" ;;
   *) rm -f "$compiler"/*.dag.new
      >&2 echo "ERROR: the extracted compiler cannot compile 'x = △'; the shipped one is left alone."
      exit 1 ;;

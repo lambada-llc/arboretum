@@ -16,24 +16,6 @@ grid_set = \x \y \val \grid
       $ equal iy y)
     grid
 
-# Set a rectangular region: blit a pattern (list of rows) at offset (ox, oy)
-grid_blit = \ox \oy \pattern \grid
-  List.mapi
-    (\row \iy
-      Bool.match
-        row
-        (Option.match row
-          (\pat_row List.mapi
-            (\cell \ix
-              Bool.match
-                cell
-                (Option.match cell (\v v) $ List.nth (Nat.sub ix ox) pat_row)
-                $ Nat.is_lte ox ix)
-            row)
-          $ List.nth (Nat.sub iy oy) pattern)
-        $ Nat.is_lte oy iy)
-    grid
-
 # Map a function over all cells, providing (x, y, value) to the function
 grid_mapi = \f
   List.mapi $ \row \y
