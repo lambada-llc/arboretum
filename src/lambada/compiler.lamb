@@ -262,9 +262,6 @@ Syntax_tree = Syntax_identifier name                        # string
             | Syntax_adt literalType listPairInstanceArgs   # string (string * string list) list
             | Syntax_spanned start end inner                # nat nat Syntax_tree
 
-syntax_app = List.match _ (List.foldl Syntax_app)
-syntax_abs = \vars \body List.foldr Syntax_abs body vars
-
 # _expr :=  name=expr | \name expr | identifier | str | nat | (expr) | comment | [expr*]
 # expr :=  app  :=  _expr* | _expr* $ expr
 
@@ -598,6 +595,40 @@ quote_str = \s Native_emit $ \gen_bin
     \ontriple ontriple dag fresh_res gen_bin
 
 
+_span_suffix = \start \end \tl Dlist.from_list "::" $ Dlist.from_list (Nat.to_string start) $ Dlist.single ',' $ Dlist.from_list (Nat.to_string end) $ tl
+
+# Native => (dag dstring, name dstring, gen_bin) via continuation
+_native_expr_to_ddag = self_apply $ \self \n n
+    (\literal \self \gen_bin \triple triple Dlist.empty (Dlist.from_list literal) gen_bin)
+    (\o1 \o2 \self \gen_bin
+         self self o1 gen_bin $ \res1 \l1 \gen_bin
+         self self o2 gen_bin $ \res2 \l2 \gen_bin
+         \triple
+            gen_bin
+              (\fresh \gen_bin
+                triple
+                  (\tl res1 $ res2 $ fresh$space$l1$space$l2$newline $ tl)
+                  fresh
+                  gen_bin)
+    )
+    (\emit \self \gen_bin emit gen_bin)
+    (\start \end \inner \self \gen_bin
+         let (_span_suffix start end) $ \sfx
+         inner
+           (\literal \triple triple Dlist.empty (Dlist.from_list literal) gen_bin)
+           (\o1 \o2
+              self self o1 gen_bin $ \res1 \l1 \gen_bin
+              self self o2 gen_bin $ \res2 \l2 \gen_bin
+              \triple gen_bin (\fresh \gen_bin
+                let (Dlist.append fresh sfx) $ \fid
+                triple (\tl res1 $ res2 $ fid$space$l1$space$l2$newline $ tl) fid gen_bin))
+           (\emit emit gen_bin $ \dag \name \gen_bin
+              let (Dlist.append name sfx) $ \nid
+              \triple triple dag nid gen_bin)
+           (\s2 \e2 \inner2 self self (Native_spanned start end inner2) gen_bin)
+    )
+    self
+
 # SYNTAX => NATIVE
 # Bracket abstraction, in one pass. Which combinator an application takes is
 # decided by whether each side mentions the bound name, and that is exactly what
@@ -648,6 +679,12 @@ _abs = \eq_name self_apply $ \strip \nbody nbody
                     △ in_inner $ Native_spanned start end sinner)
                 strip
 _syntax_to_native_abs = \eq_name compose Pair.snd (_abs eq_name)
+# (A per-character comparison through the string emitter's [equal_const]
+# recognizer table, short-circuiting at the first differing character, was
+# measured here and loses overall: it wins when first characters differ but
+# costs more per character than [equal]'s strict walk, and the ADT dispatch
+# path compares "::"-prefixed names against each other all day — its half of
+# the ADT bench regressed 36k -> 49k. Don't retry.)
 _syntax_to_native = self_apply $ \this \syntax
     syntax
         (\name \this Native_identifier name)
@@ -668,42 +705,78 @@ _syntax_to_native = self_apply $ \this \syntax
         this
 
 
-_create_unique_name_from_nat = \n Dlist.from_list "::" $ Nat.to_string n
-_syntax_emit_adt_variant = \items \ctr_arg_list \index \args \name
+# ADT constructors and dispatchers are generated as combinator natives
+# directly, from closed recurrences over the variant count [n], index [i] and
+# arity [k] — nested bracket abstraction over synthesized lambda syntax used to
+# re-walk a term that grows with every binder, and that walk was the whole cost
+# of lowering an ADT. The pieces:
+#   rot     = :c :i                        rot a f = f a
+#   B_m     = :i | :b | :b :b B_{m-1}      compose after m arguments
+#   W_m     = :i | :k | :b :k W_{m-1}      W_m a = drop m arguments, return a
+#   S_i^n   = :k^i (W_{n-1-i})             select c_i of c_0..c_{n-1}
+_n_rot = Native_app nativeC nativeI
+_n_compose_after = fix $ \self \m Nat.match
+    nativeI
+    (\pred Nat.match nativeB (\_ Native_app (Native_app nativeB nativeB) (self pred)) pred)
+    m
+_n_dropper = fix $ \self \m Nat.match
+    nativeI
+    (\pred Nat.match nativeK (\_ Native_app (Native_app nativeB nativeK) (self pred)) pred)
+    m
+_n_sel = fix $ \self \i Nat.match
+    (\n _n_dropper (Nat.pred n))
+    (\ipred \n Native_app nativeK (self ipred (Nat.pred n)))
+    i
+# The constructor for variant i of n with k arguments,
+#   V = \a1..\ak \c0..\c_{n-1} c_i a1..ak,
+# by peeling the last argument: V_0 = S_i^n and V_j = B_{j-1} t V_{j-1}, where
+# t g = \x \c0..\c_{n-1} (g c⃗) x — that is, t = C (B B_n rot). [t] depends only
+# on n, so it is emitted once per declaration under the scratch name [::t]
+# (reassigned by a later declaration exactly like every other emitted scratch
+# name) and each constructor references it by name instead of re-emitting its
+# tree per use.
+_n_t_ref = Native_identifier "::t"
+_n_t_def = \n Native_app nativeC (Native_app (Native_app nativeB (_n_compose_after n)) _n_rot)
+_n_ctor = \i \n fix $ \self \j Nat.match
+    (_n_sel i n)
+    (\jpred let (self jpred) $ \v Nat.match
+        (Native_app _n_t_ref v)
+        (\_ Native_app (Native_app (_n_compose_after jpred) _n_t_ref) v)
+        jpred)
+    j
+# The dispatcher for variant i,
+#   D = \f \alt \x  x b_0 .. b_{n-1}   with b_i = f and b_j = W_{arity_j} alt,
+# is small enough to hand to the generic bracket abstraction: the W chains are
+# prebuilt and wrapped as emit nodes, which [_abs] treats as opaque constants
+# (and which emit exactly the tree they hold), so only the three binders and
+# the n+1-node spine are ever walked.
+_native_opaque = \t Native_emit (_native_expr_to_ddag t)
+# The three binders are the only identifiers the spine contains (the W chains
+# are opaque), so their names only need to be distinct from each other — one
+# character each keeps every comparison the abstraction makes as short as a
+# comparison can be.
+_n_nf = Native_identifier "f"
+_n_na = Native_identifier "a"
+_n_nx = Native_identifier "x"
+_n_dispatch = \index \items
+    _syntax_to_native_abs (equal "f") $ _syntax_to_native_abs (equal "a") $ _syntax_to_native_abs (equal "x") $
+    List.foldl
+        (\spine \item Native_app spine (Bool.match
+            (\item let (List.length (Pair.snd (Pair.fst item))) $ \m
+                Nat.match _n_na (\_ Native_app (_native_opaque (_n_dropper m)) _n_na) m)
+            (\_item _n_nf)
+            (equal index (Pair.snd item)) item))
+        _n_nx items
+_syntax_emit_adt_variant = \items \n \index \args \name
     [
-        Native_assignment
-            name
-            (
-                _syntax_to_native
-                (syntax_abs (List.concat args ctr_arg_list) (syntax_app (List.map Syntax_identifier (△ (_create_unique_name_from_nat index) args))))
-            );
-        Native_assignment
-            (List.concat name "_Dispatch")
-            (
-                _syntax_to_native
-                (
-                    (\argDisp \argAlt \argItem syntax_abs [argDisp; argAlt; argItem]
-                        (syntax_app
-                            (△
-                                (Syntax_identifier argItem)
-                                (List.map (\item
-                                    Bool.match
-                                        (syntax_abs (Pair.snd (Pair.fst item)) (Syntax_identifier argAlt))
-                                        (Syntax_identifier argDisp)
-                                        (equal index (Pair.snd item))
-                                ) items)
-                            )
-                        )
-                    )
-                    "::f" # function to dispatch
-                    "::a" # alternative value
-                    "::x" # object to match on
-                )
-            )
+        Native_assignment name (_n_ctor index n (List.length args));
+        Native_assignment (List.concat name "_Dispatch") (_n_dispatch index items)
     ]
-_syntax_emit_adt = \type_name \items \ctr_arg_list
+_syntax_emit_adt = \type_name \items
+        let (List.length items) $ \n
+        △ (Native_assignment "::t" (_n_t_def n)) $
         List.concat_map
-        (Pair.match (\pair \index _syntax_emit_adt_variant items ctr_arg_list index (Pair.snd pair) (Pair.fst pair)))
+        (Pair.match (\pair \index _syntax_emit_adt_variant items n index (Pair.snd pair) (Pair.fst pair)))
         items
 
 _make_top_level_expr = \syntax_expr [Native_expr (_syntax_to_native syntax_expr)]
@@ -720,7 +793,7 @@ syntax_to_native = \syntax
         (\o1 \o2     _make_top_level_expr (Syntax_app o1 o2))
         (\name \o    [Native_assignment name (_syntax_to_native o)])
         (\type_name \pairs
-            (_syntax_emit_adt type_name (List.mapi △ pairs) (List.mapi (\_ _create_unique_name_from_nat) pairs))
+            (_syntax_emit_adt type_name (List.mapi △ pairs))
         )
         (\start \end \inner _make_top_level_expr (Syntax_spanned start end inner))
 
@@ -759,42 +832,16 @@ compiler_lower = \synts some $ Dlist.from_list
 _compiler_lower = \synts some $ List.concat_map syntax_to_native synts
 
 # t generator = () -> t * t generator
+# (Carrying the name as its '0'/'1' string with an amortized-O(1) successor,
+# instead of a counter rendered by [to_bits_dstring], was measured and loses
+# ~65 reductions per fresh name: the staged [to_bits] already reduces to the
+# name's fully-built dlist the moment the stream fires, so rendering was
+# one-time all along, and the string successor plus from_list cost more than
+# succ plus to_bits at the small counters emission actually reaches. Don't
+# retry.)
 _gen_bin = fix $ \self \i \pair pair (stage Nat.to_bits_dstring i pair) (self $ stage Nat.succ i pair)
 gen_bin = _gen_bin 0
 
-_span_suffix = \start \end \tl Dlist.from_list "::" $ Dlist.from_list (Nat.to_string start) $ Dlist.single ',' $ Dlist.from_list (Nat.to_string end) $ tl
-
-# Native => (dag dstring, name dstring, gen_bin) via continuation
-_native_expr_to_ddag = self_apply $ \self \n n
-    (\literal \self \gen_bin \triple triple Dlist.empty (Dlist.from_list literal) gen_bin)
-    (\o1 \o2 \self \gen_bin
-         self self o1 gen_bin $ \res1 \l1 \gen_bin
-         self self o2 gen_bin $ \res2 \l2 \gen_bin
-         \triple
-            gen_bin
-              (\fresh \gen_bin
-                triple
-                  (\tl res1 $ res2 $ fresh$space$l1$space$l2$newline $ tl)
-                  fresh
-                  gen_bin)
-    )
-    (\emit \self \gen_bin emit gen_bin)
-    (\start \end \inner \self \gen_bin
-         let (_span_suffix start end) $ \sfx
-         inner
-           (\literal \triple triple Dlist.empty (Dlist.from_list literal) gen_bin)
-           (\o1 \o2
-              self self o1 gen_bin $ \res1 \l1 \gen_bin
-              self self o2 gen_bin $ \res2 \l2 \gen_bin
-              \triple gen_bin (\fresh \gen_bin
-                let (Dlist.append fresh sfx) $ \fid
-                triple (\tl res1 $ res2 $ fid$space$l1$space$l2$newline $ tl) fid gen_bin))
-           (\emit emit gen_bin $ \dag \name \gen_bin
-              let (Dlist.append name sfx) $ \nid
-              \triple triple dag nid gen_bin)
-           (\s2 \e2 \inner2 self self (Native_spanned start end inner2) gen_bin)
-    )
-    self
 native_def_to_ddag = \n n
    (\literal \o
      _native_expr_to_ddag o gen_bin $ \res \l \_
@@ -851,7 +898,7 @@ compile_to_dag_bench "42"
 #   Emit:     890
 
 compile_to_dag_bench "1337"
-# = Tokenize: 1420
+# = Tokenize: 1363
 #   Parse:    523
 #   Lower:    307
 #   Emit:     1151
@@ -880,13 +927,20 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 #   Lower:    5387
 #   Emit:     19398
 
-# The only coverage of an ADT declaration: two variants, each emitting a
-# constructor and a *_Dispatch through _syntax_emit_adt.
+# An ADT declaration: two variants, each emitting a constructor and a
+# *_Dispatch. These are generated as closed combinator recurrences rather than
+# by bracket-abstracting synthesized lambdas — Lower used to spend 152236 here,
+# most of it re-walking each constructor's growing term once per binder. The
+# generated encodings behave exactly like the abstracted ones (the [compile]
+# tests near the end of this file exercise both hit and miss paths) but spell
+# the same functions with a few more indirections, which shows up as a few
+# percent on Token/Syntax construction and elimination once a compiler built
+# from this source compiles this repository.
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 5901
 #   Parse:    2430
-#   Lower:    152236
-#   Emit:     36255
+#   Lower:    24800
+#   Emit:     34487
 
 # Bracket abstraction over an application spine, which used to be exponential in
 # how many applications the bound variable reaches: each further [a] under \a
@@ -916,13 +970,14 @@ compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 
 # A nat literal is quadratic to tokenize, and stays that way: Horner's rule has
 # to walk an accumulator that grows by ~3.3 bits per digit, so 5, 10, 20 and 40
-# digits cost 1595, 5266, 19018 and 73289. What keeps shrinking is the constant
+# digits cost 1441, 4491, 15257 and 56830. What keeps shrinking is the constant
 # — [from_string__fastest] takes digits in pairs, halving the accumulator
 # walks, and each walk step lands in a carry-table entry that is the loop body
-# with its outcomes baked in, together worth ~3x here on top of the
-# table-driven pass that replaced two traversals and a multiply per digit.
+# for that carry, consuming two bits with their outcomes baked in — together
+# worth ~4x here on top of the table-driven pass that replaced two traversals
+# and a multiply per digit.
 compile_to_dag_bench $ List.repeat 100 '1'
-# = Tokenize: 447549
+# = Tokenize: 339449
 #   Parse:    523
 #   Lower:    307
 #   Emit:     17555
@@ -958,6 +1013,33 @@ compile "[65,123,65,]"
 _to_string = Serialize.to_source
 compile "\\x x"
 # = (△ (△ (△ △)) △)
+# A binder above ASCII exercises the identifier comparison paths for bytes
+# that no ASCII table covers.
+compile "\\△ △"
+# = (△ (△ (△ △)) △)
+compile "\\△ \\y △ y"
+# = (△ (△ (△ △)) △)
+
+# End-to-end coverage of the generated constructors and dispatchers: compiling
+# an ADT declaration alone hands back the accumulated environment, so each
+# generated definition can be fetched and exercised — a value of each variant
+# eliminated by hand-passed continuations, dispatch hit and miss, and a nullary
+# variant.
+_to_string = Nat.to_source
+let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "Ca" env 42 (\v v) (\v \w w)
+# = 42
+let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "Cb" env 1 2 (\v v) (\v \w w)
+# = 2
+let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "Ca_Dispatch" env (\v v) 9 (Map.pmap_get "Ca" env 42)
+# = 42
+let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "Ca_Dispatch" env (\v v) 9 (Map.pmap_get "Cb" env 1 2)
+# = 9
+let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "Cb_Dispatch" env (\v \w w) 9 (Map.pmap_get "Cb" env 1 2)
+# = 2
+let (compile "N0 = Z | S x") $ \env Map.pmap_get "Z_Dispatch" env 7 0 (Map.pmap_get "Z" env)
+# = 7
+let (compile "N0 = Z | S x") $ \env Map.pmap_get "S_Dispatch" env (\v v) 0 (Map.pmap_get "S" env 3)
+# = 3
 
 # Map literals lower to Map.set over the empty map, so what comes back is a
 # prefix map; a key with no ': value' takes Syntax_const_null, which is △.
