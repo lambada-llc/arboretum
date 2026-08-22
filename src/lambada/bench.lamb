@@ -10,7 +10,7 @@ Lambada.compile_to_dag_bench "Nat.add"
 #   Emit:     102
 
 Lambada.compile_to_dag_bench "42"
-# = Tokenize: 633
+# = Tokenize: 645
 #   Parse:    523
 #   Lower:    212
 #   Emit:     768

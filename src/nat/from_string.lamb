@@ -27,8 +27,8 @@
 # removed because ~167k nodes of build per module load cost more than the walk
 # it saved. Don't bring it back. The per-carry table here is different: carries
 # are bounded by the radix whatever the literal, and its entries share their
-# structure, so the exported compiler grows by ~5% while the recorded [size]
-# (which unfolds that sharing) grows much more.
+# structure, so both tables together add ~0.1% to the compiled bundle while the
+# recorded [size] (which unfolds that sharing) grows much more.
 #
 # Non-digit characters below 64 contribute their [Nat.sub_x_48] value, chars
 # >= 64 contribute 0 — callers only pass digit characters.
@@ -47,16 +47,18 @@ _decimal_digit = Memo.precompute_alt Memo.gen_ascii_low 0 Nat.sub_x_48
 _add_ten_x_digit = Memo.precompute_alt Memo.gen_ascii_low id (\c Nat.add_const (Nat.mul_const 10 (Nat.sub_x_48 c)))
 _gen_carry = Memo.gen_list Memo.gen_bool 7
 # The table entry for a carry IS the loop body for that carry, and it consumes
-# THREE accumulator bits per iteration: each bit selects between baked
-# sub-bodies before the next is even uncovered, so no bit or carry is ever
-# threaded through a branch — most of a step's cost is the K/S churn of
-# distributing live variables through the compiled branches, and here only the
-# recursion knot and the remaining bits travel. Every output bit and follow-on
-# carry sits in the entry as a constant, and the carry-trie lookup is paid once
-# per three bits. (A fourth bit per entry would amortize only the ~20-step
-# lookup further — the per-bit match and threading dominate now — for another
-# doubling of the table. Diminishing.)
-_hundred_plus_tab = Memo.precompute_multi [_gen_carry] (\c
+# THREE accumulator bits per iteration as one prebuilt triage tree: the cons
+# dispatch and the bit dispatch are stored eliminator values whose cases are
+# the next level down, so a bit costs two native triage rules and two
+# applications — nothing is matched with a combinator built on the spot, and
+# no head, div2 or output cons is ever computed at run time. Every output-bit
+# spine, follow-on carry and eliminator sits in the entry as a constant; the
+# carry-trie lookup is paid at most once per three bits — see the chained
+# table below. A level's value takes
+# (tail, self): triage on the tail either finishes on the exhausted
+# accumulator (absorbing self) or lands the bit eliminator on the head bit,
+# whose selected case takes the remaining tail and the knot.
+_hp_entry = \leaf \c
     let (Nat.add c 100) $ \cT
     let (List.match false (\hd \_ hd) c)  $ \o_F
     let (List.match false (\hd \_ hd) cT) $ \o_T
@@ -64,36 +66,40 @@ _hundred_plus_tab = Memo.precompute_multi [_gen_carry] (\c
     let (Nat.div2 cT) $ \m_T
     let (Nat.add m_F 100) $ \sFT
     let (Nat.add m_T 100) $ \sTT
-    # [tail2 o0 o1 m2] is the walk branch that has already consumed two bits
-    # producing o0 and o1, with m2 pending: it finishes on an exhausted
-    # accumulator or consumes a third bit with both outcomes baked.
+    # [tail2 o0 o1 m2] is the level that has consumed two bits producing o0
+    # and o1, with m2 pending.
     let (\o0 \o1 \m2
         let (Nat.add m2 100) $ \s2
-        let (\_self △ o0 (△ o1 m2)) $ \fin
-        let (\b2 \t3 \self Bool.match
-            (\self \t3 △ o0 (△ o1 (△ (List.match false (\hd \_ hd) m2) (self self (Nat.div2 m2) t3))))
-            (\self \t3 △ o0 (△ o1 (△ (List.match false (\hd \_ hd) s2) (self self (Nat.div2 s2) t3))))
-            b2 self t3) $ \go
-        \self \t2 List.match fin go t2 self) $ \tail2
+        let (List.match false (\hd \_ hd) m2) $ \h2F
+        let (List.match false (\hd \_ hd) s2) $ \h2T
+        let (Nat.div2 m2) $ \m3F
+        let (Nat.div2 s2) $ \m3T
+        let (\r △ o0 (△ o1 (△ h2F r))) $ \outF
+        let (\r △ o0 (△ o1 (△ h2T r))) $ \outT
+        triage (\_self △ o0 (△ o1 m2))
+               _
+               (triage (leaf outF m3F)
+                       (\_ leaf outT m3T)
+                       _)) $ \tail2
     let (tail2 o_F (List.match false (\hd \_ hd) m_F) (Nat.div2 m_F)) $ \t_FF
     let (tail2 o_F (List.match false (\hd \_ hd) sFT) (Nat.div2 sFT)) $ \t_FT
     let (tail2 o_T (List.match false (\hd \_ hd) m_T) (Nat.div2 m_T)) $ \t_TF
     let (tail2 o_T (List.match false (\hd \_ hd) sTT) (Nat.div2 sTT)) $ \t_TT
-    \self \n List.match
-      (\_self c)
-      (\b0 \t1 \self Bool.match
-          (\self \t1 List.match
-              (\_self △ o_F m_F)
-              (\b1 \t2 \self Bool.match t_FF t_FT b1 self t2)
-              t1 self)
-          (\self \t1 List.match
-              (\_self △ o_T m_T)
-              (\b1 \t2 \self Bool.match t_TF t_TT b1 self t2)
-              t1 self)
-          b0 self t1)
-      n self)
+    let (triage (\_self △ o_F m_F) _ (triage t_FF (\_ t_FT) _)) $ \lvl1F
+    let (triage (\_self △ o_T m_T) _ (triage t_TF (\_ t_TT) _)) $ \lvl1T
+    triage (\_self c)
+           _
+           (triage lvl1F (\_ lvl1T) _)
+# A level's leaf continues the walk at a baked follow-on carry. The base
+# table's leaves go back through the knot — a carry-trie lookup every three
+# bits — while the chained table's leaves embed the base table's entry for
+# their follow-on carry directly, so the walk alternates chained and base
+# entries and pays one lookup per SIX bits. The knot the base entries call is
+# the chained loop, which is what keeps the alternation going.
+_hundred_plus_tab = Memo.precompute_multi [_gen_carry] (_hp_entry (\out \m \t \self out (self self m t)))
+_hundred_plus_tab2 = Memo.precompute_multi [_gen_carry] (_hp_entry (\out \m let (_hundred_plus_tab m) $ \nx \t \self out (nx t self)))
 # 100 * n + carry, one pass over n's bits, low end first.
-_hundred_plus = \n \carry (self_apply $ \self \c \n _hundred_plus_tab c self n) carry n
+_hundred_plus = \n \carry (self_apply $ \self \c \n _hundred_plus_tab2 c n self) carry n
 _pair_step = \acc \c1 \c2 _hundred_plus acc (_add_ten_x_digit c1 (_decimal_digit c2))
 # The list is even-length by construction, so the inner match's nil branch is
 # never taken.
