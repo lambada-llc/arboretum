@@ -207,7 +207,7 @@ size Nat.to_string
 size Nat.from_string
 # = 2810
 size Nat.from_string__fastest
-# = 1840199
+# = 3016847
 size Nat.to_hex
 # = 4719
 size Nat.from_hex
@@ -240,13 +240,13 @@ Bench.run [Nat.from_string;  "255"]
 #   137 | 935 1817 2365 2445 77 53 303 | 2752 5243
 Bench.run [Nat.from_string__fastest;  "255"]
 # = oh | 0a  0b   1   2 3a 3b 3c | alc red
-#   12 | 78 130 210 209 43 25 42 | 208 529
+#   10 | 76 122 201 199 36 19 36 | 198 491
 Bench.run [Nat.from_string;  "65535"]
 # =  oh |   0a   0b    1    2  3a  3b  3c |  alc   red
 #   330 | 2360 4615 5988 6176 165 130 775 | 6975 13234
 Bench.run [Nat.from_string__fastest;  "65535"]
-# = oh |  0a  0b   1   2  3a 3b  3c | alc  red
-#   27 | 196 334 534 531 109 70 110 | 530 1354
+# = oh |  0a  0b   1   2 3a 3b 3c | alc  red
+#   23 | 192 326 524 519 94 55 97 | 518 1289
 Bench.run [Nat.to_hex;       255]
 # = oh |  0a  0b    1    2 3a 3b 3c |  alc  red
 #   53 | 490 692 1127 1128 31 26 83 | 1182 2395

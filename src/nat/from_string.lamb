@@ -47,41 +47,48 @@ _decimal_digit = Memo.precompute_alt Memo.gen_ascii_low 0 Nat.sub_x_48
 _add_ten_x_digit = Memo.precompute_alt Memo.gen_ascii_low id (\c Nat.add_const (Nat.mul_const 10 (Nat.sub_x_48 c)))
 _gen_carry = Memo.gen_list Memo.gen_bool 7
 # The table entry for a carry IS the loop body for that carry, and it consumes
-# TWO accumulator bits per iteration: the first bit selects between two baked
-# sub-bodies before the second bit is even uncovered, so no bit or carry is
-# ever threaded through a branch — most of a step's cost is the K/S churn of
+# THREE accumulator bits per iteration: each bit selects between baked
+# sub-bodies before the next is even uncovered, so no bit or carry is ever
+# threaded through a branch — most of a step's cost is the K/S churn of
 # distributing live variables through the compiled branches, and here only the
 # recursion knot and the remaining bits travel. Every output bit and follow-on
 # carry sits in the entry as a constant, and the carry-trie lookup is paid once
-# per two bits.
+# per three bits. (A fourth bit per entry would amortize only the ~20-step
+# lookup further — the per-bit match and threading dominate now — for another
+# doubling of the table. Diminishing.)
 _hundred_plus_tab = Memo.precompute_multi [_gen_carry] (\c
-    let (List.match false (\hd \_ hd) c) $ \oF
-    let (Nat.div2 c) $ \mF
-    let (Nat.add c 100) $ \sT
-    let (List.match false (\hd \_ hd) sT) $ \oT
-    let (Nat.div2 sT) $ \mT
-    let (List.match false (\hd \_ hd) mF) $ \oFF
-    let (Nat.add mF 100) $ \sFT
-    let (List.match false (\hd \_ hd) sFT) $ \oFT
-    let (List.match false (\hd \_ hd) mT) $ \oTF
-    let (Nat.add mT 100) $ \sTT
-    let (List.match false (\hd \_ hd) sTT) $ \oTT
+    let (Nat.add c 100) $ \cT
+    let (List.match false (\hd \_ hd) c)  $ \o_F
+    let (List.match false (\hd \_ hd) cT) $ \o_T
+    let (Nat.div2 c)  $ \m_F
+    let (Nat.div2 cT) $ \m_T
+    let (Nat.add m_F 100) $ \sFT
+    let (Nat.add m_T 100) $ \sTT
+    # [tail2 o0 o1 m2] is the walk branch that has already consumed two bits
+    # producing o0 and o1, with m2 pending: it finishes on an exhausted
+    # accumulator or consumes a third bit with both outcomes baked.
+    let (\o0 \o1 \m2
+        let (Nat.add m2 100) $ \s2
+        let (\_self △ o0 (△ o1 m2)) $ \fin
+        let (\b2 \t3 \self Bool.match
+            (\self \t3 △ o0 (△ o1 (△ (List.match false (\hd \_ hd) m2) (self self (Nat.div2 m2) t3))))
+            (\self \t3 △ o0 (△ o1 (△ (List.match false (\hd \_ hd) s2) (self self (Nat.div2 s2) t3))))
+            b2 self t3) $ \go
+        \self \t2 List.match fin go t2 self) $ \tail2
+    let (tail2 o_F (List.match false (\hd \_ hd) m_F) (Nat.div2 m_F)) $ \t_FF
+    let (tail2 o_F (List.match false (\hd \_ hd) sFT) (Nat.div2 sFT)) $ \t_FT
+    let (tail2 o_T (List.match false (\hd \_ hd) m_T) (Nat.div2 m_T)) $ \t_TF
+    let (tail2 o_T (List.match false (\hd \_ hd) sTT) (Nat.div2 sTT)) $ \t_TT
     \self \n List.match
       (\_self c)
       (\b0 \t1 \self Bool.match
           (\self \t1 List.match
-              (\_self △ oF mF)
-              (\b1 \t2 \self Bool.match
-                  (\self \t2 △ oF (△ oFF (self self (Nat.div2 mF) t2)))
-                  (\self \t2 △ oF (△ oFT (self self (Nat.div2 sFT) t2)))
-                  b1 self t2)
+              (\_self △ o_F m_F)
+              (\b1 \t2 \self Bool.match t_FF t_FT b1 self t2)
               t1 self)
           (\self \t1 List.match
-              (\_self △ oT mT)
-              (\b1 \t2 \self Bool.match
-                  (\self \t2 △ oT (△ oTF (self self (Nat.div2 mT) t2)))
-                  (\self \t2 △ oT (△ oTT (self self (Nat.div2 sTT) t2)))
-                  b1 self t2)
+              (\_self △ o_T m_T)
+              (\b1 \t2 \self Bool.match t_TF t_TT b1 self t2)
               t1 self)
           b0 self t1)
       n self)
