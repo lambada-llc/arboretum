@@ -513,7 +513,7 @@ Native_stmt = Native_assignment literal o  # str * Native
             | Native_expr o                # Native
 Native_expr = Native_identifier literal    # str
             | Native_app o1 o2             # Native * Native
-            | Native_emit f                # gen_bin -> dag:dstring * identifier:dstring * gen_bin
+            | Native_emit f                # depth:nat -> dag:dstring * identifier:dstring
             | Native_spanned start end o   # nat nat Native
 
 nativeT = Native_identifier ":t"
@@ -584,48 +584,55 @@ _dag_str_step = \fresh_res \fresh_helper
       (prev_rec n)
       n dag prev_rec
 
-quote_nat = \n Native_emit $ \gen_bin
-  Pair.let (gen_bin _) $ \fresh_res \gen_bin
+# Scratch names are indexed by the emission depth rather than drawn from a
+# global counter: a node at depth d is emitted under [_ename d], its left child
+# at depth d, its right child at depth d+1. On the way out of a node, every
+# name above its depth is dead and its own name holds its value, so the same
+# few names serve the whole program (register allocation on a tree needs only
+# as many registers as the deepest right-spine). Names are therefore one or
+# two characters, deterministic from position — no generator state to thread
+# through the walk and no ever-longer counter spellings to render — and a
+# later definition of the same name only ever shadows a value that has already
+# been consumed.
+_ename = Nat.to_bits_dstring
+quote_nat = \n Native_emit $ \d
+  let (_ename d) $ \fresh_res
   Pair.let (_dag_nat fresh_res n) $ \dag \result_name
-    \ontriple ontriple dag result_name gen_bin
-quote_str = \s Native_emit $ \gen_bin
-  Pair.let (gen_bin _) $ \fresh_res \gen_bin
-  Pair.let (gen_bin _) $ \fresh_helper \gen_bin
+    \pair pair dag result_name
+quote_str = \s Native_emit $ \d
+  let (_ename d) $ \fresh_res
+  let (_ename (Nat.succ d)) $ \fresh_helper
   Pair.let (List.foldr (_dag_str_step fresh_res fresh_helper) (△ (\tl fresh_res$space$_dI$space$_dT$newline $ tl) (\_ false)) s) $ \dag \_prev_rec
-    \ontriple ontriple dag fresh_res gen_bin
+    \pair pair dag fresh_res
 
 
 _span_suffix = \start \end \tl Dlist.from_list "::" $ Dlist.from_list (Nat.to_string start) $ Dlist.single ',' $ Dlist.from_list (Nat.to_string end) $ tl
 
-# Native => (dag dstring, name dstring, gen_bin) via continuation
+# Native => (dag dstring, name dstring) at a given depth, via continuation
 _native_expr_to_ddag = self_apply $ \self \n n
-    (\literal \self \gen_bin \triple triple Dlist.empty (Dlist.from_list literal) gen_bin)
-    (\o1 \o2 \self \gen_bin
-         self self o1 gen_bin $ \res1 \l1 \gen_bin
-         self self o2 gen_bin $ \res2 \l2 \gen_bin
-         \triple
-            gen_bin
-              (\fresh \gen_bin
-                triple
-                  (\tl res1 $ res2 $ fresh$space$l1$space$l2$newline $ tl)
-                  fresh
-                  gen_bin)
+    (\literal \self \d \pair pair Dlist.empty (Dlist.from_list literal))
+    (\o1 \o2 \self \d
+         self self o1 d $ \res1 \l1
+         self self o2 (Nat.succ d) $ \res2 \l2
+         let (_ename d) $ \fresh
+         \pair pair
+           (\tl res1 $ res2 $ fresh$space$l1$space$l2$newline $ tl)
+           fresh
     )
-    (\emit \self \gen_bin emit gen_bin)
-    (\start \end \inner \self \gen_bin
+    (\emit \self \d emit d)
+    (\start \end \inner \self \d
          let (_span_suffix start end) $ \sfx
          inner
-           (\literal \triple triple Dlist.empty (Dlist.from_list literal) gen_bin)
+           (\literal \pair pair Dlist.empty (Dlist.from_list literal))
            (\o1 \o2
-              self self o1 gen_bin $ \res1 \l1 \gen_bin
-              self self o2 gen_bin $ \res2 \l2 \gen_bin
-              \triple gen_bin (\fresh \gen_bin
-                let (Dlist.append fresh sfx) $ \fid
-                triple (\tl res1 $ res2 $ fid$space$l1$space$l2$newline $ tl) fid gen_bin))
-           (\emit emit gen_bin $ \dag \name \gen_bin
+              self self o1 d $ \res1 \l1
+              self self o2 (Nat.succ d) $ \res2 \l2
+              let (Dlist.append (_ename d) sfx) $ \fid
+              \pair pair (\tl res1 $ res2 $ fid$space$l1$space$l2$newline $ tl) fid)
+           (\emit emit d $ \dag \name
               let (Dlist.append name sfx) $ \nid
-              \triple triple dag nid gen_bin)
-           (\s2 \e2 \inner2 self self (Native_spanned start end inner2) gen_bin)
+              \pair pair dag nid)
+           (\s2 \e2 \inner2 self self (Native_spanned start end inner2) d)
     )
     self
 
@@ -831,24 +838,13 @@ compiler_lower = \synts some $ Dlist.from_list
 
 _compiler_lower = \synts some $ List.concat_map syntax_to_native synts
 
-# t generator = () -> t * t generator
-# (Carrying the name as its '0'/'1' string with an amortized-O(1) successor,
-# instead of a counter rendered by [to_bits_dstring], was measured and loses
-# ~65 reductions per fresh name: the staged [to_bits] already reduces to the
-# name's fully-built dlist the moment the stream fires, so rendering was
-# one-time all along, and the string successor plus from_list cost more than
-# succ plus to_bits at the small counters emission actually reaches. Don't
-# retry.)
-_gen_bin = fix $ \self \i \pair pair (stage Nat.to_bits_dstring i pair) (self $ stage Nat.succ i pair)
-gen_bin = _gen_bin 0
-
 native_def_to_ddag = \n n
    (\literal \o
-     _native_expr_to_ddag o gen_bin $ \res \l \_
+     _native_expr_to_ddag o 0 $ \res \l
       \tl res $ Dlist.from_list literal $ space $ l $ newline $ tl
    )
    (\o
-     _native_expr_to_ddag o gen_bin $ \res \l \_
+     _native_expr_to_ddag o 0 $ \res \l
       \tl res $ l $ newline $ tl
    )
 
@@ -889,43 +885,43 @@ compile_to_dag_bench "x"
 # = Tokenize: 304
 #   Parse:    672
 #   Lower:    287
-#   Emit:     182
+#   Emit:     164
 
 compile_to_dag_bench "42"
 # = Tokenize: 633
 #   Parse:    523
-#   Lower:    307
-#   Emit:     890
+#   Lower:    305
+#   Emit:     788
 
 compile_to_dag_bench "1337"
 # = Tokenize: 1363
 #   Parse:    523
-#   Lower:    307
-#   Emit:     1151
+#   Lower:    305
+#   Emit:     1049
 
 compile_to_dag_bench "[42]"
 # = Tokenize: 1072
 #   Parse:    1493
-#   Lower:    494
-#   Emit:     2190
+#   Lower:    492
+#   Emit:     1964
 
 compile_to_dag_bench "\\x x"
 # = Tokenize: 837
 #   Parse:    1345
 #   Lower:    1429
-#   Emit:     213
+#   Emit:     195
 
 compile_to_dag_bench "x = 42"
 # = Tokenize: 1230
 #   Parse:    1190
-#   Lower:    315
-#   Emit:     972
+#   Lower:    313
+#   Emit:     868
 
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
 # = Tokenize: 15496
 #   Parse:    27764
 #   Lower:    5387
-#   Emit:     19398
+#   Emit:     17034
 
 # An ADT declaration: two variants, each emitting a constructor and a
 # *_Dispatch. These are generated as closed combinator recurrences rather than
@@ -939,8 +935,8 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 5901
 #   Parse:    2430
-#   Lower:    24800
-#   Emit:     34487
+#   Lower:    24680
+#   Emit:     30393
 
 # Bracket abstraction over an application spine, which used to be exponential in
 # how many applications the bound variable reaches: each further [a] under \a
@@ -954,7 +950,7 @@ compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 # = Tokenize: 5350
 #   Parse:    8582
 #   Lower:    31459
-#   Emit:     28350
+#   Emit:     25605
 
 # Literal size. A string literal is linear in both directions: a fixed ~75
 # reductions per character to tokenize and, in a run of one repeated character,
@@ -965,8 +961,8 @@ compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 # = Tokenize: 7574
 #   Parse:    535
-#   Lower:    297
-#   Emit:     18956
+#   Lower:    295
+#   Emit:     18791
 
 # A nat literal is quadratic to tokenize, and stays that way: Horner's rule has
 # to walk an accumulator that grows by ~3.3 bits per digit, so 5, 10, 20 and 40
@@ -979,8 +975,8 @@ compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 compile_to_dag_bench $ List.repeat 100 '1'
 # = Tokenize: 339449
 #   Parse:    523
-#   Lower:    307
-#   Emit:     17555
+#   Lower:    305
+#   Emit:     17453
 
 _compiler_env =
   Map.pmap_set "△" △ $
@@ -1055,4 +1051,4 @@ compile "{△ △ △, △: △}"
 # count, printing it is pages of triangles.
 _to_string = \v Nat.to_source (size v)
 compile ""
-# = 5509
+# = 3765
