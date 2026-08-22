@@ -1192,17 +1192,22 @@ _to_string = \v Nat.to_source (size v)
 compile ""
 # = 3765
 
-# The spanned pipeline's exact text, pinned: an identifier reference drops its
-# span, an application bakes the suffixed name into its own defining line, a
-# quoted literal suffixes only the returned reference (its lines still bind
-# the plain name), and of nested spans the outer wins.
-_spanned_probe = \s compiler_emit_dag $ Option.get_or []
+# The spanned pipeline's exact text, pinned by example. A span is an
+# end-exclusive character range of the source, suffixed as ::start,end onto
+# the name of the node it wraps. In "(\x x) ((42))" the top application
+# spans the whole source, so its line binds 0::0,13 and the root references
+# it; its function is a bare :i — the lambda eta-reduces to an identifier,
+# and an identifier reference drops its span to stay resolvable; its
+# argument 1::7,13 carries the span of "((42))" — the outer parens', the
+# inner "(42)"'s having lost to it — while the literal's own lines bind the
+# plain name 1. In "f (g h)" the inner application bakes ::2,7, the span of
+# "(g h)", into its own defining line, and the leaves f, g, h stay plain.
+_to_string = \s compiler_emit_dag $ Option.get_or []
     $ Option.map (List.concat_map syntax_to_native)
     $ Option.bind _compiler_parse_spanned
     $ compiler_tokenize_positioned s
-_to_string = String.to_source
-_spanned_probe "(\\x x) ((42))"
-# = "1 :i :t
+"(\\x x) ((42))"
+# = 1 :i :t
 #   1 :ct 1
 #   1 :k 1
 #   1 :ct 1
@@ -1211,9 +1216,7 @@ _spanned_probe "(\\x x) ((42))"
 #   1 :k 1
 #   0::0,13 :i 1::7,13
 #   0::0,13
-#   "
-_spanned_probe "f (g h)"
-# = "1::2,7 g h
+"f (g h)"
+# = 1::2,7 g h
 #   0::0,7 f 1::2,7
 #   0::0,7
-#   "
