@@ -592,19 +592,20 @@ _dag_str_step = \fresh_res \fresh_helper
 # later definition of the same name only ever shadows a value that has already
 # been consumed.
 _ename = Nat.to_bits_dstring
-# The spanned pipeline needs a second behavior from an emitter — emit with a
-# span suffix decorating this node's name — and each kind supplies it the way
-# the walk it replaces did: an application bakes the suffix into its own
-# line's name, a quoted literal decorates just the returned reference (its
-# lines still bind the plain name), and an identifier ignores it (its name
-# must stay resolvable). Threading a suffix argument through the hot path
-# costs ~20 steps per node in argument churn, so instead the abstraction
-# pass carries each term as [△ plain (△ isvar taker)]: the plain emitter,
-# untouched and one field read away (every composition wants it), then the
-# bare-variable mark for the eta rules (tested only once a level list is
-# exhausted) and a [\sfx] entry only a span wrapper ever applies. Quotes
-# below build that triple directly; [_kdleaf] and [_kea] (further down) are
-# the identifier and application forms of it.
+# A span never changes what a node emits — it adds one alias line binding
+# the span-suffixed name to the node's own, and references go through the
+# alias: indirection the DAG hash-conses away, so every span-bearing
+# reference is a defined name, no span is dropped, and tooling reads one
+# uniform rule ("X::s,e Y" annotates node Y with the range s,e). To keep the
+# hot path free of any span plumbing, the abstraction pass carries each term
+# as [△ plain (△ isvar orig)]: the emitter to use (with the span alias
+# applied, if any), the bare-variable mark for the eta rules (tested only
+# once a level list is exhausted), and the original unsuffixed emitter a
+# re-wrapping span starts over from — which is how of nested spans the outer
+# wins. Unspanned terms put the same emitter in both slots, a second
+# reference and nothing more. Quotes below build that triple directly;
+# [_kdleaf] and [_kea] (further down) are the identifier and application
+# forms of it.
 _equote_nat = \n \d
   let (_ename d) $ \fresh_res
   Pair.let (_dag_nat fresh_res n) $ \dag \result_name
@@ -614,9 +615,8 @@ _equote_str = \s \d
   let (_ename (Nat.succ d)) $ \fresh_helper
   Pair.let (List.foldr (_dag_str_step fresh_res fresh_helper) (△ (\tl fresh_res$space$_dI$space$_dT$newline $ tl) (\_ false)) s) $ \dag \_prev_rec
     \pair pair dag fresh_res
-_esuffix = \em \sfx \d em d $ \dag \nm \pair pair dag (Dlist.append nm sfx)
-quote_nat = \n let (_equote_nat n) $ \em △ em (△ false (_esuffix em))
-quote_str = \s let (_equote_str s) $ \em △ em (△ false (_esuffix em))
+quote_nat = \n let (_equote_nat n) $ \em △ em (△ false em)
+quote_str = \s let (_equote_str s) $ \em △ em (△ false em)
 
 
 _span_suffix = \start \end \tl Dlist.from_list "::" $ Dlist.from_list (Nat.to_string start) $ Dlist.single ',' $ Dlist.from_list (Nat.to_string end) $ tl
@@ -637,22 +637,19 @@ _eapp = \l \r \d
     \pair pair (\tl dagL $ dagR $ x$space$nameL$space$nameR$newline $ tl) x
 _eT = _eapp _eC _eI
 _eR = _eapp _eC _eC
-# The triple forms. An identifier's taker ignores the suffix; an
-# application's taker re-runs the same emission under the suffixed name (its
-# children are the plain entries — a spanned child's plain entry already
-# carries its own suffix).
-_kdleaf = \literal let (_emk_leaf literal) $ \em △ em (△ false (\_sfx em))
-_etaker = \l \r \sfx \d
-    l d $ \dagL \nameL
-    r (Nat.succ d) $ \dagR \nameR
-    let (Dlist.append (_ename d) sfx) $ \x
-    \pair pair (\tl dagL $ dagR $ x$space$nameL$space$nameR$newline $ tl) x
-# A span wraps a term by applying its taker — so the plain entry becomes the
-# suffixed emission — killing the variable mark and passing the taker
-# through: wrapping the result again just replaces the applied suffix, which
-# is exactly the outer span winning over the inner.
-_espan = \start \end \dd Pair.let (Pair.snd dd) $ \_iv \taker
-    △ (taker (_span_suffix start end)) (△ false taker)
+# The identifier form of the triple. Suffixed names always contain "::", so
+# an alias line — two tokens — can never look like an export declaration.
+_kdleaf = \literal let (_emk_leaf literal) $ \em △ em (△ false em)
+# A span wraps a term by aliasing what its original emitter emits — a
+# spanned child's plain entry carries its own alias lines, so compositions
+# never look at spans at all — killing the variable mark and keeping the
+# original: wrapping the result again starts over from it, which is exactly
+# the outer span winning over the inner.
+_ealias = \em \sfx \d em d $ \dag \nm
+    let (Dlist.append nm sfx) $ \x
+    \pair pair (\tl dag $ x$space$nm$newline $ tl) x
+_espan = \start \end \dd Pair.let (Pair.snd dd) $ \_iv \orig
+    △ (_ealias orig (_span_suffix start end)) (△ false orig)
 
 # SYNTAX => NATIVE
 # Abstraction elimination after Kiselyov ("lambda to SKI, semantically",
@@ -671,7 +668,7 @@ _espan = \start \end \dd Pair.let (Pair.snd dd) $ \_iv \taker
 # of them: T = :c :i (T a f = f a) and R = :c :c (R a f x = f x a).
 #
 # The pass is fused with emission: a term is carried as the
-# [△ plain (△ isvar taker)] triple described above, and every rule that used
+# [△ plain (△ isvar orig)] triple described above, and every rule that used
 # to build an application node composes the two sides with [_kea] instead.
 # [isvar] marks the bare variable for the eta rules, which have no term
 # structure left to inspect; it is set by [_kvar0] alone and cleared by every
@@ -682,14 +679,13 @@ _kdB = _kdleaf ":b"
 _kdC = _kdleaf ":c"
 _kdS = _kdleaf ":s"
 _kea = \dx \dy
-    let (Pair.fst dx) $ \l
-    let (Pair.fst dy) $ \r
-    △ (_eapp l r) (△ false (_etaker l r))
+    let (_eapp (Pair.fst dx) (Pair.fst dy)) $ \ap
+    △ ap (△ false ap)
 _kdT = _kea _kdC _kdI
 _kdR = _kea _kdC _kdC
 # An annotated term is [△ bools triple]; [_kvarn m] is the variable at De
 # Bruijn index m.
-_kvar0 = △ [true] (△ _eI (△ true (\_sfx _eI)))
+_kvar0 = △ [true] (△ _eI (△ true _eI))
 _kvarn = fix $ \self \m Nat.match _kvar0 (\pred Pair.let (self pred) $ \g \d △ (△ false g) d) m
 # Is (true:h, d) exactly ([true], the bare variable)? The eta rules contract
 # those on sight; the mark travels with d, so the test is a field read.
@@ -1004,7 +1000,7 @@ compile_to_dag_bench "1337"
 compile_to_dag_bench "[42]"
 # = Tokenize: 1072
 #   Parse:    1493
-#   Lower:    878
+#   Lower:    760
 #   Emit:     1414
 
 compile_to_dag_bench "\\x x"
@@ -1016,13 +1012,13 @@ compile_to_dag_bench "\\x x"
 compile_to_dag_bench "x = 42"
 # = Tokenize: 1230
 #   Parse:    1190
-#   Lower:    351
+#   Lower:    331
 #   Emit:     848
 
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
 # = Tokenize: 15496
 #   Parse:    27764
-#   Lower:    11464
+#   Lower:    10085
 #   Emit:     10588
 
 # An ADT declaration: two variants, each emitting a constructor and a
@@ -1054,7 +1050,7 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 # = Tokenize: 5350
 #   Parse:    8582
-#   Lower:    31978
+#   Lower:    29694
 #   Emit:     17673
 
 # Literal size. A string literal is linear in both directions: a fixed ~75
@@ -1193,30 +1189,38 @@ compile ""
 # = 3765
 
 # The spanned pipeline's exact text, pinned by example. A span is an
-# end-exclusive character range of the source, suffixed as ::start,end onto
-# the name of the node it wraps. In "(\x x) ((42))" the top application
-# spans the whole source, so its line binds 0::0,13 and the root references
-# it; its function is a bare :i — the lambda eta-reduces to an identifier,
-# and an identifier reference drops its span to stay resolvable; its
-# argument 1::7,13 carries the span of "((42))" — the outer parens', the
-# inner "(42)"'s having lost to it — while the literal's own lines bind the
-# plain name 1. In "f (g h)" the inner application bakes ::2,7, the span of
-# "(g h)", into its own defining line, and the leaves f, g, h stay plain.
+# end-exclusive character range of the source; the node it wraps emits
+# exactly as usual, then one alias line binds its span-suffixed name to it,
+# and references go through the alias. In "(\x x) ((42))" the function is
+# :i::0,6 — the lambda eta-reduced to an identifier, still carrying the
+# span of "(\x x)"; the literal's lines bind 1, and 1::7,13 annotates it
+# with the span of "((42))" — the outer parens', the inner "(42)"'s having
+# lost to it; the application line binds 0 as usual, 0::0,13 spans the
+# whole source, and the root goes through that alias. "f (g h)" annotates
+# its three leaves and both applications by the same one rule.
 _to_string = \s compiler_emit_dag $ Option.get_or []
     $ Option.map (List.concat_map syntax_to_native)
     $ Option.bind _compiler_parse_spanned
     $ compiler_tokenize_positioned s
 "(\\x x) ((42))"
-# = 1 :i :t
+# = :i::0,6 :i
+#   1 :i :t
 #   1 :ct 1
 #   1 :k 1
 #   1 :ct 1
 #   1 :k 1
 #   1 :ct 1
 #   1 :k 1
-#   0::0,13 :i 1::7,13
+#   1::7,13 1
+#   0 :i::0,6 1::7,13
+#   0::0,13 0
 #   0::0,13
 "f (g h)"
-# = 1::2,7 g h
-#   0::0,7 f 1::2,7
+# = f::0,1 f
+#   g::3,4 g
+#   h::5,6 h
+#   1 g::3,4 h::5,6
+#   1::2,7 1
+#   0 f::0,1 1::2,7
+#   0::0,7 0
 #   0::0,7
