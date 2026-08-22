@@ -46,25 +46,44 @@ _decimal_digit = Memo.precompute_alt Memo.gen_ascii_low 0 Nat.sub_x_48
 # 0 the value table yields for bytes >= 64.
 _add_ten_x_digit = Memo.precompute_alt Memo.gen_ascii_low id (\c Nat.add_const (Nat.mul_const 10 (Nat.sub_x_48 c)))
 _gen_carry = Memo.gen_list Memo.gen_bool 7
-# The table entry for a carry IS the loop body for that carry: it matches the
-# next accumulator bit itself, with the output bit and follow-on carry for
-# either bit value baked in as constants. The step then threads only [self] and
-# the tail through its branches — most of a step's cost is the K/S churn of
-# distributing live variables through the compiled branches, so keeping the
-# carry and bit out of that traffic (they live in the table, not the loop)
-# matters more than the trie walk the lookup costs.
+# The table entry for a carry IS the loop body for that carry, and it consumes
+# TWO accumulator bits per iteration: the first bit selects between two baked
+# sub-bodies before the second bit is even uncovered, so no bit or carry is
+# ever threaded through a branch — most of a step's cost is the K/S churn of
+# distributing live variables through the compiled branches, and here only the
+# recursion knot and the remaining bits travel. Every output bit and follow-on
+# carry sits in the entry as a constant, and the carry-trie lookup is paid once
+# per two bits.
 _hundred_plus_tab = Memo.precompute_multi [_gen_carry] (\c
-    let (List.match false (\hd \_ hd) c) $ \o0
-    let (Nat.div2 c) $ \c0
-    let (Nat.add c 100) $ \s1
-    let (List.match false (\hd \_ hd) s1) $ \o1
-    let (Nat.div2 s1) $ \c1
+    let (List.match false (\hd \_ hd) c) $ \oF
+    let (Nat.div2 c) $ \mF
+    let (Nat.add c 100) $ \sT
+    let (List.match false (\hd \_ hd) sT) $ \oT
+    let (Nat.div2 sT) $ \mT
+    let (List.match false (\hd \_ hd) mF) $ \oFF
+    let (Nat.add mF 100) $ \sFT
+    let (List.match false (\hd \_ hd) sFT) $ \oFT
+    let (List.match false (\hd \_ hd) mT) $ \oTF
+    let (Nat.add mT 100) $ \sTT
+    let (List.match false (\hd \_ hd) sTT) $ \oTT
     \self \n List.match
       (\_self c)
-      (\hd \tl \self Bool.match
-          (\self \tl △ o0 (self self c0 tl))
-          (\self \tl △ o1 (self self c1 tl))
-          hd self tl)
+      (\b0 \t1 \self Bool.match
+          (\self \t1 List.match
+              (\_self △ oF mF)
+              (\b1 \t2 \self Bool.match
+                  (\self \t2 △ oF (△ oFF (self self (Nat.div2 mF) t2)))
+                  (\self \t2 △ oF (△ oFT (self self (Nat.div2 sFT) t2)))
+                  b1 self t2)
+              t1 self)
+          (\self \t1 List.match
+              (\_self △ oT mT)
+              (\b1 \t2 \self Bool.match
+                  (\self \t2 △ oT (△ oTF (self self (Nat.div2 mT) t2)))
+                  (\self \t2 △ oT (△ oTT (self self (Nat.div2 sTT) t2)))
+                  b1 self t2)
+              t1 self)
+          b0 self t1)
       n self)
 # 100 * n + carry, one pass over n's bits, low end first.
 _hundred_plus = \n \carry (self_apply $ \self \c \n _hundred_plus_tab c self n) carry n
