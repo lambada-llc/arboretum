@@ -754,22 +754,78 @@ _klower = self_apply $ \this \syntax
         this
 _syntax_to_native = \syntax Pair.snd (_klower syntax [])
 
-# ADT constructors and dispatchers are built straight at the annotation level —
-# the generator knows every De Bruijn index, so no names are compared at all,
-# and the output comes out in the same application-lean combinator style as
-# lowered user code (the closed-form recurrences this replaces spelled the same
-# functions with more indirections).
+# ADT constructors and dispatchers are the Kiselyov pass's own output on two
+# fixed families of shapes, so instead of running the machinery per
+# declaration, its answer is spelled out as closed forms of the variant count,
+# index and arities — byte-identical trees for a fraction of the lowering
+# work. The [_kctor_oracle]/[_kdispatch_oracle] grid tests near the end of
+# this file hold the closed forms to the machinery's answer, so a change to
+# the combiner's rules that alters its output fails the build here.
 # Constructor for variant i of n with k arguments: \a1..ak \c0..c_{n-1} c_i a⃗,
-# with c_{n-1} at index 0 … c_0 at n-1, and a_k at n … a_1 at n+k-1.
-_kctor = \i \n \k
+# with c_{n-1} at index 0 … c_0 at n-1, and a_k at n … a_1 at n+k-1. The
+# Kiselyov pass's output on this shape is a closed form of (i, n, k), so it is
+# spelled out here instead of run: the spine folds to
+#   d_0 = :i,  d_j = (:b^(j-1) :c) d_(j-1)
+# (each further argument routes through one more :b-lifted :c), and the
+# binders that follow contribute, innermost first, n-1-i weakenings
+# (:b^(k+1) :k) for the constructor arms below c_i, nothing for the used
+# binders, and i weakenings (:b^k :k) for the arms above — where :b^p x is
+# p-fold application of :b. The k = 0 selectors feel the combiner's eta cuts
+# and come out as :i or a :k chain instead. [_kctor_oracle] below holds the
+# machinery to the same answer over a grid of shapes.
+_kbn = \p \x Fn.pow p (Native_app nativeB) x
+_kctor_dchain = fix $ \self \j Nat.match nativeI (\jp Native_app (_kbn jp nativeC) (self jp)) j
+_kctor = \i \n \k Nat.match
+    (\i \n \_k let (Nat.sub (Nat.pred n) i) $ \m0
+        Fn.pow i (Native_app nativeK) $ Nat.match
+            nativeI
+            (\m0p Fn.pow m0p (Native_app (Native_app nativeB nativeK)) nativeK)
+            m0)
+    (\_kp \i \n \k
+        Fn.pow i (Native_app (_kbn k nativeK)) $
+        Fn.pow (Nat.sub (Nat.pred n) i) (Native_app (_kbn (Nat.succ k) nativeK)) $
+        _kctor_dchain k)
+    k i n k
+_kctor_oracle = \i \n \k
     let (List.foldl (\acc \idx _kapp acc (_kvarn idx))
          (_kvarn (Nat.sub (Nat.pred n) i))
          (List.map (Nat.add n) (List.reverse (List.range k)))) $ \spine
     Pair.snd (Fn.pow (Nat.add n k) _kabs spine)
 # Dispatcher for variant [index]: \f \alt \x  x b_0..b_{n-1} with b_i = f and
-# b_j = \y1..y_mj alt — at the spine, x is index 0, alt 1, f 2; inside a
-# dropped branch with m binders, alt is index m+1.
+# b_j = \y1..y_mj alt. This too is the Kiselyov pass's output spelled as a
+# closed form: folding the spine steps a four-state machine over which of x,
+# alt and f the accumulator mentions so far — just x, then x+alt, x+f, or all
+# three — and the state and branch kind (the hit f, or a miss of arity m
+# dropping to alt through [_kdrop m]) determine the exact combinator wrap,
+# eta cuts included. [_kdispatch_oracle] holds the machinery to the same
+# answer over a grid of shapes.
+_kdrop = \m Nat.match nativeI (\mp Fn.pow mp (Native_app (Native_app nativeB nativeK)) nativeK) m
+_kbc = \d Native_app (Native_app nativeB nativeC) d
+_kS1 = \a \b \c \d a
+_kS2 = \a \b \c \d b
+_kS3 = \a \b \c \d c
+_kS4 = \a \b \c \d d
 _kdispatch = \index \items
+    Pair.let (List.foldl (\st \item Pair.let st $ \state \d Bool.match
+        (\item \state \d
+            let (List.length (Pair.snd (Pair.fst item))) $ \m
+            let (_kdrop m) $ \dr
+            state
+              (\d \dr \m △ _kS2 (Nat.match (\_dr _kT) (\_mp \dr Native_app (Native_app nativeB _kT) dr) m dr))
+              (\d \dr \m △ _kS2 (Native_app (Native_app nativeS (_kbc d)) dr))
+              (\d \dr \m △ _kS4 (Nat.match (\_dr \d _kbc d) (\_mp \dr \d Native_app (Native_app _kR dr) (Native_app (Native_app nativeB nativeB) (_kbc d))) m dr d))
+              (\d \dr \m △ _kS4 (Native_app (Native_app _kR dr) (Native_app (Native_app nativeB nativeS) (Native_app (Native_app nativeB (Native_app nativeB nativeC)) d))))
+              d dr m)
+        (\_item \state \d state
+              (\d △ _kS3 _kT)
+              (\d △ _kS4 (Native_app nativeC (_kbc d)))
+              (\d △ _kS3 (Native_app (Native_app nativeS (_kbc d)) nativeI))
+              (\d △ _kS4 (Native_app (Native_app nativeS (_kbc (Native_app (Native_app nativeB (Native_app nativeB nativeC)) d))) nativeI))
+              d)
+        (equal index (Pair.snd item)) item state d)
+      (△ _kS1 nativeI) items) $ \state \d
+    state _ _ (Native_app (Native_app nativeB nativeK) d) d
+_kdispatch_oracle = \index \items
     let (List.foldl (\acc \item _kapp acc (Bool.match
             (\item let (List.length (Pair.snd (Pair.fst item))) $ \m
                 Fn.pow m _kabs (_kvarn (Nat.succ m)))
@@ -941,7 +997,7 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 5901
 #   Parse:    2430
-#   Lower:    38977
+#   Lower:    12164
 #   Emit:     31306
 
 # Abstraction over an application spine, which used to be exponential in how
@@ -1054,6 +1110,23 @@ let (compile "N0 = Z | S x") $ \env Map.pmap_get "Z_Dispatch" env 7 0 (Map.pmap_
 # = 7
 let (compile "N0 = Z | S x") $ \env Map.pmap_get "S_Dispatch" env (\v v) 0 (Map.pmap_get "S" env 3)
 # = 3
+
+# The hardcoded constructor form is held to the abstraction machinery's own
+# answer over every shape up to four variants and three arguments.
+_to_string = Bool.to_source
+List.all (\t Pair.let t $ \inn \k Pair.let inn $ \i \n equal (_kctor i n k) (_kctor_oracle i n k))
+    (List.concat_map (\n List.concat_map (\i List.map (\k △ (△ i n) k) (List.range 4)) (List.range n)) (List.map Nat.succ (List.range 4)))
+# = true
+# And the hardcoded dispatcher, over every combination of up to three variants
+# with arities up to two and every hit position.
+_arity_vectors = fix $ \self \n Nat.match [[]] (\np List.concat_map (\v List.map (\m △ m v) [0; 1; 2]) (self np)) n
+List.all (\case Pair.let case $ \index \items equal (_kdispatch index items) (_kdispatch_oracle index items))
+    (List.concat_map (\n List.concat_map (\arities List.map
+            (\index △ index (List.mapi (\m \j △ (△ "N" (List.repeat m "y")) j) arities))
+            (List.range n))
+        (_arity_vectors n))
+      (List.map Nat.succ (List.range 3)))
+# = true
 
 # Map literals lower to Map.set over the empty map, so what comes back is a
 # prefix map; a key with no ': value' takes Syntax_const_null, which is △.
