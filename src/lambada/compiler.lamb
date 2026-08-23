@@ -1120,8 +1120,7 @@ _to_string = Nat.to_source
 compile "123"
 # = 123
 # Comments disappear at tokenize time; the parser never sees them.
-compile "# a comment
-42 # another"
+compile "# a comment\n42 # another"
 # = 42
 
 _to_string = List.to_source Nat.to_source
