@@ -10,7 +10,7 @@ Lambada.compile_to_dag_bench "Nat.add"
 #   Emit:     102
 
 Lambada.compile_to_dag_bench "42"
-# = Tokenize: 633
+# = Tokenize: 464
 #   Parse:    523
 #   Lower:    212
 #   Emit:     768
@@ -36,7 +36,7 @@ Lambada.compile_to_dag_bench "(x)"
 #   Lower:    248
 #   Emit:     90
 Lambada.compile_to_dag_bench "[1, 2]"
-# = Tokenize: 1278
+# = Tokenize: 1282
 #   Parse:    2205
 #   Lower:    1120
 #   Emit:     2400

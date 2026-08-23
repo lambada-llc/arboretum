@@ -4,8 +4,8 @@
 # costs is dominated by walking the accumulator's bits once per digit — the
 # quadratic term of parsing a literal. Taking digits in *pairs* instead,
 # acc := 100*acc + (10*d1 + d2), halves how many times the accumulator is
-# walked, and that is the whole game: the per-block digit arithmetic (two table
-# lookups and one short add) is noise next to a walk of the accumulator.
+# walked, and that is the whole game: the per-block digit arithmetic (three short
+# table lookups) is noise next to a walk of the accumulator.
 #
 # The walk itself carries the value still owed at the current position: the
 # amount pending at a bit is [carry + 100*bit], of which the low bit is the
@@ -27,8 +27,8 @@
 # removed because ~167k nodes of build per module load cost more than the walk
 # it saved. Don't bring it back. The per-carry table here is different: carries
 # are bounded by the radix whatever the literal, and its entries share their
-# structure, so the exported compiler grows by ~5% while the recorded [size]
-# (which unfolds that sharing) grows much more.
+# structure, so both tables together add ~0.1% to the compiled bundle while the
+# recorded [size] (which unfolds that sharing) grows much more.
 #
 # Non-digit characters below 64 contribute their [Nat.sub_x_48] value, chars
 # >= 64 contribute 0 — callers only pass digit characters.
@@ -39,24 +39,26 @@
 # [gen_list]). Keeping it separate makes the file-level dependency graph acyclic
 # (nat -> memo -> from_string) instead of forming a Nat <-> Memo cycle.
 _decimal_digit = Memo.precompute_alt Memo.gen_ascii_low 0 Nat.sub_x_48
-# A block's high digit becomes an [add_const]-specialized adder for 10*d,
-# straight from the character: the general [Nat.add] costs ~200 reductions even
-# on tiny operands (zip, 3-bit table, carry fold), while the unrolled chain adds
-# 10*d1 to d2 in a handful. The fallback adder [id] contributes 0, matching the
-# 0 the value table yields for bytes >= 64.
-_add_ten_x_digit = Memo.precompute_alt Memo.gen_ascii_low id (\c Nat.add_const (Nat.mul_const 10 (Nat.sub_x_48 c)))
+# A block's value 10*d1 + d2 comes out of a 16x16 table keyed by the two
+# digits' bit lists — an [add_const]-chain adder was measured at 116-220
+# steps depending on the digit, while two digit conversions and a short trie
+# walk cost ~50, less for small digits whose keys are shorter.
+_pair_val_tab = Memo.precompute_multi [Memo.gen_list Memo.gen_bool 4; Memo.gen_list Memo.gen_bool 4] (\d1 \d2 Nat.add (Nat.mul_const 10 d1) d2)
+_pair_val = \c1 \c2 _pair_val_tab (_decimal_digit c1) (_decimal_digit c2)
 _gen_carry = Memo.gen_list Memo.gen_bool 7
 # The table entry for a carry IS the loop body for that carry, and it consumes
-# THREE accumulator bits per iteration: each bit selects between baked
-# sub-bodies before the next is even uncovered, so no bit or carry is ever
-# threaded through a branch — most of a step's cost is the K/S churn of
-# distributing live variables through the compiled branches, and here only the
-# recursion knot and the remaining bits travel. Every output bit and follow-on
-# carry sits in the entry as a constant, and the carry-trie lookup is paid once
-# per three bits. (A fourth bit per entry would amortize only the ~20-step
-# lookup further — the per-bit match and threading dominate now — for another
-# doubling of the table. Diminishing.)
-_hundred_plus_tab = Memo.precompute_multi [_gen_carry] (\c
+# THREE accumulator bits per iteration as one prebuilt triage tree: the cons
+# dispatch and the bit dispatch are stored eliminator values whose cases are
+# the next level down, so a bit costs two native triage rules and two
+# applications — nothing is matched with a combinator built on the spot, and
+# no head, div2 or output cons is ever computed at run time. Every output-bit
+# spine, follow-on carry and eliminator sits in the entry as a constant; the
+# carry-trie lookup is paid at most once per three bits — see the chained
+# table below. A level's value takes
+# (tail, self): triage on the tail either finishes on the exhausted
+# accumulator (absorbing self) or lands the bit eliminator on the head bit,
+# whose selected case takes the remaining tail and the knot.
+_hp_entry = \leaf \c
     let (Nat.add c 100) $ \cT
     let (List.match false (\hd \_ hd) c)  $ \o_F
     let (List.match false (\hd \_ hd) cT) $ \o_T
@@ -64,54 +66,76 @@ _hundred_plus_tab = Memo.precompute_multi [_gen_carry] (\c
     let (Nat.div2 cT) $ \m_T
     let (Nat.add m_F 100) $ \sFT
     let (Nat.add m_T 100) $ \sTT
-    # [tail2 o0 o1 m2] is the walk branch that has already consumed two bits
-    # producing o0 and o1, with m2 pending: it finishes on an exhausted
-    # accumulator or consumes a third bit with both outcomes baked.
+    # [tail2 o0 o1 m2] is the level that has consumed two bits producing o0
+    # and o1, with m2 pending.
     let (\o0 \o1 \m2
         let (Nat.add m2 100) $ \s2
-        let (\_self △ o0 (△ o1 m2)) $ \fin
-        let (\b2 \t3 \self Bool.match
-            (\self \t3 △ o0 (△ o1 (△ (List.match false (\hd \_ hd) m2) (self self (Nat.div2 m2) t3))))
-            (\self \t3 △ o0 (△ o1 (△ (List.match false (\hd \_ hd) s2) (self self (Nat.div2 s2) t3))))
-            b2 self t3) $ \go
-        \self \t2 List.match fin go t2 self) $ \tail2
+        let (List.match false (\hd \_ hd) m2) $ \h2F
+        let (List.match false (\hd \_ hd) s2) $ \h2T
+        let (Nat.div2 m2) $ \m3F
+        let (Nat.div2 s2) $ \m3T
+        let (\r △ o0 (△ o1 (△ h2F r))) $ \outF
+        let (\r △ o0 (△ o1 (△ h2T r))) $ \outT
+        triage (\_self △ o0 (△ o1 m2))
+               _
+               (triage (leaf outF m3F)
+                       (\_ leaf outT m3T)
+                       _)) $ \tail2
     let (tail2 o_F (List.match false (\hd \_ hd) m_F) (Nat.div2 m_F)) $ \t_FF
     let (tail2 o_F (List.match false (\hd \_ hd) sFT) (Nat.div2 sFT)) $ \t_FT
     let (tail2 o_T (List.match false (\hd \_ hd) m_T) (Nat.div2 m_T)) $ \t_TF
     let (tail2 o_T (List.match false (\hd \_ hd) sTT) (Nat.div2 sTT)) $ \t_TT
-    \self \n List.match
-      (\_self c)
-      (\b0 \t1 \self Bool.match
-          (\self \t1 List.match
-              (\_self △ o_F m_F)
-              (\b1 \t2 \self Bool.match t_FF t_FT b1 self t2)
-              t1 self)
-          (\self \t1 List.match
-              (\_self △ o_T m_T)
-              (\b1 \t2 \self Bool.match t_TF t_TT b1 self t2)
-              t1 self)
-          b0 self t1)
-      n self)
+    let (triage (\_self △ o_F m_F) _ (triage t_FF (\_ t_FT) _)) $ \lvl1F
+    let (triage (\_self △ o_T m_T) _ (triage t_TF (\_ t_TT) _)) $ \lvl1T
+    triage (\_self c)
+           _
+           (triage lvl1F (\_ lvl1T) _)
+# A level's leaf continues the walk at a baked follow-on carry. The base
+# table's leaves continue by looking the carry up in the table threaded as
+# the knot — the chained trie itself — while the chained table's leaves embed
+# the base table's entry for their follow-on carry directly, so the walk
+# alternates chained and base entries and pays one lookup per SIX bits.
+#
+# Everything from here down references each heavy value exactly once: the
+# recorded unfolded [size] of the conversion multiplies every reference, so
+# knots thread the table (and [_pairs] its step) as arguments instead of
+# capturing them, and the parity branches receive the fold rather than each
+# embedding it. At run time an argument is a pointer like any other; in the
+# unfolded tree it is the difference between the chained table appearing
+# once and appearing eight times.
+_hundred_plus_tab = Memo.precompute_multi [_gen_carry] (_hp_entry (\out \m \t \tab out (tab m t tab)))
+_hundred_plus_tab2 = Memo.precompute_multi [_gen_carry] (_hp_entry (\out \m let (_hundred_plus_tab m) $ \nx \t \tab out (nx t tab)))
 # 100 * n + carry, one pass over n's bits, low end first.
-_hundred_plus = \n \carry (self_apply $ \self \c \n _hundred_plus_tab c self n) carry n
-_pair_step = \acc \c1 \c2 _hundred_plus acc (_add_ten_x_digit c1 (_decimal_digit c2))
-# The list is even-length by construction, so the inner match's nil branch is
-# never taken.
-_pairs = self_apply $ \self \acc \l List.match
-    (\_self \acc acc)
-    (\c1 \r1 \self \acc List.match _
-        (\c2 \r2 \self \acc \c1 self self (_pair_step acc c1 c2) r2)
-        r1 self acc c1)
-    l self acc
+_hundred_plus = \n \carry (\tab tab carry n tab) _hundred_plus_tab2
+_pair_step = \acc \c1 \c2 _hundred_plus acc (_pair_val c1 c2)
+# The fold over digit pairs, as prebuilt eliminators like the walk's table
+# entries: the two cons dispatches are stored triage values, the data flows
+# in before the loop state, and the head character is reordered early so the
+# outer branch is two lambdas and nothing is rebuilt or threaded through a
+# deep body per iteration. The inner nil branch is never taken — the list is
+# even-length by construction. The knot IS the outer eliminator, applied
+# straight to the remaining list.
+_pelim2 = triage _ _ (\c2 \r2 \c1 \self \step \acc self r2 self step (step acc c1 c2))
+_pelim1 = triage (\_self \_step \acc acc) _ (\c1 \r1 _pelim2 r1 c1)
 _odd_len = self_apply $ \self \l List.match
     (\_self false)
     (\_ \t \self List.match true (\_ \t2 self self t2) t)
     l self
-# Both parity branches are functions of [s], so only the selected one runs.
-from_string__fastest = \s Bool.match
-    (_pairs 0)
-    (List.match 0 (\c1 \r _pairs (_decimal_digit c1) r))
-    (_odd_len s) s
+# Both parity branches take the pair step and then the string, so only the
+# selected one runs and only the dispatch in [from_string__fastest] embeds
+# the step; their seeding eliminators are prebuilt like the fold's, and both
+# enter the fold's eliminator directly once seeded. The even branch seeds
+# the accumulator from the first digit pair — its value IS the accumulator,
+# so the walk over a zero accumulator that a zero seed would cost is never
+# taken — and a lone digit is just its own conversion, no fold at all.
+_elim_e2 = triage (\_step 0) _ (\c2 \r2 \c1 \step _pelim1 r2 _pelim1 step (_pair_val c1 c2))
+_elim_e1 = triage (\_step 0) _ (\c1 \r1 _elim_e2 r1 c1)
+_elim_o2 = triage (\c1 \_step _decimal_digit c1) _ (\c2 \r2 \c1 \step _pelim1 (△ c2 r2) _pelim1 step (_decimal_digit c1))
+_elim_o  = triage (\_step 0) _ (\c1 \r _elim_o2 r c1)
+_from_even = \step \s _elim_e1 s step
+_from_odd  = \step \s _elim_o s step
+_parity = triage _from_even (\_ _from_odd) _
+from_string__fastest = \s _parity (_odd_len s) _pair_step s
 
 _to_string = Nat.to_source
 from_string__fastest "0"
@@ -128,3 +152,4 @@ from_string__fastest "007"
 # = 7
 from_string__fastest "1000000"
 # = 1000000
+
