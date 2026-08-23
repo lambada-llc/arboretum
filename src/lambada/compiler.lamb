@@ -986,19 +986,19 @@ compile_to_dag_bench "x"
 #   Emit:     90
 
 compile_to_dag_bench "42"
-# = Tokenize: 645
+# = Tokenize: 464
 #   Parse:    523
 #   Lower:    212
 #   Emit:     768
 
 compile_to_dag_bench "1337"
-# = Tokenize: 1243
+# = Tokenize: 943
 #   Parse:    523
 #   Lower:    212
 #   Emit:     1029
 
 compile_to_dag_bench "[42]"
-# = Tokenize: 1084
+# = Tokenize: 903
 #   Parse:    1493
 #   Lower:    760
 #   Emit:     1414
@@ -1010,7 +1010,7 @@ compile_to_dag_bench "\\x x"
 #   Emit:     92
 
 compile_to_dag_bench "x = 42"
-# = Tokenize: 1242
+# = Tokenize: 1061
 #   Parse:    1190
 #   Lower:    331
 #   Emit:     848
@@ -1074,7 +1074,7 @@ compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 # worth ~4x here on top of the table-driven pass that replaced two traversals
 # and a multiply per digit.
 compile_to_dag_bench $ List.repeat 100 '1'
-# = Tokenize: 122738
+# = Tokenize: 104772
 #   Parse:    523
 #   Lower:    212
 #   Emit:     17433
