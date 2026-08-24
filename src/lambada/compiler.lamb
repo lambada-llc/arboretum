@@ -796,7 +796,13 @@ _klkW = triage _ _ (\g \d △ (△ false g) d)
 _klkMiss = \es \name \self _klkW (self es name self)
 _klkE = triage (\name \_self △ [] (_kdleaf name)) _
     (\recs \es \name \self triage _klkMiss (\_ (\_es \_name \_self _kvar0)) _ (_krrE recs name _krrE) es name self)
-_klookup = \name \env _klkE env name _klkE
+# Level zero is unrolled so the empty environment — every identifier of
+# every top-level expression — never routes the recursion knot it will not
+# use.
+_klkMiss0 = \es \name _klkW (_klkE es name _klkE)
+_klkE0 = triage (\name △ [] (_kdleaf name)) _
+    (\recs \es \name triage _klkMiss0 (\_ (\_es \_name _kvar0)) _ (_krrE recs name _krrE) es name)
+_klookup = \name \env _klkE0 env name
 _knilT = △ [] (_kdleaf ":t")
 _knilMapSet = △ [] (_kdleaf "Map.set")
 _klower = self_apply $ \this \syntax
@@ -1039,7 +1045,7 @@ compile_to_dag_bench "[42]"
 compile_to_dag_bench "\\x x"
 # = Tokenize: 982
 #   Parse:    802
-#   Lower:    754
+#   Lower:    735
 #   Emit:     92
 
 compile_to_dag_bench "x = 42"
@@ -1051,7 +1057,7 @@ compile_to_dag_bench "x = 42"
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
 # = Tokenize: 19247
 #   Parse:    20111
-#   Lower:    9725
+#   Lower:    9137
 #   Emit:     10588
 
 # An ADT declaration: two variants, each emitting a constructor and a
@@ -1083,7 +1089,7 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 # = Tokenize: 6491
 #   Parse:    5665
-#   Lower:    17155
+#   Lower:    16830
 #   Emit:     17673
 
 # Literal size. A string literal is linear in both directions: a fixed ~75
