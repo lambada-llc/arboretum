@@ -1,63 +1,63 @@
 Lambada.compile_to_dag_bench "foo bar"
-# = Tokenize: 1330
-#   Parse:    1111
-#   Lower:    867
+# = Tokenize: 1240
+#   Parse:    716
+#   Lower:    795
 #   Emit:     366
 Lambada.compile_to_dag_bench "Nat.add"
-# = Tokenize: 1349
-#   Parse:    672
+# = Tokenize: 1260
+#   Parse:    323
 #   Lower:    422
 #   Emit:     102
 
 Lambada.compile_to_dag_bench "42"
-# = Tokenize: 633
-#   Parse:    523
+# = Tokenize: 562
+#   Parse:    180
 #   Lower:    212
-#   Emit:     768
+#   Emit:     704
 Lambada.compile_to_dag_bench "'a'"
-# = Tokenize: 322
-#   Parse:    523
+# = Tokenize: 251
+#   Parse:    180
 #   Lower:    212
-#   Emit:     816
+#   Emit:     762
 Lambada.compile_to_dag_bench ['"'; 'h'; 'i'; '"']
-# = Tokenize: 719
-#   Parse:    535
+# = Tokenize: 646
+#   Parse:    187
 #   Lower:    204
-#   Emit:     2598
+#   Emit:     2580
 
 Lambada.compile_to_dag_bench "\\x x"
-# = Tokenize: 837
-#   Parse:    1345
-#   Lower:    1435
+# = Tokenize: 755
+#   Parse:    641
+#   Lower:    1373
 #   Emit:     92
 Lambada.compile_to_dag_bench "(x)"
-# = Tokenize: 714
-#   Parse:    1526
+# = Tokenize: 634
+#   Parse:    914
 #   Lower:    248
 #   Emit:     90
 Lambada.compile_to_dag_bench "[1, 2]"
-# = Tokenize: 1278
-#   Parse:    2205
-#   Lower:    1120
-#   Emit:     2400
+# = Tokenize: 1185
+#   Parse:    1349
+#   Lower:    1046
+#   Emit:     2182
 Lambada.compile_to_dag_bench "{a: b}"
-# = Tokenize: 1275
-#   Parse:    2721
-#   Lower:    1128
+# = Tokenize: 1184
+#   Parse:    1843
+#   Lower:    1056
 #   Emit:     908
 
 Lambada.compile_to_dag_bench "x = y"
-# = Tokenize: 904
-#   Parse:    1339
+# = Tokenize: 817
+#   Parse:    658
 #   Lower:    372
 #   Emit:     170
 Lambada.compile_to_dag_bench "f $ x"
-# = Tokenize: 892
-#   Parse:    1530
-#   Lower:    751
+# = Tokenize: 805
+#   Parse:    921
+#   Lower:    679
 #   Emit:     358
 Lambada.compile_to_dag_bench "# note"
-# = Tokenize: 594
-#   Parse:    194
+# = Tokenize: 301
+#   Parse:    45
 #   Lower:    33
 #   Emit:     13
