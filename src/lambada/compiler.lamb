@@ -45,10 +45,7 @@ Bench.run [is_alpha_char; '3']
 # instead of a lookup producing a bool that a second dispatch then routes. The
 # two branches are shared closures (the character is threaded, not baked), so
 # the table is two leaves' worth of structure. [alt] plays the classifier
-# table's fallback role for bytes >= 128. (A stored-triage loop with the cons
-# in a separate eliminator was measured at +14 per character — the extra
-# routing of the head through the cons case loses to [Pair.match]'s closure,
-# which hash-consing already builds only once. Don't retry.)
+# table's fallback role for bytes >= 128.
 _scan_stop = \h \self \t △ [] (△ h t)
 _scan_go = \h \self \t Pair.match (\taken \rest △ (△ h taken) rest) (self self t)
 _mk_scanner = \alt \pred
@@ -58,7 +55,6 @@ _mk_scanner = \alt \pred
         (\h \t \self tab h h self t)
         l self
 
-parse_whitespace = _mk_scanner false Char.is_whitespace
 _scan_digits = _mk_scanner false Char.is_digit
 parse_nat = Parser.map Nat.from_string__fastest $ Parser.seq_pair Parser.one _scan_digits
 
@@ -90,13 +86,14 @@ schar_eq =
   let (\s s 0 1 2 3 4 5 6 7 8 9 10 11) $ \id
   \a \b equal (id a) (id b)
 
-# tokens
+# tokens. Comments are not among them: a comment is gap text, skipped where
+# whitespace is (see the gap dispatch below), so it never becomes data that
+# every later phase then pays to dispatch on and filter out.
 Token = Token_special_char schar     # schar
       | Token_identifier name        # string
       | Token_identifier_adt name    # string
       | Token_const_str value escapes # string nat
       | Token_const_nat value        # nat
-      | Token_comment value          # string
 
 # First character of [name]'s last '.'-separated segment (uppercase here marks an
 # ADT name). [cand] holds the current segment's first character; each '.' promotes
@@ -109,7 +106,10 @@ Token = Token_special_char schar     # schar
 # (A fused one-pass scanner that tracked [cand] during the take_while walk was
 # measured and loses ~2.5x: the extra per-character state threads through every
 # branch closure and the K-rule churn of distributing-then-discarding it costs
-# more than the second walk. Don't retry.)
+# more than the second walk. A stateless rescan — probe for the first dot
+# with only the knot and tail threaded, restart per segment — wins ~50/char
+# on long dotted names but loses ~40 flat on the 1-character identifiers
+# that dominate real programs. All measured; don't retry.)
 _is_dot = Memo.precompute_alt Memo.gen_ascii_low false (equal_const '.')
 # The walk is stored triage eliminators with the knot threaded last: a
 # character costs the dot lookup, one rule on its answer, and the continue
@@ -132,7 +132,7 @@ _parse_identifier_token = List.match Parser.fail_result $ \c \rest
 _to_string = id
 Bench.run [_parse_identifier_token; "compiler_tokenize"]
 # = oh |  0a  0b   1   2  3a  3b  3c | alc  red
-#   85 | 409 518 865 880 251 134 282 | 927 2412
+#   85 | 409 517 864 879 251 134 282 | 926 2410
 
 parse_char_map = \map List.match Parser.fail_result $ \head \tail Option.match Parser.fail_result (\v Parser.return v tail) $ Map.to_func map head
 
@@ -185,14 +185,13 @@ _parse_str_body = fix $ \self Parser.compose_dep _scan_str_chars $ \chunk \rest
             (\chunk \rest \tl \self Parser.return (△ chunk 0) rest)
             (_is_quot c) chunk rest tl self
     ) rest
-# The first-char dispatch only routes here once the opening delimiter (or '#')
-# has already matched, so the opener is consumed with [one] rather than checked
+# The first-char dispatch only routes here once the opening delimiter has
+# already matched, so the opener is consumed with [one] rather than checked
 # a second time. The closing-delimiter satisfy stays — it is a real check.
 parse_str  = Parser.map (Pair.match Token_const_str) (Parser.seq_snd Parser.one (Parser.seq_fst _parse_str_body (Parser.satisfy _is_quot)))
 _is_quot = equal_const '''
 parse_char  = Parser.map Token_const_nat (Parser.seq_snd Parser.one (Parser.seq_fst Parser.one (Parser.satisfy _is_quot)))
 parse_nat  = Parser.map Token_const_nat parse_nat
-parse_comment = Parser.map Token_comment (Parser.seq_snd Parser.one (_mk_scanner true (Fn.p_not Char.is_newline)))
 
 # Pick the value of the first (predicate, value) pair whose predicate accepts [x],
 # falling back to [default] when none match.
@@ -211,42 +210,37 @@ _parse_token_dispatch = Memo.precompute_alt Memo.gen_ascii _parse_identifier_tok
     ; △ is_digit_char     parse_nat
     ; △ (equal_const '"') parse_str
     ; △ (equal_const ''') parse_char
-    ; △ (equal_const '#') parse_comment
     ]
 
-# Strip only *leading* whitespace per token; the trailing whitespace of each gap
-# is then consumed as the next token's leading whitespace (productive), instead of
-# scanning every gap twice. A single trailing strip in compiler_tokenize handles
-# whitespace after the final token. Skipping and dispatching are one loop: each
-# gap character costs a table lookup and a step, with no take_while pair or
-# seq_snd plumbing around it.
-parse_token = self_apply $ \self \input List.match
-    (\_self Parser.fail_result)
-    (\c \rest \self Bool.match
-        (\_self \c \rest _parse_token_dispatch c (△ c rest))
-        (\self \_c \rest self self rest)
-        (is_whitespace_char c) self c rest)
+# Drop the remainder of a comment: everything to the newline goes, the newline
+# itself included (one more gap character either way).
+_skip_comment =
+    let (Memo.precompute_alt Memo.gen_ascii_low (\self \t self self t) (\c Bool.match (\self \t self self t) (\_self \t t) (Char.is_newline c))) $ \tab
+    self_apply $ \self \l List.match (\_self []) (\h \t \self tab h self t) l self
+
+# The tokenizer is one loop over the input: each character costs a single
+# trie walk that lands directly in the branch to run — whitespace skips,
+# a comment opener drops the rest of its line, a token start runs the one
+# sub-parser that can match and conses its token onto the loop's own result.
+# Gap text is stripped where it stands, never scanned twice, and the loop's
+# base cases make the all-or-nothing contract structural: end of input is
+# [some] of the tokens, a failed token is [none] — no [many] wrapper or
+# final consumed-it-all check around it.
+_is_hash = equal_const '#'
+_tok_token = \self \c \rest Parser.match_result none
+    (\tok \rest2 Option.map (△ tok) (self self rest2))
+    (_parse_token_dispatch c (△ c rest))
+_tok_dispatch = Memo.precompute_alt Memo.gen_ascii _tok_token $ \c
+    Bool.match
+      (Bool.match _tok_token (\self \_c \rest self self (_skip_comment rest)) (_is_hash c))
+      (\self \_c \rest self self rest)
+      (is_whitespace_char c)
+
+# str => Token list option
+compiler_tokenize = self_apply $ \self \input List.match
+    (\_self some [])
+    (\c \rest \self _tok_dispatch c self c rest)
     input self
-
-
-# str => Token list option. A bespoke loop with narrow eliminator cases: a
-# comment token is dropped the moment it is parsed — nothing downstream
-# consumes one, so the parser no longer pays a filtering pass over every
-# token of every program. The positioned tokenizer below keeps the
-# combinator pipeline and its comment tokens: position annotation re-walks
-# the source, so every source construct must still appear in its token list.
-_tk_cons = triage _ _ (\list \rem \tok △ (△ tok list) rem)
-_tk_keep = \tok \rest \os _tk_cons (os os rest) tok
-_tk_skip = \_v \_tok \rest \os os os rest
-_tk_res = triage
-    (\_os \toks △ [] toks)
-    _
-    (\tok \rest \os \_toks Token_comment_Dispatch _tk_skip _tk_keep tok tok rest os)
-_tokloop = \os \toks _tk_res (parse_token toks) os toks
-_tk_fin2 = triage _ _ (\_ws \rem2 \list List.match Option.some (\_h \_t \_list Option.none) rem2 list)
-_tk_fin = triage _ _ (\list \rem _tk_fin2 (parse_whitespace rem) list)
-compiler_tokenize = \s _tk_fin (_tokloop _tokloop s)
-_tokenize_with_comments = Parser.value_if_consumed $ Parser.seq_fst (Parser.many parse_token) parse_whitespace
 
 # Position tracking for tokens
 _token_text_len = \tok tok
@@ -255,9 +249,19 @@ _token_text_len = \tok tok
     (\name List.length name)
     (\value \escapes Nat.add escapes $ Nat.add 2 $ List.length value)
     (\value List.length $ Nat.to_string value)
-    (\value Nat.succ $ List.length value)
 
-_count_leading_ws = fix $ \self List.match 0 (\h \t Bool.match 0 (Nat.succ (self t)) (is_whitespace_char h))
+# The gap between tokens is whitespace and comments — the same classes the
+# tokenizer's gap dispatch skips — so counting it walks the same three-way
+# split: a comment contributes its '#', its body, and continues at the
+# newline, which is counted as the whitespace it is.
+_count_leading_ws = fix $ \self List.match 0 (\h \t
+    Bool.match
+      (\t Bool.match
+        (\_t 0)
+        (\t Pair.match (\body \rest Nat.succ $ Nat.add (List.length body) (self rest)) (List.span (Fn.p_not Char.is_newline) t))
+        (_is_hash h) t)
+      (\t Nat.succ (self t))
+      (is_whitespace_char h) t)
 
 _annotate_positions = fix $ \self \pos \str \tokens List.match [] (\tok \rest
     let (_count_leading_ws str) $ \ws
@@ -267,7 +271,7 @@ _annotate_positions = fix $ \self \pos \str \tokens List.match [] (\tok \rest
     △ (△ (△ start end) tok) (self end (List.drop (Nat.add ws len) str) rest)
   ) tokens
 
-compiler_tokenize_positioned = \s Option.map (_annotate_positions 0 s) $ _tokenize_with_comments s
+compiler_tokenize_positioned = \s Option.map (_annotate_positions 0 s) $ compiler_tokenize s
 
 
 Syntax_tree = Syntax_identifier name                        # string
@@ -290,6 +294,15 @@ Syntax_tree = Syntax_identifier name                        # string
 # [cp head tail]. Consume the head token directly instead, skipping that round-trip.
 _one_then = List.match Parser.fail_result
 
+parse_abs_tail = \e
+    _one_then
+        (Token_identifier_Dispatch
+            (\literal Parser.map
+                (\rese Syntax_abs literal rese)
+                e
+            )
+            Parser.fail)
+
 # Each caller knows the expected special char statically, so match the parsed schar
 # with that constructor's *_Dispatch — a single elimination — instead of mapping
 # both schars to indices and comparing them via [schar_eq].
@@ -311,7 +324,6 @@ parse_separator = parse_schar Schar_separator_Dispatch
 parse_colon = parse_schar Schar_colon_Dispatch
 parse_equals = parse_schar Schar_equals_Dispatch
 parse_pipe = parse_schar Schar_pipe_Dispatch
-parse_dollar = parse_schar Schar_dollar_Dispatch
 
 
 parse_list_tail = \e Parser.seq_fst
@@ -345,109 +357,104 @@ parse_map_tail = \e Parser.seq_fst
                     )
                     (Parser.either parse_curly_close (Parser.seq_fst parse_separator parse_curly_close))
 
+# (Replacing the assignment lookahead with a next-token peek that dispatches
+# straight on Schar_equals was measured and loses ~2.5x on a bare identifier:
+# the nested dispatch closures put the recursive parser and the identifier
+# many lambda layers deep, and distributing them through those layers costs
+# more than the failed equals-parse ever did — which short-circuits at its
+# first List.match anyway. Don't retry.)
+parse_assign_tail = \literal \e Parser.map
+                        (\body Syntax_assignment literal body)
+                        (Parser.seq_snd parse_equals e)
+
 parse_adt_variant = Parser.seq_pair
                             parse_identifier_adt
                             (Parser.many parse_identifier)
+parse_adt_tail = \literal \e Parser.map
+                        (\list Syntax_adt literal list)
+                        (Parser.seq_snd
+                            parse_equals
+                            (Parser.seq_pair
+                              parse_adt_variant
+                              (Parser.many (Parser.seq_snd parse_pipe parse_adt_variant))))
 
-# The expression parser is hand-rolled recursive descent over prebuilt
-# dispatch values: the knot is threaded as an argument, parse results (△ for
-# failure, △ item rest for success) are torn apart by stored triage
-# eliminators, and every handler is a constant — nothing about the parser is
-# constructed while parsing, at any nesting depth. Where one token decides
-# between two continuations — an identifier followed by '=' or not, the end
-# of an operand run followed by '$' or not — the next token is dispatched
-# through the constructors' dispatch chains, and handed back re-consed on
-# the miss path; the peek costs two eliminations, not a speculative
-# sub-parse. (An earlier peek attempt lost 2.5x by nesting closures per
-# dispatch level; prebuilt eliminators taking their state as trailing
-# arguments are what make it cheap.) List, map and ADT-variant tails are
-# rare enough to stay combinator-built; the variant list has no expression
-# recursion, so it is a constant too.
-# An operand parse has three outcomes, told apart by shape: △ item rest on
-# success, a stem △ toks when the head token cannot start an operand (the
-# unconsumed input rides in the stem, so the loop never threads it), and a
-# bare △ when an operand started but is malformed — the whole expression
-# fails. Stop tokens are prebuilt, so a soft stop re-conses its token for
-# free.
-_hstop = \tok \rest \_self △ (△ tok rest)
-_tok_pc  = Token_special_char Schar_paren_close
-_tok_eq  = Token_special_char Schar_equals
-_tok_sep = Token_special_char Schar_separator
-_tok_pip = Token_special_char Schar_pipe
-_tok_dol = Token_special_char Schar_dollar
-_tok_col = Token_special_char Schar_colon
-_tok_sqc = Token_special_char Schar_sqbracket_close
-_tok_cuc = Token_special_char Schar_curly_close
-# ( expr )
-_rparen2 = triage (\_item Parser.fail_result) _ (\t2 \r3 \item
-    Token_special_char_Dispatch
-        (\schar Schar_paren_close_Dispatch (\r3 \item Parser.return item r3) (\_r3 \_item Parser.fail_result) schar)
-        (\_r3 \_item Parser.fail_result)
-        t2 r3 item)
-_rparen = triage Parser.fail_result _ (\item \r2 _rparen2 r2 item)
-_hparen = \rest \self _rparen (self self rest)
-# \name body
-_rabs = triage (\_lit Parser.fail_result) _ (\body \r3 \lit Parser.return (Syntax_abs lit body) r3)
-_habs = triage (\_self Parser.fail_result) _ (\t2 \r2 \self
-    Token_identifier_Dispatch (\lit \r2 \self _rabs (self self r2) lit) (\_r2 \_self Parser.fail_result) t2 r2 self)
-_hlist = \rest \self parse_list_tail (self self) rest
-_hmap  = \rest \self parse_map_tail (self self) rest
-_hschar = \schar \rest \self schar
-    _hparen (_hstop _tok_pc) _habs (_hstop _tok_eq) (_hstop _tok_sep) (_hstop _tok_pip)
-    (_hstop _tok_dol) (_hstop _tok_col) _hlist (_hstop _tok_sqc) _hmap (_hstop _tok_cuc)
-    rest self
-# name — an '=' one token ahead commits to an assignment.
-_rassign = triage (\_lit Parser.fail_result) _ (\body \r3 \lit Parser.return (Syntax_assignment lit body) r3)
-_hieq = \_t2 \r2 \lit \self _rassign (self self r2) lit
-_hino = \t2 \r2 \lit \_self Parser.return (Syntax_identifier lit) (△ t2 r2)
-_hident_elim = triage (\lit \_self Parser.return (Syntax_identifier lit) []) _
-    (\t2 \r2 \lit \self Token_special_char_Dispatch (\schar Schar_equals_Dispatch _hieq _hino schar) _hino t2 t2 r2 lit self)
-# Name — an '=' one token ahead commits to a variant list.
-_adt_variants = Parser.seq_pair parse_adt_variant (Parser.many (Parser.seq_snd parse_pipe parse_adt_variant))
-_radt = triage (\_lit Parser.fail_result) _ (\list \r3 \lit Parser.return (Syntax_adt lit list) r3)
-_haeq = \_t2 \r2 \lit \_self _radt (_adt_variants r2) lit
-_hadt_elim = triage (\lit \_self Parser.return (Syntax_identifier lit) []) _
-    (\t2 \r2 \lit \self Token_special_char_Dispatch (\schar Schar_equals_Dispatch _haeq _hino schar) _hino t2 t2 r2 lit self)
-# One operand, a soft stop, or a hard failure.
-_pop_elim = triage (\_self △ △) _ (\tok \rest tok
-    _hschar
-    (\lit \rest \self _hident_elim rest lit self)
-    (\lit \rest \self _hadt_elim rest lit self)
-    (\v \_esc \rest \_self Parser.return (Syntax_const_str v) rest)
-    (\v \rest \_self Parser.return (Syntax_const_nat v) rest)
-    (\_v \_rest \_self Parser.fail_result)
-    rest)
-# After the last operand: a '$' on the stopped-at token grafts one more
-# application onto the fold.
-_rdollar = triage (\_acc Parser.fail_result) _ (\rhs \r2 \acc Parser.return (Syntax_app acc rhs) r2)
-_hdyes = \_t2 \rest \acc \self _rdollar (self self rest) acc
-_hdno  = \t2 \rest \acc \_self Parser.return acc (△ t2 rest)
-_dc_elim = triage (\acc \_self Parser.return acc []) _
-    (\tok \rest \acc \self Token_special_char_Dispatch (\schar Schar_dollar_Dispatch _hdyes _hdno schar) _hdno tok tok rest acc self)
-# The operand run is collected as a list by a loop whose eliminator cases
-# stay at four threaded arguments or fewer — a case's arguments each pay to
-# route past the case's other lambda layers, so wide cases are what made
-# the combinator parser slow — and the applications left-nest in one fold
-# at the end.
-_consM = triage (\_item Parser.fail_result) _ (\list \toks2 \item △ (△ item list) toks2)
-_resM = triage
-    (\_os \_self Parser.fail_result)
-    (\toks \_os \_self △ [] toks)
-    (\item \rest \os \self _consM (os os rest self) item)
-_opsmany = \os \toks \self _resM (_pop_elim toks self) os self
-_fold1 = triage (\_item \_self Parser.fail_result) _
-    (\list \toks2 \item \self _dc_elim toks2 (List.foldl Syntax_app item list) self)
-_res1 = triage
-    (\_self Parser.fail_result)
-    (\_toks \_self Parser.fail_result)
-    (\item \rest \self _fold1 (_opsmany _opsmany rest self) item self)
-_pe = \self \toks _res1 (_pop_elim toks self) self
-parse_expr = _pe _pe
+# The recursive parser [e] is applied *after* the token dispatch, so each
+# handler takes its own [e]. This keeps [parse__expr e] cheap to instantiate:
+# [e] flows to a single position instead of being substituted into every
+# branch, so only the dispatched branch's body is built per call.
+parse__expr = \e
+    _one_then
+        (\token token
+            (\schar \e schar
+                (\e Parser.seq_fst e parse_paren_close)
+                (\_ Parser.fail)
+                parse_abs_tail
+                (\_ Parser.fail)
+                (\_ Parser.fail)
+                (\_ Parser.fail)
+                (\_ Parser.fail)
+                (\_ Parser.fail)
+                parse_list_tail
+                (\_ Parser.fail)
+                parse_map_tail
+                (\_ Parser.fail)
+                e
+            )
+            (\literal \e
+                Parser.either
+                    (parse_assign_tail literal e)
+                    (Parser.return (Syntax_identifier literal))
+            )
+            (\literal \e
+                Parser.either
+                    (parse_adt_tail literal e)
+                    (Parser.return (Syntax_identifier literal))
+            )
+            (\value \escapes \e Parser.return $ Syntax_const_str value)
+            (\value \e Parser.return $ Syntax_const_nat value)
+            e
+        )
+
+# After the last atom of an expression: a [$ e] tail grafts one further
+# application onto the accumulated expression; any other head — peeked, not
+# consumed (re-consing the head is two rule-0 steps, free) — ends the
+# expression as it stands.
+_expr_tail = \e \acc \input List.match
+    (\_e \acc △ acc [])
+    (\tok \rest \e \acc
+        Token_special_char_Dispatch
+          (\schar \e \acc \tok \rest Schar_dollar_Dispatch
+              (\e \acc \_tok \rest Parser.map_result (Syntax_app acc) (e rest))
+              (\_e \acc \tok \rest △ acc (△ tok rest))
+              schar e acc tok rest)
+          (\_e \acc \tok \rest △ acc (△ tok rest))
+          tok e acc tok rest)
+    input e acc
+# expr := atom+ [$ e]. The atoms fold into a left-nested application as they
+# parse — no operand list, no emptiness test, no re-fold — and the first
+# failed atom parse hands over to [_expr_tail]. An expression with no atom at
+# all fails in the first [match_result].
+_parse_expr_body = \e
+    let (parse__expr e) $ \atom
+    let (self_apply $ \self \acc \input Parser.match_result
+          (\self \acc \input _expr_tail e acc input)
+          (\item \remaining \self \acc \_input self self (Syntax_app acc item) remaining)
+          (atom input) self acc input) $ \loop
+    \input Parser.match_result
+      Parser.fail_result
+      (\first \remaining loop first remaining)
+      (atom input)
+# Two unroll levels: [fix]'s wait delays all combinator construction until input
+# arrives, so a plain [fix _parse_expr_body] rebuilds the pipeline on every call.
+# Applying the body twice outside the fix lets the build pre-reduce the two
+# outermost levels — top-level expressions plus one nesting level
+# (parenthesized/list/map/$-tail), covering common inputs; only deeper
+# recursions pay per call.
+parse_expr = _parse_expr_body (_parse_expr_body (fix _parse_expr_body))
 
 parse_exprs = Parser.many parse_expr
 
-# Token list => Syntax_tree list option. The token list is comment-free by
-# construction (see [compiler_tokenize]).
+# Token list => Syntax_tree list option
 compiler_parse = Parser.value_if_consumed parse_exprs
 compiler_parse_expr_exn = Parser.value parse_expr
 
@@ -456,7 +463,6 @@ compiler_parse_expr_exn = Parser.value parse_expr
 _last = \l List.foldl (\_ \x x) (List.head_or _ l) l
 _ptok_start = \ptok Pair.fst (Pair.fst ptok)
 _ptok_end = \ptok Pair.snd (Pair.fst ptok)
-_drop_pcomments = List.filter (\ptok Token_comment_Dispatch (\_ false) true (Pair.snd ptok))
 
 # Consume one positioned token, return raw token value
 _pone = List.match Parser.fail_result (\h \t Parser.return (Pair.snd h) t)
@@ -508,7 +514,6 @@ _p__expr = \e \ptoks
       (\literal Parser.either (_padt_tail literal e) (Parser.return [Syntax_identifier literal]))
       (\value \escapes Parser.return $ [Syntax_const_str value])
       (\value Parser.return $ [Syntax_const_nat value])
-      (\_ Parser.fail)
   ) ptoks)
 
 _p_expr = fix $ \e \ptoks
@@ -527,7 +532,7 @@ _p_expr = fix $ \e \ptoks
   ) (inner_parser ptoks)
 
 _p_exprs = Parser.many _p_expr
-_compiler_parse_spanned = \ptoks Parser.value_if_consumed _p_exprs $ _drop_pcomments ptoks
+_compiler_parse_spanned = Parser.value_if_consumed _p_exprs
 
 space = △ ' '
 newline = △ 10
@@ -557,19 +562,27 @@ _dConsFalse = _dTrue
 _dConsTrue = Dlist.from_list ":ct"
 # Every bit line applies a stem to the name's own previous value, so after a
 # seed line binds the name to [:i :t] (the leaf, by way of an application — a
-# two-token alias line would declare the scratch name an export), the lines for
-# a literal come in just two shapes — one per bit value — prebuilt once per
-# literal. The fold then carries only the dag and each step selects a prebuilt
-# line, with no pair state and no per-bit line construction.
+# two-token alias line would declare the scratch name an export), the lines
+# for a literal come in two prebuilt shapes — one per bit value — bound
+# through a single let as [line], the partially applied bool dispatch that
+# maps each bit straight to its line. One let per literal (a let costs the
+# rest of the body once, so binding the two lines separately pays that
+# twice), the between-name text as constant prebuilt segments, and a fold
+# step that applies [line] to the bit, with no pair state and no per-bit
+# line construction.
 _dI = Dlist.cons ':' (Dlist.single 'i')
+_dSegConsFalse = Dlist.cons ' ' (Dlist.snoc _dConsFalse ' ')
+_dSegConsTrue = Dlist.cons ' ' (Dlist.snoc _dConsTrue ' ')
+_dSegSeed = Dlist.cons ' ' (Dlist.snoc (Dlist.append _dI (Dlist.cons ' ' _dT)) 10)
 _dag_nat = \fresh_res \n List.match
         (△ id _dListEmpty)
         (\_ \_
-          let (\tl fresh_res$space$_dConsFalse$space$fresh_res$newline $ tl) $ \line0
-          let (\tl fresh_res$space$_dConsTrue$space$fresh_res$newline $ tl) $ \line1
+          let (Bool.match
+                (\tl fresh_res $ _dSegConsFalse $ fresh_res $ newline tl)
+                (\tl fresh_res $ _dSegConsTrue $ fresh_res $ newline tl)) $ \line
           △ (List.foldr
-              (\b \dag \tl dag $ Bool.match line0 line1 b $ tl)
-              (\tl fresh_res$space$_dI$space$_dT$newline $ tl)
+              (\b \dag \tl dag $ line b tl)
+              (\tl fresh_res $ _dSegSeed tl)
               n)
             fresh_res)
         n
@@ -590,11 +603,12 @@ _char_rec = Memo.precompute_alt Memo.gen_ascii (\_ false) equal_const
 # and the fold state is just (△ dag recognizer).
 _dag_str_step = \fresh_res \fresh_helper
     let (\tl fresh_res$space$fresh_helper$space$fresh_res$newline $ tl) $ \line_cons
+    let (_dag_nat fresh_helper) $ \dag_nat_h
     \n \acc
     Pair.let acc $ \dag \prev_rec
     Bool.match
       (\n \dag \_prev
-        Pair.let (_dag_nat fresh_helper n) $ \nat_dag \nat_name
+        Pair.let (dag_nat_h n) $ \nat_dag \nat_name
         △ (\tl dag $ nat_dag $
               fresh_helper$space$_dT$space$nat_name$newline $
               line_cons $ tl)
@@ -636,7 +650,7 @@ _equote_nat = \n \d
 _equote_str = \s \d
   let (_ename d) $ \fresh_res
   let (_ename (Nat.succ d)) $ \fresh_helper
-  Pair.let (List.foldr (_dag_str_step fresh_res fresh_helper) (△ (\tl fresh_res$space$_dI$space$_dT$newline $ tl) (\_ false)) s) $ \dag \_prev_rec
+  Pair.let (List.foldr (_dag_str_step fresh_res fresh_helper) (△ (\tl fresh_res $ _dSegSeed tl) (\_ false)) s) $ \dag \_prev_rec
     \pair pair dag fresh_res
 quote_nat = \n let (_equote_nat n) $ \em △ em (△ false em)
 quote_str = \s let (_equote_str s) $ \em △ em (△ false em)
@@ -805,20 +819,29 @@ _klkE0 = triage (\name △ [] (_kdleaf name)) _
 _klookup = \name \env _klkE0 env name
 _knilT = △ [] (_kdleaf ":t")
 _knilMapSet = △ [] (_kdleaf "Map.set")
-_klower = self_apply $ \this \syntax
+# The compound handlers are named so [syntax_to_native]'s top-level dispatch
+# can call them directly on the fields it already has, instead of rebuilding
+# the node it just took apart only for [_klower] to dispatch on it again.
+_klow_list = \list \this \env List.foldr (\item \acc _kapp (_kapp _knilT (this this item env)) acc) _knilT list
+_klow_map = \kvlist \this \env List.foldr (\item \acc _kapp (Pair.match (\k \v _kapp (_kapp _knilMapSet (this this k env)) (this this v env)) item) acc) _knilT kvlist
+_klow_abs = \literal \body \this \env _kabs (this this body (△ (_krec literal) env))
+_klow_app = \o1 \o2 \this \env _kapp (this this o1 env) (this this o2 env)
+_klow_span = \start \end \inner \this \env Pair.let (this this inner env) $ \g \d △ g (_espan start end d)
+_klower_open = \this \syntax
     syntax
         (\name \this \env _klookup name env)
         (\this \env _knilT)
         (\value \this \env △ [] (quote_nat value))
         (\value \this \env △ [] (quote_str value))
-        (\list \this \env List.foldr (\item \acc _kapp (_kapp _knilT (this this item env)) acc) _knilT list)
-        (\kvlist \this \env List.foldr (\item \acc _kapp (Pair.match (\k \v _kapp (_kapp _knilMapSet (this this k env)) (this this v env)) item) acc) _knilT kvlist)
-        (\literal \body \this \env _kabs (this this body (△ (_krec literal) env)))
-        (\o1 \o2 \this \env _kapp (this this o1 env) (this this o2 env))
+        _klow_list
+        _klow_map
+        _klow_abs
+        _klow_app
         (\literal \o \this \env △ [] (△ fail (△ false fail)))
         (\typeLiteral \this \env △ [] (△ fail (△ false fail)))
-        (\start \end \inner \this \env Pair.let (this this inner env) $ \g \d △ g (_espan start end d))
+        _klow_span
         this
+_klower = self_apply _klower_open
 _syntax_to_native = \syntax Pair.fst $ Pair.snd $ _klower syntax []
 
 # ADT constructors and dispatchers are the Kiselyov pass's own output on two
@@ -918,12 +941,14 @@ _syntax_emit_adt = \type_name \items
         (Pair.match (\pair \index _syntax_emit_adt_variant items n index (Pair.snd pair) (Pair.fst pair)))
         items
 
-_make_top_level_expr = \syntax_expr [Native_expr (_syntax_to_native syntax_expr)]
-
 # Top-level identifiers and constants skip the abstraction pass entirely: no
 # binder can be in scope, so their lowered form is the plain emitter itself,
 # with none of the machinery triple built just to be unwrapped again. The
 # null statement's lowered form is a constant, so it is spelled as one.
+# Compound expressions call the pass's own handler for their shape with an
+# empty environment — the fields are already in hand, so no node is rebuilt
+# and nothing dispatches twice.
+_native_expr_of = \annotated [Native_expr (Pair.fst (Pair.snd annotated))]
 _native_null = [Native_expr (_emk_leaf ":t")]
 syntax_to_native = \syntax
     syntax
@@ -931,15 +956,15 @@ syntax_to_native = \syntax
         (            _native_null)
         (\value      [Native_expr (_equote_nat value)])
         (\value      [Native_expr (_equote_str value)])
-        (\list       _make_top_level_expr (Syntax_list list))
-        (\kvlist     _make_top_level_expr (Syntax_map kvlist))
-        (\name \body _make_top_level_expr (Syntax_abs name body))
-        (\o1 \o2     _make_top_level_expr (Syntax_app o1 o2))
+        (\list       _native_expr_of (_klow_list list _klower_open []))
+        (\kvlist     _native_expr_of (_klow_map kvlist _klower_open []))
+        (\name \body _native_expr_of (_klow_abs name body _klower_open []))
+        (\o1 \o2     _native_expr_of (_klow_app o1 o2 _klower_open []))
         (\name \o    [Native_assignment name (_syntax_to_native o)])
         (\type_name \pairs
             (_syntax_emit_adt type_name (List.mapi △ pairs))
         )
-        (\start \end \inner _make_top_level_expr (Syntax_spanned start end inner))
+        (\start \end \inner _native_expr_of (_klow_span start end inner _klower_open []))
 
 syntax_error = Syntax_identifier "ERROR"
 to_internal△ = fix $ \self \syntax syntax
@@ -1019,45 +1044,45 @@ compile_to_dag_bench = \s
 
 _to_string = id
 compile_to_dag_bench "x"
-# = Tokenize: 323
-#   Parse:    359
+# = Tokenize: 230
+#   Parse:    323
 #   Lower:    248
 #   Emit:     90
 
 compile_to_dag_bench "42"
-# = Tokenize: 481
-#   Parse:    348
+# = Tokenize: 393
+#   Parse:    180
 #   Lower:    212
-#   Emit:     768
+#   Emit:     676
 
 compile_to_dag_bench "1337"
-# = Tokenize: 960
-#   Parse:    348
+# = Tokenize: 872
+#   Parse:    180
 #   Lower:    212
-#   Emit:     1029
+#   Emit:     937
 
 compile_to_dag_bench "[42]"
-# = Tokenize: 1052
-#   Parse:    1192
-#   Lower:    702
-#   Emit:     1414
+# = Tokenize: 824
+#   Parse:    887
+#   Lower:    628
+#   Emit:     1322
 
 compile_to_dag_bench "\\x x"
-# = Tokenize: 982
-#   Parse:    802
-#   Lower:    735
+# = Tokenize: 747
+#   Parse:    641
+#   Lower:    661
 #   Emit:     92
 
 compile_to_dag_bench "x = 42"
-# = Tokenize: 1204
-#   Parse:    793
+# = Tokenize: 969
+#   Parse:    515
 #   Lower:    331
-#   Emit:     848
+#   Emit:     756
 
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
-# = Tokenize: 19247
-#   Parse:    20111
-#   Lower:    9137
+# = Tokenize: 14966
+#   Parse:    22222
+#   Lower:    9065
 #   Emit:     10588
 
 # An ADT declaration: two variants, each emitting a constructor and a
@@ -1073,8 +1098,8 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 # the same application-lean encodings as lowered user code — under
 # self-hosting the tax is gone.
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
-# = Tokenize: 6262
-#   Parse:    1441
+# = Tokenize: 5378
+#   Parse:    1297
 #   Lower:    12694
 #   Emit:     19344
 
@@ -1087,9 +1112,9 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # binders at a time: the same five cost 13134, 17222, 21310, 25398, 29486, a
 # flat 4088 apiece.
 compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
-# = Tokenize: 6491
-#   Parse:    5665
-#   Lower:    16830
+# = Tokenize: 5114
+#   Parse:    6141
+#   Lower:    16756
 #   Emit:     17673
 
 # Literal size. A string literal is linear in both directions: a fixed ~75
@@ -1099,10 +1124,10 @@ compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 # character pays its own run of per-bit DAG lines, so mixed text sits between
 # this and the old one-nat-per-character cost (~1205 per character).
 compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
-# = Tokenize: 7596
-#   Parse:    355
+# = Tokenize: 7501
+#   Parse:    187
 #   Lower:    204
-#   Emit:     18737
+#   Emit:     18701
 
 # A nat literal is quadratic to tokenize, and stays that way: Horner's rule has
 # to walk an accumulator that grows by ~3.3 bits per digit, so 5, 10, 20 and 40
@@ -1113,10 +1138,10 @@ compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 # worth ~4x here on top of the table-driven pass that replaced two traversals
 # and a multiply per digit.
 compile_to_dag_bench $ List.repeat 100 '1'
-# = Tokenize: 104789
-#   Parse:    348
+# = Tokenize: 104701
+#   Parse:    180
 #   Lower:    212
-#   Emit:     17433
+#   Emit:     17341
 
 _compiler_env =
   Map.pmap_set "△" △ $
@@ -1139,9 +1164,6 @@ compile = compose dag_to_val compile_to_dag
 _to_string = Nat.to_source
 compile "123"
 # = 123
-# Comments disappear at tokenize time; the parser never sees them.
-compile "# a comment\n42 # another"
-# = 42
 
 _to_string = List.to_source Nat.to_source
 compile "[65,123,65]"
@@ -1266,5 +1288,3 @@ _to_string = \s compiler_emit_dag $ Option.get_or []
 #   0 f::0,1 1::2,7
 #   0::0,7 0
 #   0::0,7
-
-
