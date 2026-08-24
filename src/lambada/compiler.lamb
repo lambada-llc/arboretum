@@ -563,13 +563,13 @@ _dConsTrue = Dlist.from_list ":ct"
 # Every bit line applies a stem to the name's own previous value, so after a
 # seed line binds the name to [:i :t] (the leaf, by way of an application — a
 # two-token alias line would declare the scratch name an export), the lines
-# for a literal come in one shape: [line] takes the bit's stem segment and
-# writes [res stem res]. One closure per literal, the between-name text as
-# constant prebuilt segments, and a fold step that selects a segment, with no
-# pair state and no per-bit line construction. Against two per-bit-value
-# lines prebuilt via a second let this trades ~80 fixed for ~10 per bit —
-# chosen for the 1-7 bit literals that dominate programs; only a very wide
-# literal (a 100-digit nat) pays more.
+# for a literal come in two prebuilt shapes — one per bit value — bound
+# through a single let as [line], the partially applied bool dispatch that
+# maps each bit straight to its line. One let per literal (a let costs the
+# rest of the body once, so binding the two lines separately pays that
+# twice), the between-name text as constant prebuilt segments, and a fold
+# step that applies [line] to the bit, with no pair state and no per-bit
+# line construction.
 _dI = Dlist.cons ':' (Dlist.single 'i')
 _dSegConsFalse = Dlist.cons ' ' (Dlist.snoc _dConsFalse ' ')
 _dSegConsTrue = Dlist.cons ' ' (Dlist.snoc _dConsTrue ' ')
@@ -577,9 +577,11 @@ _dSegSeed = Dlist.cons ' ' (Dlist.snoc (Dlist.append _dI (Dlist.cons ' ' _dT)) 1
 _dag_nat = \fresh_res \n List.match
         (△ id _dListEmpty)
         (\_ \_
-          let (\stemseg \tl fresh_res $ stemseg $ fresh_res $ newline tl) $ \line
+          let (Bool.match
+                (\tl fresh_res $ _dSegConsFalse $ fresh_res $ newline tl)
+                (\tl fresh_res $ _dSegConsTrue $ fresh_res $ newline tl)) $ \line
           △ (List.foldr
-              (\b \dag \tl dag $ line (Bool.match _dSegConsFalse _dSegConsTrue b) tl)
+              (\b \dag \tl dag $ line b tl)
               (\tl fresh_res $ _dSegSeed tl)
               n)
             fresh_res)
@@ -1047,19 +1049,19 @@ compile_to_dag_bench "42"
 # = Tokenize: 562
 #   Parse:    180
 #   Lower:    212
-#   Emit:     704
+#   Emit:     676
 
 compile_to_dag_bench "1337"
 # = Tokenize: 1261
 #   Parse:    180
 #   Lower:    212
-#   Emit:     1015
+#   Emit:     937
 
 compile_to_dag_bench "[42]"
 # = Tokenize: 993
 #   Parse:    887
 #   Lower:    686
-#   Emit:     1350
+#   Emit:     1322
 
 compile_to_dag_bench "\\x x"
 # = Tokenize: 755
@@ -1071,7 +1073,7 @@ compile_to_dag_bench "x = 42"
 # = Tokenize: 1142
 #   Parse:    515
 #   Lower:    331
-#   Emit:     784
+#   Emit:     756
 
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
 # = Tokenize: 15078
@@ -1121,7 +1123,7 @@ compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 # = Tokenize: 7501
 #   Parse:    187
 #   Lower:    204
-#   Emit:     18729
+#   Emit:     18701
 
 # A nat literal is quadratic to tokenize, and stays that way: Horner's rule has
 # to walk an accumulator that grows by ~3.3 bits per digit, so 5, 10, 20 and 40
@@ -1135,7 +1137,7 @@ compile_to_dag_bench $ List.repeat 100 '1'
 # = Tokenize: 303044
 #   Parse:    180
 #   Lower:    212
-#   Emit:     20609
+#   Emit:     17341
 
 _compiler_env =
   Map.pmap_set "△" △ $

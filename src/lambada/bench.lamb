@@ -13,17 +13,17 @@ Lambada.compile_to_dag_bench "42"
 # = Tokenize: 562
 #   Parse:    180
 #   Lower:    212
-#   Emit:     704
+#   Emit:     676
 Lambada.compile_to_dag_bench "'a'"
 # = Tokenize: 251
 #   Parse:    180
 #   Lower:    212
-#   Emit:     762
+#   Emit:     724
 Lambada.compile_to_dag_bench ['"'; 'h'; 'i'; '"']
 # = Tokenize: 646
 #   Parse:    187
 #   Lower:    204
-#   Emit:     2580
+#   Emit:     2464
 
 Lambada.compile_to_dag_bench "\\x x"
 # = Tokenize: 755
@@ -39,7 +39,7 @@ Lambada.compile_to_dag_bench "[1, 2]"
 # = Tokenize: 1185
 #   Parse:    1349
 #   Lower:    1046
-#   Emit:     2182
+#   Emit:     2216
 Lambada.compile_to_dag_bench "{a: b}"
 # = Tokenize: 1184
 #   Parse:    1843
