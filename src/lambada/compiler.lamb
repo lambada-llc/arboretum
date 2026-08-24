@@ -45,7 +45,10 @@ Bench.run [is_alpha_char; '3']
 # instead of a lookup producing a bool that a second dispatch then routes. The
 # two branches are shared closures (the character is threaded, not baked), so
 # the table is two leaves' worth of structure. [alt] plays the classifier
-# table's fallback role for bytes >= 128.
+# table's fallback role for bytes >= 128. (A stored-triage loop with the cons
+# in a separate eliminator was measured at +14 per character — the extra
+# routing of the head through the cons case loses to [Pair.match]'s closure,
+# which hash-consing already builds only once. Don't retry.)
 _scan_stop = \h \self \t △ [] (△ h t)
 _scan_go = \h \self \t Pair.match (\taken \rest △ (△ h taken) rest) (self self t)
 _mk_scanner = \alt \pred
@@ -108,12 +111,13 @@ Token = Token_special_char schar     # schar
 # branch closure and the K-rule churn of distributing-then-discarding it costs
 # more than the second walk. Don't retry.)
 _is_dot = Memo.precompute_alt Memo.gen_ascii_low false (equal_const '.')
-_local_head = List.match _ $ self_apply $ \self \cand \l List.match cand (\c \rest
-    Bool.match
-      (\cand \rest \self self self cand rest)
-      (\cand \rest \self List.match cand (\c2 \r2 self self c2 (△ c2 r2)) rest)
-      (_is_dot c) cand rest self
-  ) l
+# The walk is stored triage eliminators with the knot threaded last: a
+# character costs the dot lookup, one rule on its answer, and the continue
+# case — the promotion path re-conses only when a dot is actually seen.
+_lh_next = \rest \cand \self self rest cand self
+_lh_promote = triage (\cand \_self cand) _ (\c2 \r2 \_cand \self self (△ c2 r2) c2 self)
+_lh_elim = triage (\cand \_self cand) _ (\c \rest triage _lh_next (\_ _lh_promote) _ (_is_dot c) rest)
+_local_head = List.match _ (\c \rest _lh_elim rest c _lh_elim)
 token_identifier = \name Bool.match Token_identifier Token_identifier_adt (is_uppercase_char (_local_head name)) name
 
 # Only reached via the first-char dispatch table, which fires this parser only
@@ -127,8 +131,8 @@ _parse_identifier_token = List.match Parser.fail_result $ \c \rest
 
 _to_string = id
 Bench.run [_parse_identifier_token; "compiler_tokenize"]
-# = oh |  0a  0b    1    2  3a  3b  3c |  alc  red
-#   82 | 475 697 1074 1107 251 134 282 | 1172 2848
+# = oh |  0a  0b   1   2  3a  3b  3c | alc  red
+#   85 | 409 518 865 880 251 134 282 | 927 2412
 
 parse_char_map = \map List.match Parser.fail_result $ \head \tail Option.match Parser.fail_result (\v Parser.return v tail) $ Map.to_func map head
 
@@ -712,77 +716,93 @@ _k_is_var = \h \d List.match
     (\d Pair.fst (Pair.snd d))
     (\_ \_ \_ false)
     h d
-# The combining operator, split by the head of the left bool list into three
-# closed helpers so each body stays small. The cases follow the eta-optimized
-# rule table literally; [self] is the whole combiner.
+# The combining operator, following the eta-optimized rule table literally.
 # The closed-left case is the combiner's inner loop — every :s/:b/:c rule and
 # every K-composition in [_kabs] spawns one — so it is its own tight
-# recursion, threading three values per level instead of bouncing back through
-# the full dispatch with six.
-_kc0 = self_apply $ \self \d1 \g2 \d2 List.match
-    (\_self \d1 _kea d1)
-    (\b2 \h2 \self \d1 \d2 Bool.match
-        (\self \d1 \h2 \d2 self self d1 h2 d2)
-        (\self \d1 \h2 \d2 Bool.match
-            (\self \d1 \h2 \d2 self self (_kea _kdB d1) h2 d2)
-            (\_self \d1 \_h2 \_d2 d1)
-            (_k_is_var h2 d2) self d1 h2 d2)
-        b2 self d1 h2 d2)
-    g2 self d1 d2
-_kcF = \self \h1 \d1 \g2 \d2 List.match
-    (\self \h1 \d1 \d2 self self h1 d1 [] d2)
-    (\b2 \h2 \self \h1 \d1 \d2 Bool.match
-        (\self \h1 \d1 \h2 \d2 self self h1 d1 h2 d2)
-        (\self \h1 \d1 \h2 \d2 Bool.match
-            (\self \h1 \d1 \h2 \d2 self self h1 (_kc0 _kdB h1 d1) h2 d2)
-            (\_self \_h1 \d1 \_h2 \_d2 d1)
-            (_k_is_var h2 d2) self h1 d1 h2 d2)
-        b2 self h1 d1 h2 d2)
-    g2 self h1 d1 d2
-_kcT = \self \h1 \d1 \g2 \d2 List.match
-    (\self \h1 \d1 \d2 Bool.match
-        (\self \h1 \d1 \d2 _kc0 (_kea _kdR d2) h1 d1)
-        (\_self \_h1 \_d1 \d2 _kea _kdT d2)
-        (_k_is_var h1 d1) self h1 d1 d2)
-    (\b2 \h2 \self \h1 \d1 \d2 Bool.match
-        (\self \h1 \d1 \h2 \d2 Bool.match
-            (\self \h1 \d1 \h2 \d2 self self h1 (_kc0 _kdC h1 d1) h2 d2)
-            (\self \_h1 \_d1 \h2 \d2 _kc0 _kdT h2 d2)
-            (_k_is_var h1 d1) self h1 d1 h2 d2)
-        (\self \h1 \d1 \h2 \d2 self self h1 (_kc0 _kdS h1 d1) h2 d2)
-        b2 self h1 d1 h2 d2)
-    g2 self h1 d1 d2
-_kc = self_apply $ \self \g1 \d1 \g2 \d2 List.match
-    (\_self _kc0)
-    (\b1 \h1 \self \d1 \g2 \d2 Bool.match _kcF _kcT b1 self h1 d1 g2 d2)
-    g1 self d1 g2 d2
+# recursion.
+# The rule cells are stored triage eliminators — one on the level list, one
+# on its head bool, one on an eta test's answer — whose selected case takes
+# the traveling state as trailing arguments, at most five of them; the knot
+# each recursion re-enters is the eliminator itself. The closed-left loop
+# [_kc0E] is called as (g2, d1, d2, knot), the full combiner [_kcE] as
+# (g1, g2, d1, d2, knot).
+_kc0F = \h2 \d1 \d2 \k k h2 d1 d2 k
+_kc0TB = \h2 \d1 \d2 \k k h2 (_kea _kdB d1) d2 k
+_kc0TV = \_h2 \d1 \_d2 \_k d1
+_kc0T = \h2 \d1 \d2 \k triage _kc0TB (\_ _kc0TV) _ (_k_is_var h2 d2) h2 d1 d2 k
+_kc0E = triage (\d1 \d2 \_k _kea d1 d2) _ (\b2 \h2 triage _kc0F (\_ _kc0T) _ b2 h2)
+_kcFF = \h2 \h1 \d1 \d2 \k k h1 h2 d1 d2 k
+_kcFTB = \h2 \h1 \d1 \d2 \k k h1 h2 (_kc0E h1 _kdB d1 _kc0E) d2 k
+_kcFTV = \_h2 \_h1 \d1 \_d2 \_k d1
+_kcFT = \h2 \h1 \d1 \d2 \k triage _kcFTB (\_ _kcFTV) _ (_k_is_var h2 d2) h2 h1 d1 d2 k
+_kcFE = triage
+    (\h1 \d1 \d2 \k k h1 [] d1 d2 k)
+    _
+    (\b2 \h2 triage _kcFF (\_ _kcFT) _ b2 h2)
+_kcTnR = \h1 \d1 \d2 \_k _kc0E h1 (_kea _kdR d2) d1 _kc0E
+_kcTnT = \_h1 \_d1 \d2 \_k _kea _kdT d2
+_kcTFC = \h2 \h1 \d1 \d2 \k k h1 h2 (_kc0E h1 _kdC d1 _kc0E) d2 k
+_kcTFT = \h2 \_h1 \_d1 \d2 \_k _kc0E h2 _kdT d2 _kc0E
+_kcTF = \h2 \h1 \d1 \d2 \k triage _kcTFC (\_ _kcTFT) _ (_k_is_var h1 d1) h2 h1 d1 d2 k
+_kcTS = \h2 \h1 \d1 \d2 \k k h1 h2 (_kc0E h1 _kdS d1 _kc0E) d2 k
+_kcTE = triage
+    (\h1 \d1 \d2 \k triage _kcTnR (\_ _kcTnT) _ (_k_is_var h1 d1) h1 d1 d2 k)
+    _
+    (\b2 \h2 triage _kcTF (\_ _kcTS) _ b2 h2)
+_kcE = triage
+    (\g2 \d1 \d2 \_k _kc0E g2 d1 d2 _kc0E)
+    _
+    (\b1 \h1 triage
+        (\h1 \g2 \d1 \d2 \k _kcFE g2 h1 d1 d2 k)
+        (\_ \h1 \g2 \d1 \d2 \k _kcTE g2 h1 d1 d2 k)
+        _ b1 h1)
 # Pointwise-or of two bool lists, the unmatched tail passing through.
 _kor = fix $ \self \a \b List.match b
     (\x \xs List.match (△ x xs) (\y \ys △ (Bool.or x y) (self xs ys)) b) a
 # Applications of closed terms to closed terms — all of a program with no
 # binder in sight, and most subterms even under one — skip the combiner and
-# the or entirely.
-_kapp = \p1 \p2 Pair.let p1 $ \g1 \d1 Pair.let p2 $ \g2 \d2 List.match
-    (\d1 \g2 \d2 List.match
-        (\d1 \d2 △ [] (_kea d1 d2))
-        (\b2 \h2 \d1 \d2 △ (△ b2 h2) (_kc [] d1 (△ b2 h2) d2))
-        g2 d1 d2)
-    (\b1 \h1 \d1 \g2 \d2 △ (_kor (△ b1 h1) g2) (_kc (△ b1 h1) d1 g2 d2))
-    g1 d1 g2 d2
-_kabs = \p Pair.let p $ \g \d List.match
-    (\d △ [] (_kea _kdK d))
-    (\b \t \d Bool.match
-        (\t \d △ t (_kc0 _kdK t d))
-        (\t \d △ t d)
-        b t d)
-    g d
-_klookup = self_apply $ \self \name \env List.match
-    (\_self \name △ [] (_kdleaf name))
-    (\e \es \self \name Bool.match
-        (\self \name \es Pair.let (self self name es) $ \g \d △ (△ false g) d)
-        (\_self \_name \_es _kvar0)
-        (equal name e) self name es)
-    env self name
+# the or entirely, and the annotated pairs are torn apart by the same stored
+# eliminators as everything else.
+_kapE2c = triage (\d2 \d1 △ [] (_kea d1 d2)) _ (\b2 \h2 \d2 \d1 △ (△ b2 h2) (_kc0E (△ b2 h2) d1 d2 _kc0E))
+_kapEc = triage _ _ (\g2 \d2 \d1 _kapE2c g2 d2 d1)
+_kapEo = triage _ _ (\g2 \d2 \b1 \h1 \d1 △ (_kor (△ b1 h1) g2) (_kcE (△ b1 h1) g2 d1 d2 _kcE))
+_kapE1 = triage (\d1 \p2 _kapEc p2 d1) _ (\b1 \h1 \d1 \p2 _kapEo p2 b1 h1 d1)
+_kapE = triage _ _ (\g1 \d1 \p2 _kapE1 g1 d1 p2)
+_kapp = \p1 \p2 _kapE p1 p2
+_kabsF = \t \d △ t (_kc0E t _kdK d _kc0E)
+_kabsT = \t \d △ t d
+_kabsE1 = triage (\d △ [] (_kea _kdK d)) _ (\b \t triage _kabsF (\_ _kabsT) _ b t)
+_kabsE = triage _ _ (\g \d _kabsE1 g d)
+_kabs = \p _kabsE p
+# The environment holds, per binder, its name's characters mapped through
+# the prelude of prebuilt per-character recognizers — pennies to build off
+# the [_char_rec] table — so a lookup's comparison runs one recognizer per
+# character and stops at the first mismatching one, instead of paying the
+# general [equal]'s full eager walk of two names (measured at 867 steps for
+# two one-character names, and once per environment level).
+# Bytes past the [_char_rec] table's ASCII range — identifiers may hold any
+# UTF-8 byte — get a recognizer built on the spot; the range test is itself
+# a table whose out-of-range fallback is the "high" answer (a subtraction-
+# based comparison was measured at ~780 steps per character).
+_khigh = Memo.precompute_alt Memo.gen_ascii true (\_ false)
+_krec = \literal List.map (\c Bool.match _char_rec equal_const (_khigh c) c) literal
+_krr_go = \r2 \recs2 \self self recs2 r2 self
+_krr_no = \_r2 \_recs2 \_self false
+_krr2 = triage (\_rc \_recs2 \_self false) _
+    (\c2 \r2 \rc \recs2 \self triage _krr_no (\_ _krr_go) _ (rc c2) r2 recs2 self)
+_krrE = triage (\name \_self triage true _ (\_h \_t false) name) _
+    (\rc \recs2 \name \self _krr2 name rc recs2 self)
+_klkW = triage _ _ (\g \d △ (△ false g) d)
+_klkMiss = \es \name \self _klkW (self es name self)
+_klkE = triage (\name \_self △ [] (_kdleaf name)) _
+    (\recs \es \name \self triage _klkMiss (\_ (\_es \_name \_self _kvar0)) _ (_krrE recs name _krrE) es name self)
+# Level zero is unrolled so the empty environment — every identifier of
+# every top-level expression — never routes the recursion knot it will not
+# use.
+_klkMiss0 = \es \name _klkW (_klkE es name _klkE)
+_klkE0 = triage (\name △ [] (_kdleaf name)) _
+    (\recs \es \name triage _klkMiss0 (\_ (\_es \_name _kvar0)) _ (_krrE recs name _krrE) es name)
+_klookup = \name \env _klkE0 env name
 _knilT = △ [] (_kdleaf ":t")
 _knilMapSet = △ [] (_kdleaf "Map.set")
 _klower = self_apply $ \this \syntax
@@ -793,7 +813,7 @@ _klower = self_apply $ \this \syntax
         (\value \this \env △ [] (quote_str value))
         (\list \this \env List.foldr (\item \acc _kapp (_kapp _knilT (this this item env)) acc) _knilT list)
         (\kvlist \this \env List.foldr (\item \acc _kapp (Pair.match (\k \v _kapp (_kapp _knilMapSet (this this k env)) (this this v env)) item) acc) _knilT kvlist)
-        (\literal \body \this \env _kabs (this this body (△ literal env)))
+        (\literal \body \this \env _kabs (this this body (△ (_krec literal) env)))
         (\o1 \o2 \this \env _kapp (this this o1 env) (this this o2 env))
         (\literal \o \this \env △ [] (△ fail (△ false fail)))
         (\typeLiteral \this \env △ [] (△ fail (△ false fail)))
@@ -999,7 +1019,7 @@ compile_to_dag_bench = \s
 
 _to_string = id
 compile_to_dag_bench "x"
-# = Tokenize: 327
+# = Tokenize: 323
 #   Parse:    359
 #   Lower:    248
 #   Emit:     90
@@ -1019,25 +1039,25 @@ compile_to_dag_bench "1337"
 compile_to_dag_bench "[42]"
 # = Tokenize: 1052
 #   Parse:    1192
-#   Lower:    760
+#   Lower:    702
 #   Emit:     1414
 
 compile_to_dag_bench "\\x x"
-# = Tokenize: 990
+# = Tokenize: 982
 #   Parse:    802
-#   Lower:    1435
+#   Lower:    735
 #   Emit:     92
 
 compile_to_dag_bench "x = 42"
-# = Tokenize: 1208
+# = Tokenize: 1204
 #   Parse:    793
 #   Lower:    331
 #   Emit:     848
 
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
-# = Tokenize: 19359
+# = Tokenize: 19247
 #   Parse:    20111
-#   Lower:    10085
+#   Lower:    9137
 #   Emit:     10588
 
 # An ADT declaration: two variants, each emitting a constructor and a
@@ -1053,7 +1073,7 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 # the same application-lean encodings as lowered user code — under
 # self-hosting the tax is gone.
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
-# = Tokenize: 6626
+# = Tokenize: 6262
 #   Parse:    1441
 #   Lower:    12694
 #   Emit:     19344
@@ -1067,9 +1087,9 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # binders at a time: the same five cost 13134, 17222, 21310, 25398, 29486, a
 # flat 4088 apiece.
 compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
-# = Tokenize: 6539
+# = Tokenize: 6491
 #   Parse:    5665
-#   Lower:    29694
+#   Lower:    16830
 #   Emit:     17673
 
 # Literal size. A string literal is linear in both directions: a fixed ~75
@@ -1246,4 +1266,5 @@ _to_string = \s compiler_emit_dag $ Option.get_or []
 #   0 f::0,1 1::2,7
 #   0::0,7 0
 #   0::0,7
+
 
