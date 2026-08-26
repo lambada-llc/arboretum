@@ -950,6 +950,17 @@ _syntax_emit_adt = \type_name \items
 # and nothing dispatches twice.
 _native_expr_of = \annotated [Native_expr (Pair.fst (Pair.snd annotated))]
 _native_null = [Native_expr (_emk_leaf ":t")]
+# The spanned parser wraps every statement in [Syntax_spanned] — definitions
+# too, which the unspanned parser leaves bare. A definition is no expression
+# ([_klower]'s cases for the two are [fail]), so the wrappers are peeled off
+# a spanned definition and it emits exactly what the unspanned parser's
+# would: the name line a definition emits is anchor enough, and the spans
+# inside an assignment's body ride along in the body's own wrappers.
+_native_def_of_spanned = fix $ \self \syntax
+    Syntax_spanned_Dispatch (\_start \_end \inner self inner)
+    (Syntax_assignment_Dispatch (\literal \o some [Native_assignment literal (_syntax_to_native o)])
+    (Syntax_adt_Dispatch (\type_name \pairs some $ _syntax_emit_adt type_name (List.mapi △ pairs))
+    none syntax) syntax) syntax
 syntax_to_native = \syntax
     syntax
         (\name       [Native_expr (_emk_leaf name)])
@@ -964,7 +975,9 @@ syntax_to_native = \syntax
         (\type_name \pairs
             (_syntax_emit_adt type_name (List.mapi △ pairs))
         )
-        (\start \end \inner _native_expr_of (_klow_span start end inner _klower_open []))
+        (\start \end \inner Option.get_or
+            (_native_expr_of (_klow_span start end inner _klower_open []))
+            (_native_def_of_spanned inner))
 
 syntax_error = Syntax_identifier "ERROR"
 to_internal△ = fix $ \self \syntax syntax
@@ -1288,3 +1301,33 @@ _to_string = \s compiler_emit_dag $ Option.get_or []
 #   0 f::0,1 1::2,7
 #   0::0,7 0
 #   0::0,7
+
+# Definitions through the same pipeline. The spanned parser wraps every
+# statement — assignments and ADT declarations included, which the unspanned
+# parser leaves bare — and a definition is no expression, so its wrappers
+# are peeled off ([_native_def_of_spanned]) and the definition emits exactly
+# what the unspanned parser's would. The spans inside an assignment's body
+# survive the peeling: "x = id" still annotates the reference to [id].
+"x = id"
+# = id::4,6 id
+#   x id::4,6
+"B = T | F f"
+# = T :k
+#   0 :c :c
+#   0 0 :k
+#   1 :b :b
+#   01 :b :c
+#   11 :c :i
+#   01 01 11
+#   1 1 01
+#   0 0 1
+#   T_Dispatch 0
+#   0 :b :k
+#   1 :c :i
+#   0 0 1
+#   F 0
+#   1 :b :c
+#   01 :c :i
+#   1 1 01
+#   0 :c 1
+#   F_Dispatch 0

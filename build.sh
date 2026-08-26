@@ -41,19 +41,25 @@ $lambada expect-test src/.dag-bundle-canonical --root src
 # brick the next build: extract first, probe, and only then install.
 >&2 echo "Exporting compiler"
 compiler=submodules/lambada/compiler
-for symbol in compile compile_to_dag; do
+symbols='compile compile_to_dag compile_to_dag_with_spans'
+for symbol in $symbols; do
   $dag extract --symbol "Lambada.$symbol" src/.dag-bundle-canonical \
     | $dag canonicalize > "$compiler/$symbol.dag.new"
 done
 
-probe=$(node submodules/tree-calculus/bin/main.js \
-  -dag -file "$compiler/compile_to_dag.dag.new" -string 'x = △' -string 2>/dev/null || true)
-case "$probe" in
-  ':t '*) for symbol in compile compile_to_dag; do mv "$compiler/$symbol.dag.new" "$compiler/$symbol.dag"; done ;;
-  *) rm -f "$compiler"/*.dag.new
-     >&2 echo "ERROR: the extracted compiler cannot compile 'x = △'; the shipped one is left alone."
-     exit 1 ;;
-esac
+probe() { node submodules/tree-calculus/bin/main.js -dag -file "$1" -string 'x = △' -string 2>/dev/null || true; }
+ok=true
+# The spanned variant has to compile the same definition *and* annotate it —
+# the `::` span aliases are the whole reason it ships beside compile_to_dag.
+case "$(probe "$compiler/compile_to_dag.dag.new")" in ':t '*) ;; *) ok=false ;; esac
+case "$(probe "$compiler/compile_to_dag_with_spans.dag.new")" in ':t '*'::'*) ;; *) ok=false ;; esac
+if "$ok"; then
+  for symbol in $symbols; do mv "$compiler/$symbol.dag.new" "$compiler/$symbol.dag"; done
+else
+  rm -f "$compiler"/*.dag.new
+  >&2 echo "ERROR: an extracted compiler cannot compile 'x = △'; the shipped ones are left alone."
+  exit 1
+fi
 
 # The scopes lambada's codemirror demo offers, cut from the same bundle. A root
 # brings along what it is built from, so each file is self-contained.
