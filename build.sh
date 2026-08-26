@@ -41,7 +41,7 @@ $lambada expect-test src/.dag-bundle-canonical --root src
 # brick the next build: extract first, probe, and only then install.
 >&2 echo "Exporting compiler"
 compiler=submodules/lambada/compiler
-symbols='compile compile_to_dag compile_to_dag_with_spans'
+symbols='compile_to_dag compile_to_dag_with_spans'
 for symbol in $symbols; do
   $dag extract --symbol "Lambada.$symbol" src/.dag-bundle-canonical \
     | $dag canonicalize > "$compiler/$symbol.dag.new"
