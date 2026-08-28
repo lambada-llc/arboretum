@@ -1307,6 +1307,12 @@ _to_string = \s compiler_emit_dag $ Option.get_or []
 # are peeled off ([_native_def_of_spanned]) and the definition emits exactly
 # what the unspanned parser's would. The spans inside an assignment's body
 # survive the peeling: "x = id" still annotates the reference to [id].
+#
+# A declaration needs no spans of its own: resolution runs on names, and the
+# definition lines it emits carry them. A later use of [F] or [F_Dispatch]
+# is an ordinary identifier occurrence, annotated like any other, and finds
+# the declaration through those lines. [B] is absent deliberately — a type
+# name binds nothing, so a use of one is an undefined name.
 "x = id"
 # = id::4,6 id
 #   x id::4,6
