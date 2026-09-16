@@ -26,3 +26,16 @@ Option.match △ id (Certify.Size.lean_size_proof "SizeProof103.lean" Snat.size_
 _to_string = Option.match "none" (\_ "a module")
 Certify.Size.lean_size_proof "SizeProof100.lean" Snat.size__wn_100
 # = none
+
+# The eager record gets none for the other reason: Snat.size__90 strongly
+# normalizes, so the derivations to replay all exist — what fails is the
+# invariant these modules state, that the loop value stacks (sz t) bare
+# stems onto whatever it is applied to next. The 90's loop keeps that law
+# only for its own continuations: applied to △ it answers △^(sz t) △, but
+# on a foreign next argument it stacks △ △ wrappers instead — its self at
+# △ then △ △ △ leaves △ △ (△ △ △) — so the quantified theorem is
+# false of it, not merely unproven. Its being `size` stands on the fuzz
+# testing and readback recorded in src/snat/size.lamb, not on a
+# certificate.
+Certify.Size.lean_size_proof "SizeProof90.lean" Snat.size__90
+# = none

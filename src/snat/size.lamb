@@ -46,6 +46,9 @@ size__125 = \x (fix__wait _functional_smallest) x Snat.zero
 # candidates none so much as rebuilds △ P (△ x), so rule (2)'s duplication
 # cannot construct the carried copy cheaper than carrying it. The same kind
 # of enumeration that established the 125's minimality, pointed at the knot.
+# An exhaustive GPU search over whole trees agrees, assuming nothing about
+# seats either: no `fix f` tree below the knot's 37 nodes exists (#55) —
+# reported with the caveat that the search harness itself is unverified.
 # _selfstem q ⟶ q (△ q)
 _selfstem = \q q (△ q)
 # _k z ⟶ triage △ △ _selfstem — fourteen nodes, paid twice, plus nine of
@@ -77,7 +80,8 @@ size__118 = \x (△ (△ _k) (△ _code)) x △
 # machine-checked as the record's. The lazy certifier has no such rules,
 # and its false stays the conservative false the header describes. Of the
 # weakly normalizing records further down, the 78, the 95 and the 100
-# undercut the eager ones.
+# undercut the certified programs of this family — and only the 78 still
+# undercuts the 90 that holds the eager record itself.
 # _chain_step self t n ⟶ △ (case t of  △ ⟶ n;  △ u ⟶ self u n;
 #                                       △ u v ⟶ self (self u v) n)
 _chain_step = \self \x compose Snat.succ $ triage id self (\u \v self (self u v)) x
@@ -85,13 +89,14 @@ _chain_step = \self \x compose Snat.succ $ triage id self (\u \v self (self u v)
 _chain_code = \sq _chain_step (△ (△ _k) sq)
 size__103 = \x (△ (△ _k) (△ _chain_code)) x △
 
-# The record, and the smallest of these this repository can run under its own
-# rule — so it is what __smallest names. (size__smallest__wn further down is
-# the weakly normalizing record, at 78 nodes.)
-# Smallest is not cheapest: the chain it recurses on is rebuilt rather than
-# taken apart, and it pays five to six times `size`'s reductions for it, so it
-# is the record and not the default — see src/snat/bench.lamb.
-size__smallest = size__103
+# The smallest eager program here with a machine-checked certificate — but
+# since #55 no longer the record: size__90 further down, the weakly
+# normalizing 78 grown strongly normalizing again, undercuts it by thirteen
+# nodes and is what __smallest names now. (size__smallest__wn further down
+# is the weakly normalizing record, at 78 nodes.)
+# Neither record is cheap: the chain this one recurses on is rebuilt rather
+# than taken apart, and it pays five to six times `size`'s reductions for
+# it; the 90 does better and still pays thrice — see src/snat/bench.lamb.
 
 _to_string = Snat.to_string
 size__118 (△ (△ △) (△ △))
@@ -213,8 +218,7 @@ Serialize.ternary_encode size__wn_78
 Serialize.ternary_encode size__wn_95
 # = "21212022002121000121202120112011200212120012110021212021202120001021202120001021100212101010200"
 
-# The step identity, checked: the 95 drives the eager record's step, tree
-# for tree.
+# The step identity, checked: the 95 drives the 103's step, tree for tree.
 _to_string = Bool.to_source
 equal _step_95 _chain_step
 # = true
@@ -233,15 +237,18 @@ size__111 = \t _dispatch (△ (_s (const _step_95) (wait _dup)) t) (const △ t)
 # seated where _dup sat, nothing else changed — the divergent application is
 # now a value, and each unfolding waits for a constructor of the input.
 # Sixteen nodes of wait around the nine of _dup make 111 — eight over the
-# record from the other side, since retying the same step with _k is
+# 103 from the other side, since retying the same step with _k is
 # size__103 itself, node for node. Nor is there a leaner knot for the
 # seat: every tree to sixteen nodes fails in it, under this step and the
-# 78's both — 490912 candidates — so strong normalization by this route
-# starts at the record's own 103, if a seventeen-node knot exists at all,
-# and wait's twenty-five is the only one known. The 78's step survives no knot but its
-# own: with _k seated it assembles an 86-node program that miscounts —
-# _flat reads a whnf shape only _dup has — and no tree of thirteen nodes or
-# fewer repairs _flat's seat.
+# 78's both — 490912 candidates — so strong normalization by this route,
+# the knot moved alone, starts at the 103. The seventeen-node knot that
+# turns out to exist (#55) is no exception: seated in either machine as it
+# stands it miscounts, and only with the door changed to feed it and the
+# 78's pruning widened does it assemble the 90 below — which is why the
+# search that found it had to move three seats, not one. The 78's step
+# survives no knot but its own: with _k seated it assembles an 86-node
+# program that miscounts — _flat reads a whnf shape only _dup has — and no
+# tree of thirteen nodes or fewer repairs _flat's seat.
 _to_string = Snat.to_string
 size__111 (△ (△ △) (△ △))
 # = 5
@@ -249,6 +256,81 @@ _to_string = Bool.to_source
 Certify.Size.computes_size_eagerly size__111
 # = true
 Certify.Size.computes_size size__111
+# = false
+
+# The eager record, twelve nodes grown onto the 78: Nathan Farlow found this
+# program — and fifteen more 90-node strongly normalizing siblings — by
+# brute force, adding nodes to the weak record until the result passed fuzz
+# testing under the eager evaluator (#55). The growth is three seats' worth,
+# and each seat's cheaper spelling measurably fails below.
+#
+# _refork:  △ ⟶ △;  △ u ⟶ △ △ u;  △ u v ⟶ △ u v
+_refork = triage △ (△ △) △
+# Identity on the forks the loop feeds it. id in its seat is one node
+# cheaper — _s id △ is _selfstem, tree for tree, checked below — and the 89
+# nodes that assembles diverge eagerly on a six-node input: the widened
+# pruning further down reads states as data and applies their halves to
+# each other, what falls out lands on this door too, and _refork's leaf and
+# stem cases put it down where bare _selfstem would re-light the loop.
+# The inner door, and rule (2)'s duplication doing _dup's work one call at
+# a time:  _redispatch (△ code z) ⟶ _refork code (△ code) z ⟶
+# code (△ code) z — the carried copy handed to the fork it was copied from.
+_redispatch = triage △ △ (_s _refork △)
+# The seat that learned to wait: _dup's nine nodes self-apply the carried
+# copy on sight, which no eager evaluator survives. Composing the inner
+# door in front parks re-entry behind the next argument instead —
+#   self := _repack (△ code)   is a value, and
+#   self z ⟶ _redispatch (△ code z) ⟶ code (△ code) z ⟶ step self z
+# — the front door's own moves, replayed once per argument arriving. That
+# is the delay the 111 buys with wait _dup's twenty-five nodes in this same
+# seat, for seventeen.
+_repack = compose _redispatch
+# The pruning, its fork case three nodes wider than _flat's:
+#   △ ⟶ △;   △ m ⟶ △ m;   △ m n ⟶ △ m (m m) n
+# On k = △ it is Snat.succ, as _flat is. But this loop's other k is its
+# self, whose whnf is △ W (△ code) for W = △ (△ △ _redispatch) — not
+# the shape _dup's loop shows _flat — and pruning it to △ W miscounts at
+# 87 nodes; applying the state's halves to each other is what closes the
+# algebra over the new states, and m m is why _refork above must absorb
+# stray reads. What the algebra keeps: self w △ ⟶ △^|w| △. A foreign
+# continuation collects △ △ wrappers instead of stems (the counterexample
+# is in src/certify/size/lean_test.lamb), so the 95's every-k law is
+# traded for nodes here exactly as the 78 traded it.
+_flat_90 = triage △ △ (_s (△ (△ △)) id)
+# The step is the 78's with that pruning swapped in: same triage over the
+# input, same fork case handing the loop in as its own accumulator.
+_step_90 = \self \t \k _flat_90 k $ triage id self (_s self (const self)) t k
+# The front door: _selfstem where the pair seats _fork_self, one node
+# more. _fork_self hands the knot's seat the carried copy — v (△ u v) —
+# which _dup wanted and _repack must never see bare; _selfstem's
+# code (△ code) starts the loop exactly as every re-entry continues it.
+# With _fork_self kept, the 89-node assembly miscounts.
+_dispatch_90 = triage △ △ _selfstem
+size__90 = \t _dispatch_90 (△ (_s (const _step_90) _repack) t) (const △ t)
+
+# The record, and strongly normalizing — the tests below apply it directly,
+# under this build's eager runner, where the __wn family needs
+# Reflect.lazy_eval. What stands behind its being `size` is #55's fuzz
+# testing plus the readback pinning it to the tree the search reported —
+# the record pair's footing exactly; the certifiers stay conservative on
+# it, as at the bottom of this file. Cheaper than the 103 it replaces, too
+# (src/snat/bench.lamb), though still over thrice `size`'s reductions.
+size__smallest = size__90
+
+_to_string = Snat.to_string
+size__90 (△ (△ △) (△ △))
+# = 5
+size__90 size__90
+# = 90
+_to_string = String.to_source
+Serialize.ternary_encode size__90
+# = "212120220021211000121202120112011220021110211002121200121100212120001011202200212201000200"
+_to_string = Bool.to_source
+equal (_s id △) _selfstem
+# = true
+Certify.Size.computes_size_eagerly size__90
+# = false
+Certify.Size.computes_size size__90
 # = false
 
 # The six the pair supersedes, three architectures tied with _fork_self.
@@ -672,6 +754,8 @@ Reflect.lazy_eval size__wn_113 id
 # = 5
 
 # Node counts.
+size size__90
+# = 90
 size size__103
 # = 103
 size size__111
