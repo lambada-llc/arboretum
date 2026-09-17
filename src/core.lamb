@@ -16,7 +16,9 @@ fix__wait = let (\x x (\_ x)) $ \self_apply_k
 # https://github.com/lambada-llc/tree-calculus/issues/20
 # `fix f` is still a value that unfolds only once an argument arrives, and the
 # knot costs 37 nodes and 13 reductions per iteration where fix__wait's cost 44
-# and 16.
+# and 16. Those 37 nodes are likely optimal: an exhaustive GPU search found
+# no smaller `fix f` tree (lambada-llc/arboretum#55) — reported with the
+# caveat that the search harness itself is unverified.
 fix = let (const (triage △ △ (\q q (△ q)))) $ \knot
       \f △ (△ knot) (△ (compose f (△ (△ knot))))
 stage = \f \x \_ (\_ f) _ x
