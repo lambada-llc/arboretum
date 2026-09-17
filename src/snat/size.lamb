@@ -77,8 +77,9 @@ size__118 = \x (△ (△ _k) (△ _code)) x △
 # shape (RGEN and GEN-TREE, src/certify/size): the chain becomes a
 # minted tree variable of known size, strictly smaller than the split
 # variable, and the induction closes — so the certificate below is as
-# machine-checked as the record's. The lazy certifier has no such rules,
-# and its false stays the conservative false the header describes. Of the
+# machine-checked as the record's. The lazy certifier carries the same two
+# rules, ported (src/certify/size), so its true below rests on the same
+# chain induction read under normal order. Of the
 # weakly normalizing records further down, the 78, the 95 and the 100
 # undercut the certified programs of this family — and only the 78 still
 # undercuts the 90 that holds the eager record itself.
@@ -118,7 +119,7 @@ Certify.Size.computes_size size__118
 Certify.Size.computes_size_eagerly size__103
 # = true
 Certify.Size.computes_size size__103
-# = false
+# = true
 
 # Smaller still, once the program no longer has to strongly normalize.
 # Nathan Farlow found all of these by search: the six older ones
@@ -256,7 +257,7 @@ _to_string = Bool.to_source
 Certify.Size.computes_size_eagerly size__111
 # = true
 Certify.Size.computes_size size__111
-# = false
+# = true
 
 # The eager record, twelve nodes grown onto the 78: Nathan Farlow found this
 # program — and fifteen more 90-node strongly normalizing siblings — by
@@ -312,8 +313,10 @@ size__90 = \t _dispatch_90 (△ (_s (const _step_90) _repack) t) (const △ t)
 # under this build's eager runner, where the __wn family needs
 # Reflect.lazy_eval. What stands behind its being `size` is #55's fuzz
 # testing plus the readback pinning it to the tree the search reported —
-# the record pair's footing exactly; the certifiers stay conservative on
-# it, as at the bottom of this file. Cheaper than the 103 it replaces, too
+# the weak record's footing exactly; the certifiers stay conservative on
+# it, and for the same reason the 78 defeats them: this step reads its own
+# continuation's shape, which no opaque residual survives — the bottom of
+# this file spells it out. Cheaper than the 103 it replaces, too
 # (src/snat/bench.lamb), though still over thrice `size`'s reductions.
 size__smallest = size__90
 
@@ -522,16 +525,19 @@ Certify.Size.computes_size_eagerly size__wn_113
 # = false
 
 # Certify.Size.computes_size asks only for the count, in normal order, and its
-# extended rule system (src/certify/size) closes over two of them: the
-# induction abstracts away the input copies their states drag one constructor
-# behind the live one, and a tail atom caps the spec their left-nested forks
-# would otherwise grow without bound. A true is a proof that the program
-# returns its argument's node count on every tree — which is more than any
-# run of it below can say.
+# extended rule system (src/certify/size) closes over three of them. For the
+# 100 and the 104 the induction abstracts away the input copies their states
+# drag one constructor behind the live one, and a tail atom caps the spec
+# their left-nested forks would otherwise grow without bound. The 95 falls
+# to the eager prover's RGEN and GEN-TREE, since ported: it drives the
+# eager record's own chain step, and the rules close it the same way,
+# residual for accumulator and minted tree for chain. A true is a proof
+# that the program returns its argument's node count on every tree — which
+# is more than any run of it below can say.
 Certify.Size.computes_size size__wn_78
 # = false
 Certify.Size.computes_size size__wn_95
-# = false
+# = true
 Certify.Size.computes_size size__wn_100
 # = true
 Certify.Size.computes_size size__wn_103
@@ -545,8 +551,25 @@ Certify.Size.computes_size size__wn_108
 Certify.Size.computes_size size__wn_113
 # = false
 
-# The 100's certificate, drawn. This is what the extended rules exist for —
-# no eager program's proof tree has a CUT against a ⟨★k⟩ tail, an END
+# The 95's certificate, drawn: the ported rules in two strokes. RGEN
+# generalizes the accumulator seat this machine never reads, the stem case
+# folds outright — no lag to abstract once the seat is opaque — and
+# GEN-TREE hands the fork case's rebuilt chain to the hypothesis as one
+# minted tree.
+_to_string = Option.match "no proof" Certify.Size.render
+Certify.Size.certify_size size__wn_95
+# = RGEN r1
+#     SPLIT t
+#       PEEL
+#         VALUE r1
+#       PEEL
+#         FOLD
+#       PEEL
+#         GEN-TREE G1
+#           FOLD
+
+# The 100's certificate, drawn. This is what the other extended rules exist
+# for — no eager program's proof tree has a CUT against a ⟨★k⟩ tail, an END
 # recording where a phase stopped, an ABSTRACT stripping lag junk, or a
 # FOLD* whose borrowed tail the second pass re-checked.
 _to_string = Option.match "no proof" Certify.Size.render
@@ -717,20 +740,26 @@ _to_string = Bool.to_source
 # The remaining falses are the certifier being conservative, not a finding:
 # false has always meant "no proof within bounds" here. The 103, the 106, the
 # 108 and the 113 defeat its junk and continuation heuristics within its
-# depth; the record pair recurses on chains — what RGEN and GEN-TREE close in
-# the eager system, which the pair's divergence keeps it out of — and the 78
-# passes the loop itself for an accumulator besides. All eight run at all
+# depth — their counts lag behind their traversal, so the spec accrues 1s no
+# phase partition here banks to a tail. The 78 is the ported rules' one
+# near miss: where the 95 never reads its accumulator, the 78's step
+# dispatches on it — _flat reads k's shape — so the opaque residual RGEN
+# seats there blocks the machine instead of riding it, and certifying the
+# 78 would take judgments indexed by the loop's own two continuations,
+# which no rule here carries. The 90 above fails the same way, in both
+# provers: its step is the 78's on that point. All eight run at all
 # only because the certifier reduces over spines (src/quoted/spine.lamb):
 # reading the 103 and the 106 through the term-rebuilding evaluator did not
 # come back under this build's eager runner, which made the analysis a
 # program this repository could not run on its own subject matter.
 #
-# For the 100 and the 104 the count claim is proven above. For the other six
+# For the 100, the 104 and — since the port — the 95 the count claim is
+# proven above. For the other five
 # nothing here establishes they are `size`; what is left of that claim is a
 # smoke test or two apiece below — `_deep_bug` in src/certify/size/test.lamb is
 # not `size`, and returns 5 on id too. The record pair stands additionally on
 # being, node for node, the trees #23 reports fuzz-tested, which the ternary
-# readbacks above pin down.
+# readbacks above pin down — a standing the 95's certificate now outranks.
 _to_string = Snat.to_string
 Reflect.lazy_eval size__smallest__wn id
 # = 5

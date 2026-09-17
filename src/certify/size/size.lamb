@@ -11,7 +11,7 @@
 # abstract Snat: a multiset of `1`s, `|t|`s (the size of tree variable t) and
 # `n`s (the value of an Snat variable). The top goal is `p t ⊨ |t|`. Five rules
 # close it, each either a fact about trees or a step of the induction — the
-# lazy certifier further down extends them with three more, rendered at its
+# lazy certifier further down extends them with five more, rendered at its
 # own header:
 #   • NORMALIZE  reduce the term symbolically, on a budget; opaque variables
 #                block reduction and the evaluator reports the one it waits on
@@ -343,8 +343,8 @@ computes_size_eagerly = _certify _eagerly
 #   ──────────────────────────────────────────────────────── GENERALIZE
 #   Γ ⊢ s ⊨ E   from   Γ ⊢ s[c:=n] ⊨ (E − σEₕ) ⊎ [n]
 #
-# Three additions, each forced by a measured obstruction of the __wn
-# programs, none needed by the eager ones:
+# Five additions. Three are this prover's own, each forced by a measured
+# obstruction of the __wn programs and none needed by the eager ones:
 #
 # SPEC-SPLIT. A lazy program emits successors before consulting its input, so
 # reduction is not blocked on any variable and the SPLIT above never fires.
@@ -387,16 +387,36 @@ computes_size_eagerly = _certify _eagerly
 # borrows that hypothesis's end states for another continuation. That is
 # sound exactly when those ends also satisfy the borrowing cut's spec, which
 # is what [_validate] re-checks across the finished proof before a verdict.
+#
+# The last two additions are the eager prover's own RGEN and GEN-TREE,
+# ported: a chain machine recurses on a rebuilt tree no structural FOLD
+# closes, and the weak record pair drives exactly the eager record's chain
+# step — the 95's, tree for tree. Both rules survive the change of judgment
+# as they stand, ⟨r⟩ meaning normal-order evaluation to r under sum(E)
+# successors. What the port adds is spelled at their definitions: a seed is
+# whatever head-normalizes to △ without consulting a variable, the instance
+# match runs on both sides' standalone normal forms, and each rule keeps to
+# res-owing, star-free specs — so neither tail's semantics ever reads the
+# other's, and no RGEN or GEN-TREE node can sit inside a phase for [_ends]
+# to misread.
 
 # The spec gains a fourth atom: [△ (△ △) k] is ⟨★k⟩, "then whatever the
-# continuation k owes". At most one per spec.
+# continuation k owes". At most one per spec. RGEN further down adds a
+# fifth, [△ (△ △ △) r] — the eager certifier's ⟨r⟩ read under the
+# normal-order judgment: a state owing E ⊎ [⟨r⟩] evaluates to r under
+# sum(E) successors. Also at most one per spec, and never beside a ⟨★⟩:
+# RGEN refuses starred goals and CUT refuses residualed ones, so the two
+# tails never meet and each keeps its one semantics.
 _starx = \k △ (△ △) k
-_atomx = \o1 \osz \oval \ostar triage o1 osz (\c \v triage (oval v) (\_ ostar v) (\_ \_ oval v) c)
-_is_star = _atomx false (\_ false) (\_ false) (\_ true)
-_star_name = _atomx Option.none (\_ Option.none) (\_ Option.none) (\k Option.some k)
+_resx = \r △ (△ △ △) r
+_atomx = \o1 \osz \oval \ostar \ores triage o1 osz (\c \v triage (oval v) (\_ ostar v) (\_ \_ ores v) c)
+_is_star = _atomx false (\_ false) (\_ false) (\_ true) (\_ false)
+_is_res = _atomx false (\_ false) (\_ false) (\_ false) (\_ true)
+_star_name = _atomx Option.none (\_ Option.none) (\_ Option.none) (\k Option.some k) (\_ Option.none)
 _core = List.filter (\a Bool.not (_is_star a))
 _stars = List.filter _is_star
-_atom_var = _atomx Option.none Option.some Option.some Option.none
+_has_resx = List.any _is_res
+_atom_var = _atomx Option.none Option.some Option.some Option.none Option.none
 
 # Fresh names carry the proof path, so every star and hypothesis id minted
 # anywhere in the tree is globally distinct; the leading Snat says what kind
@@ -407,36 +427,43 @@ _n5 = Snat.succ _n4
 _n6 = Snat.succ _n5
 _n7 = Snat.succ _n6
 _n8 = Snat.succ _n7
+_n9 = Snat.succ _n8
+_n10 = Snat.succ _n9
 _genname = \p △ Snat.two p
 _jname = \i \p △ _n3 (△ i p)
 _starname = \p △ _n4 p
+_resname = \p △ _n5 p
 
 # Hypotheses: [△ state (△ spec (△ split_variable id))].
 # [_foldx] matches a hypothesis against a state: the split variable must land
-# strictly below itself, the renamed size atoms must be exactly the goal's,
-# and a tail is bridged whenever both sides have one — a bridge across two
-# different tails borrows the hypothesis's end states for another cut's
-# continuation, so it is recorded and re-checked by [_validate] afterwards.
+# strictly below itself — [_below], so a variable GEN-TREE minted from
+# disjoint proper parts counts — the renamed size atoms must be exactly the
+# goal's, and a tail is bridged whenever both sides have one — a bridge
+# across two different tails borrows the hypothesis's end states for
+# another cut's continuation, so it is recorded and re-checked by
+# [_validate] afterwards. A ⟨r⟩ atom renames like a size atom: the residual
+# must land on a variable.
 _renamex = \s _atomx (Option.some _one) (\v Option.map _sz $ _image s v)
-  (\v Option.map _val $ _image s v) (\_ Option.none)
+  (\v Option.map _val $ _image s v) (\_ Option.none) (\v Option.map _resx $ _image s v)
 _foldx = \a \t Pair.let a $ \state \r Pair.let r $ \spec \r2 Pair.let r2 $ \v \hid
   Option.bind (\s Option.bind
     (\w Bool.match Option.none
       (Option.map (\renamed △ renamed (△ (List.foldr (\at \acc Option.alt (_star_name at) acc) Option.none spec) (△ s hid)))
         (Option.sequence $ List.map (_renamex s) (_core spec)))
-      (_extends v w))
+      (_below v w))
     (_image s v))
     (_match state t [])
 
 # Proof nodes: [△ tag payload], tag an Snat.
 #   0 zero   1 value   2 peel   3 split   4 fold   5 generalize
-#   6 abstract   7 cut   8 end-of-phase
+#   6 abstract   7 cut   8 end-of-phase   9 rgen   10 gen-tree
 _pf = \tag \payload △ tag payload
 # Handlers take the payload; picking one costs only the tag walk.
-_pf_case = \p \z \va \pe \sp \fo \ge \ab \cu \st Pair.let p $ \tag \pay
+_pf_case = \p \z \va \pe \sp \fo \ge \ab \cu \st \rg \gt Pair.let p $ \tag \pay
   (Snat.match z (\t1 Snat.match va (\t2 Snat.match pe
   (\t3 Snat.match sp (\t4 Snat.match fo (\t5 Snat.match ge
-  (\t6 Snat.match ab (\t7 Snat.match cu (\_ st) t7) t6) t5) t4) t3) t2) t1) tag) pay
+  (\t6 Snat.match ab (\t7 Snat.match cu (\t8 Snat.match st
+  (\t9 Snat.match rg (\_ gt) t9) t8) t7) t6) t5) t4) t3) t2) t1) tag) pay
 
 # The states a phase ends in: every tag-8 leaf naming this tail. An abstract
 # (or generalize) node proved its subtree for fresh variables standing for
@@ -453,6 +480,8 @@ _ends = \star fix $ \self \p _pf_case p
   (Pair.match $ \subst \sub List.map (Quoted.apply_record subst) (self sub))
   (Pair.match $ \_ Pair.match $ \phase \obls List.concat (self phase) (List.concat_list $ List.map self obls))
   (Pair.match $ \st \state Bool.match [] [state] (equal st star))
+  (Pair.match $ \_ self)
+  (Pair.match $ \_ self)
 
 # ── ABSTRACT: induction strengthening ────────────────────────────────────────
 # Walk hypothesis state and goal state in parallel, collecting every variable
@@ -637,7 +666,7 @@ _stg_cut = \selfp \depth \path \asms \e \s \blocked
         (\tl2 _sort_ranked $ List.map (\v2 △ (_rank e s v2) v2) (△ c1 tl2))
         (\tl2 [△ Snat.zero c1])
         (List.is_empty tl)) tl) cands))
-    (Nat.is_lte 2 (List.length (_core e)))) △
+    (Bool.and (Bool.not (_has_resx e)) (Nat.is_lte 2 (List.length (_core e))))) △
 _stg_abs = \selfp \depth \path \ca \asms \e \s
   (Bool.match (\u2 (Bool.match (\u3 Option.none) (\u3
     Option.match (\u4 Option.none) (\cand \u4
@@ -647,7 +676,7 @@ _stg_abs = \selfp \depth \path \ca \asms \e \s
       (_at u3 _abstractx path asms e s)
       u3) ca) u2)
     (\u2 Option.none)
-    (List.is_empty asms)) △
+    (Bool.or (List.is_empty asms) (_has_resx e))) △
 _split_at = \selfp \depth \path \asms \e \s \v
   Snat.match Option.none (\d
     let (△ s (△ e (△ v path))) $ \hyp
@@ -668,19 +697,50 @@ _stg_split = \selfp \depth \path \asms \e \s \blocked
       (\v \u3 _at u3 _split_at selfp depth path asms e s v) (_atom_var a) a) e)
     (\v \u2 _at u2 _split_at selfp depth path asms e s v)
     blocked △
+
+# RGEN, ported from the eager prover: when the split fails on a plain goal —
+# no assumptions yet, no tail of either kind — an accumulator seed down the
+# state's right application spine becomes an opaque residual r and the goal
+# is retried owing ⟨r⟩, so that the hypothesis the next split records ranges
+# over every accumulator. Proving the goal under ⟨r⟩ proves it at r := △,
+# and ⟨△⟩ is the plain judgment, a stack over a leaf being an Snat. One lazy
+# widening: a whnf state still spells its k seat [const △ t] where the eager
+# states have long reduced it, so a seed is any argument whose head normal
+# form is △ with no blocker — a reduction that inspected no variable, so it
+# reaches △ under every instantiation and r := △ still recovers the goal.
+_sbudget = Snat.from_nat 100
+_seedish = \x Option.match false (Pair.match $ \t \b
+    Option.match (triage true (\_ false) (\_ \_ false) t) (\_ false) b)
+  (Quoted.head_normalize _sbudget x)
+_rgen_sitesx = \r fix $ \self triage [] (\_ []) (\f \x
+  List.concat (Bool.match [] [△ f (_var r)] (_seedish x))
+    (List.map (△ f) (self x)))
+_stg_split2 = \selfp \depth \path \asms \e \s \blocked
+  Option.match
+    (\u2 (Bool.match (\u3 Option.none) (\u3
+        let (_resname path) $ \r
+        _at u3 _first (\s2 Option.map (\pf _pf _n9 (△ r pf))
+            (_at s2 selfp s2 depth (△ _n9 path) true asms (△ (_resx r) e)))
+          (_rgen_sitesx r s))
+        (Bool.and (List.is_empty asms)
+          (Bool.and (List.is_empty (_stars e)) (Bool.not (_has_resx e))))) u2)
+    (\pf \u2 Option.some pf)
+    (_stg_split selfp depth path asms e s blocked) △
+
 _stg_read = \selfp \depth \path \asms \e \s \blocked
   triage
     ((Bool.match (\_ Option.none) (\_ Option.some (_pf Snat.zero △)) (List.is_empty e)) △)
-    (\n (Bool.match (\_ Option.none) (\_ Option.some (_pf Snat.one n)) (_spec_eq e [_val n])) △)
+    (\n (Bool.match (\_ Option.none) (\_ Option.some (_pf Snat.one n))
+      (Bool.or (_spec_eq e [_val n]) (_spec_eq e [_resx n]))) △)
     (\f \x (triage
       (\u2 Option.match
-        (\u3 _at u3 _stg_split selfp depth path asms e s blocked)
+        (\u3 _at u3 _stg_split2 selfp depth path asms e s blocked)
         (\e2 \u3 Option.map (_pf Snat.two) (_at u3 selfp x depth (△ _n6 (△ _n6 path)) true asms e2))
         (_remove _one e) u2)
-      (\g \u2 _at u2 _stg_split selfp depth path asms e s blocked)
+      (\g \u2 _at u2 _stg_split2 selfp depth path asms e s blocked)
       (\ff \fx \u2 (triage (\u3 Option.none)
-        (\g2 \u3 _at u3 _stg_split selfp depth path asms e s blocked)
-        (\g2 \g3 \u3 _at u3 _stg_split selfp depth path asms e s blocked) ff) u2)
+        (\g2 \u3 _at u3 _stg_split2 selfp depth path asms e s blocked)
+        (\g2 \g3 \u3 _at u3 _stg_split2 selfp depth path asms e s blocked) ff) u2)
       f) △)
     s
 
@@ -696,6 +756,59 @@ _lazilyx = \q (Option.match
   (\r \_ Option.some r)
   (Quoted.normalize_lazy _nf_budget q)) △
 
+# GEN-TREE, ported from the eager prover: a subterm a hypothesis proves
+# evaluates to a known-size chain — part sizes stacked over a residual —
+# becomes a fresh tree variable, its parts recorded in its name for
+# [_foldx]'s widened measure; the stem-up attempt and the 1 it returns to
+# the spec are the eager rule's. Two lazy differences. The instance match
+# runs on both sides' own normal forms: a whnf state leaves its guts at
+# whatever stage the budget reached, so hypothesis and candidate spellings
+# agree only once each is normalized alone — and on the variable-to-variable
+# instances the rule wants, the two standalone reductions are isomorphic and
+# truncate at the same places. And the rule is gated to goals owing a ⟨r⟩
+# against a hypothesis owing one: without RGEN's residual there is no chain
+# judgment to instantiate — which also keeps it out of every phase, since a
+# spec never carries both tails.
+_norm_t = \q Option.map Pair.fst (_lazilyx q)
+_resvarx = _atomx Option.none (\_ Option.none) (\_ Option.none) (\_ Option.none) Option.some
+_foldxn = \a \t Pair.let a $ \state \r Pair.let r $ \spec \r2 Pair.let r2 $ \v \hid
+  (Bool.match (\u
+    Option.bind (\sN Option.bind (\tN
+      Option.bind (\s Option.bind
+        (\w Bool.match Option.none
+          (Option.sequence $ List.map (_renamex s) (_core spec))
+          (_below v w))
+        (_image s v))
+        (_match sN tN []))
+      (_at sN _norm_t t)) (_at u _norm_t state))
+    (\u Option.none)
+    (List.any _is_star spec)) △
+_stg_gentree = \selfp \depth \path \asms \e \s
+  (Bool.match (\u2 Option.none) (\u2
+    _at u2 _first (\c _first (\a
+      let (\k1s \fopt Option.bind (\f
+            Option.bind (\b
+              let (List.filter (\at Option.match true (\_ false) (_resvarx at)) f) $ \core2
+              Option.bind (\parts
+                Option.bind (\rest
+                  Option.bind (\rest2
+                    let (_gname (List.concat parts [b])) $ \gn
+                    Option.map (\sub _pf _n10 (△ (△ gn c) sub))
+                      (_at rest2 selfp (_replace c (_var gn) s) depth (△ _n10 path) true asms
+                        (△ (_sz gn) (List.concat k1s rest2))))
+                  (_remove (_sz b) rest))
+                (_minus core2 e))
+              (Option.sequence $ List.map
+                (_atomx Option.none Option.some (\_ Option.none) (\_ Option.none) (\_ Option.none)) core2))
+            (List.foldr (\at \acc Option.alt (_resvarx at) acc) Option.none f))
+          fopt) $ \attempt
+      Option.match (\u3 _at u3 attempt [_one] (_at u3 _foldxn a (_app △ c))) (\pf \u3 Option.some pf)
+        (attempt [] (_foldxn a c)) △)
+      asms) (_subterms s))
+    (Bool.and (_has_resx e)
+      (Bool.and (List.is_empty (_stars e))
+        (List.any (\a2 Pair.let a2 $ \st2 \r5 Pair.let r5 $ \sp2 \_ _has_resx sp2) asms)))) △
+
 _depthx = Snat.from_nat 5
 _sizecap = 20000
 _provex = fix $ \selfp \q \depth \path \ca \asms \e
@@ -703,7 +816,8 @@ _provex = fix $ \selfp \q \depth \path \ca \asms \e
   (Bool.match (\_ \_ Option.none) (\_ \selfp
   let (List.foldr (\at \acc Option.alt (_star_name at) acc) Option.none e) $ \gstar
   let (\u5 _try u5
-    [ \u6 _at u6 _stg_star e s
+    [ \u6 _at u6 _stg_gentree selfp depth path asms e s
+    ; \u6 _at u6 _stg_star e s
     ; \u6 _at u6 _stg_cut selfp depth path asms e s blocked
     ; \u6 _at u6 _stg_abs selfp depth path ca asms e s
     ; \u6 _at u6 _stg_read selfp depth path asms e s blocked
@@ -740,6 +854,8 @@ _walk_cuts = fix $ \self \p _pf_case p (\_ []) (\_ []) self
   (Pair.match $ \info Pair.match $ \phase \obls
     △ info (List.concat (self phase) (List.concat_list (List.map self obls))))
   (\_ [])
+  (Pair.match $ \_ self)
+  (Pair.match $ \_ self)
 _walk_splits = fix $ \self \p _pf_case p (\_ []) (\_ []) self
   (Pair.match $ \vp \kids △ (△ (Pair.snd vp) (_pf _n3 (△ vp kids)))
     (List.concat_list (List.map self kids)))
@@ -749,6 +865,8 @@ _walk_splits = fix $ \self \p _pf_case p (\_ []) (\_ []) self
   (Pair.match $ \_ Pair.match $ \phase \obls
     List.concat (self phase) (List.concat_list (List.map self obls)))
   (\_ [])
+  (Pair.match $ \_ self)
+  (Pair.match $ \_ self)
 _walk_borrows = fix $ \self \p _pf_case p (\_ []) (\_ []) self
   (Pair.match $ \_ \kids List.concat_list (List.map self kids))
   (Option.match [] (\c [c]))
@@ -757,6 +875,8 @@ _walk_borrows = fix $ \self \p _pf_case p (\_ []) (\_ []) self
   (Pair.match $ \_ Pair.match $ \phase \obls
     List.concat (self phase) (List.concat_list (List.map self obls)))
   (\_ [])
+  (Pair.match $ \_ self)
+  (Pair.match $ \_ self)
 
 _validate = \proof
   let (_walk_cuts proof) $ \cuts
@@ -795,37 +915,54 @@ _names_in = fix $ \self \p _pf_case p
         [] (Pair.fst r))
       (List.concat (self phase) (List.concat_list (List.map self obls))))
   (\_ [])
+  (Pair.match $ \r \sub △ r (self sub))
+  (Pair.match $ \nc \sub Pair.let nc $ \gn \_ △ gn (self sub))
 
-# Assign the generated names their display names, a counter per kind.
-_num_step = \env \cg \cj \ck \n List.match (△ env (△ cg (△ cj ck))) (\hd \tl
-  (Bool.match
-    (\_ Snat.match (△ env (△ cg (△ cj ck))) (\h2 Snat.match (△ env (△ cg (△ cj ck))) (\h3
-      Snat.match (△ (△ (△ n (List.concat "g" (Nat.to_source cg))) env) (△ (Nat.add cg 1) (△ cj ck)))
-      (\h4 Snat.match (△ (△ (△ n (List.concat "j" (Nat.to_source cj))) env) (△ cg (△ (Nat.add cj 1) ck)))
-        (\_ △ (△ (△ n (List.concat "k" (Nat.to_source ck))) env) (△ cg (△ cj (Nat.add ck 1)))) h4) h3) h2) hd)
-    (\_ △ env (△ cg (△ cj ck)))
-    (Snat.is_lt hd Snat.two)) △) n
+# Assign the generated names their display names, a counter per kind. A
+# minted GEN-TREE name leads with a fork where every other kind leads with
+# a Snat, so the fork case numbers it under its own counter.
+_num_step = \env \cg \cj \ck \cr \cG \n
+  let (△ env (△ cg (△ cj (△ ck (△ cr cG))))) $ \same
+  List.match same (\hd \tl
+    (triage
+      (\u2 same)
+      (\c2 Bool.match
+        (\u2 Snat.match same (\h2 Snat.match same (\h3
+          Snat.match (△ (△ (△ n (List.concat "g" (Nat.to_source cg))) env) (△ (Nat.add cg 1) (△ cj (△ ck (△ cr cG)))))
+          (\h4 Snat.match (△ (△ (△ n (List.concat "j" (Nat.to_source cj))) env) (△ cg (△ (Nat.add cj 1) (△ ck (△ cr cG)))))
+          (\h5 Snat.match (△ (△ (△ n (List.concat "k" (Nat.to_source ck))) env) (△ cg (△ cj (△ (Nat.add ck 1) (△ cr cG)))))
+          (\_ △ (△ (△ n (List.concat "r" (Nat.to_source cr))) env) (△ cg (△ cj (△ ck (△ (Nat.add cr 1) cG))))) h5) h4) h3) h2) hd)
+        (\u2 same)
+        (Snat.is_lt hd Snat.two))
+      (\a2 \b2 \u2 △ (△ (△ n (List.concat "G" (Nat.to_source cG))) env) (△ cg (△ cj (△ ck (△ cr (Nat.add cG 1))))))
+      hd) △) n
 _number_names = \names Pair.fst $ List.foldl (\acc \n Pair.let acc $ \env \cnt
-    Pair.let cnt $ \cg \r2 Pair.let r2 $ \cj \ck
-    Option.match (_num_step env cg cj ck n) (\_ acc) (List.lookup n env))
-  (△ [] (△ 1 (△ 1 1))) names
+    Pair.let cnt $ \cg \r2 Pair.let r2 $ \cj \r3 Pair.let r3 $ \ck \r4 Pair.let r4 $ \cr \cG
+    Option.match (_num_step env cg cj ck cr cG n) (\_ acc) (List.lookup n env))
+  (△ [] (△ 1 (△ 1 (△ 1 (△ 1 1))))) names
 
 _render_name = \env \n Option.match
   (List.match "t" (\hd \tl
-    (Bool.match
-      (\_ List.concat
-        (Snat.match "?" (\h2 Snat.match "?" (\h3 Snat.match "g"
-          (\h4 Snat.match "j" (\_ "k") h4) h3) h2) hd)
-        (List.concat_list (List.map Snat.to_string (List.reverse tl))))
-      (\_ List.concat "t" (List.concat_list (List.map Snat.to_string
+    (triage
+      (List.concat "t" (List.concat_list (List.map Snat.to_string
         (List.match [] (\h2 \t2 t2) (List.reverse n)))))
-      (Snat.is_lt hd Snat.two)) n) n)
+      (\_ (Bool.match
+        (\_ List.concat
+          (Snat.match "?" (\h2 Snat.match "?" (\h3 Snat.match "g"
+            (\h4 Snat.match "j" (\h5 Snat.match "k" (\_ "r") h5) h4) h3) h2) hd)
+          (List.concat_list (List.map Snat.to_string (List.reverse tl))))
+        (\_ List.concat "t" (List.concat_list (List.map Snat.to_string
+          (List.match [] (\h2 \t2 t2) (List.reverse n)))))
+        (Snat.is_lt hd Snat.two)) △)
+      (\_ \_ "G")
+      hd)) n)
   id
   (List.lookup n env)
 _render_atom = \env _atomx "1"
   (\v List.concat "|" (List.concat (_render_name env v) "|"))
   (_render_name env)
   (\k List.concat "*" (_render_name env k))
+  (\r List.concat "<" (List.concat (_render_name env r) ">"))
 _render_spec = \env \e List.concat "["
   (List.concat (List.join "," (List.map (_render_atom env) e)) "]")
 
@@ -852,7 +989,10 @@ render = \pf let (_number_names (_names_in pf)) $ \env
   (Pair.match $ \info Pair.match $ \phase \obls Pair.let info $ \st \r
     △ (List.concat ind (List.concat "CUT " (_render_spec env (Pair.fst r))))
       (List.concat (self ind2 phase) (List.concat_list (List.map (self ind2) obls))))
-  (Pair.match $ \st \state [List.concat ind "END"])) "" pf
+  (Pair.match $ \st \state [List.concat ind "END"])
+  (Pair.match $ \r \sub △ (List.concat ind (List.concat "RGEN " (_render_name env r))) (self ind2 sub))
+  (Pair.match $ \nc \sub Pair.let nc $ \gn \_
+    △ (List.concat ind (List.concat "GEN-TREE " (_render_name env gn))) (self ind2 sub))) "" pf
 
 # certify_size p — the proof that p returns its argument's node count, as an
 # Snat, for every tree, under normal-order evaluation; or none.
