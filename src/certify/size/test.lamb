@@ -146,3 +146,21 @@ Certify.Size.computes_size _chain_dropped
 # = false
 Certify.Size.computes_size _chain_unpaid
 # = false
+
+# The record pair's near-siblings, from the search neighborhood #55 mapped:
+# the 90 with the 78's narrower pruning seated (87 nodes), and with the
+# door's carried copy handed on bare (89 nodes). Both miscount — on some
+# input their normal form is not an Snat at all — and reduction is
+# confluent, so they are wrong in every order. REL must refuse them: the
+# co-reduction their certificates would need never meets, and the use
+# obligations never close.
+_pruned_90 = Serialize.ternary_decode "212120220021211000121202120112011220021201002121200121100212120001011202200212201000200"
+_doored_90 = Serialize.ternary_decode "21212022002121000121202120112011220021110211002121200121100212120001011202200212201000200"
+Certify.Size.computes_size _pruned_90
+# = false
+Certify.Size.computes_size _doored_90
+# = false
+Certify.Size.computes_size_eagerly _pruned_90
+# = false
+Certify.Size.computes_size_eagerly _doored_90
+# = false

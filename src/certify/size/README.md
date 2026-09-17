@@ -28,21 +28,23 @@ tactic script.
 [`expect-test-out/`](./expect-test-out/) —
 `SizeProof125.lean` (the superseded `size__125`), `SizeProof118.lean`,
 and `SizeProof103.lean` — the last of these is the smallest size program
-with an eager certificate, and so the smallest this exporter covers. (The
-smallest with any machine-checked count is now Nathan Farlow's weakly
-normalizing 95: the lazy certifier carries the eager prover's chain rules
-— RGEN and GEN-TREE, ported — and closes it, but that certificate is
-normal-order-only, so there is no derivation to export.) The eager record itself has moved below
-it: Nathan Farlow's fuzz-tested 90 (lambada-llc/arboretum#55) strongly
-normalizes, but its loop keeps the modules' stem-stacking invariant only
-for its own continuations, so it gets `none` too — the theorem these
-modules state is false of its loop value, not merely unproven;
-`lean_test.lamb` records the counterexample. The weakly normalizing
-programs — the 100, and the `__wn` records proper, Nathan Farlow's 78 and
-95 (lambada-llc/arboretum#23) — get `none`
+this exporter covers. (The smallest with any machine-checked count is now
+Nathan Farlow's weakly normalizing 78 — the record itself: the certifier's
+REL rules judge its accumulator-reading loop against the loop value it
+feeds itself, and close it under the normal-order judgment. The eager
+record, his 90, carries certifier certificates under **both** judgments
+the same way.) The 90 still gets `none` from this exporter: its loop keeps
+the modules' stem-stacking invariant only for its own continuations, so
+the theorem these modules state is false of its loop value, not merely
+unproven — `lean_test.lamb` records the counterexample — and the
+continuation-indexed statement the certifier proves instead is not yet one
+this emitter can state. The weakly normalizing programs — the 100, and the
+`__wn` records proper, Nathan Farlow's 78 and 95
+(lambada-llc/arboretum#23) — get `none`
 rather than a module: they converge in normal order only, so there is no
 big-step computation to replay; exporting the lazy certificates
-(CUT/ABSTRACT phase structure over small-step semantics) is future work.
+(CUT/ABSTRACT phase structure over small-step semantics) and the REL
+co-reductions is future work.
 
 ## Checking a module
 
