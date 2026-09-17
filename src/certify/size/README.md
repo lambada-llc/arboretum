@@ -28,7 +28,11 @@ tactic script.
 [`expect-test-out/`](./expect-test-out/) —
 `SizeProof125.lean` (the superseded `size__125`), `SizeProof118.lean`,
 and `SizeProof103.lean` — the last of these is the smallest size program
-either certifier can vouch for. The eager record itself has moved below
+with an eager certificate, and so the smallest this exporter covers. (The
+smallest with any machine-checked count is now Nathan Farlow's weakly
+normalizing 95: the lazy certifier carries the eager prover's chain rules
+— RGEN and GEN-TREE, ported — and closes it, but that certificate is
+normal-order-only, so there is no derivation to export.) The eager record itself has moved below
 it: Nathan Farlow's fuzz-tested 90 (lambada-llc/arboretum#55) strongly
 normalizes, but its loop keeps the modules' stem-stacking invariant only
 for its own continuations, so it gets `none` too — the theorem these

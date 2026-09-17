@@ -133,3 +133,16 @@ Certify.Size.computes_size_eagerly _chain_dropped
 # = false
 Certify.Size.computes_size_eagerly _chain_unpaid
 # = false
+
+# The same family under the lazy judgment, now that RGEN and GEN-TREE are
+# ported there: the real one closes identically — residual for the
+# accumulator seat, a minted tree for the chain — and the accounting
+# rejects the mutants for the same reasons as above.
+Certify.Size.computes_size _chain
+# = true
+Certify.Size.computes_size _chain_twice
+# = false
+Certify.Size.computes_size _chain_dropped
+# = false
+Certify.Size.computes_size _chain_unpaid
+# = false
