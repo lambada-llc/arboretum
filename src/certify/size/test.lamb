@@ -164,3 +164,21 @@ Certify.Size.computes_size_eagerly _pruned_90
 # = false
 Certify.Size.computes_size_eagerly _doored_90
 # = false
+
+# The lag pair's near-siblings, carved the same way: two single-position
+# mutations of the 108's assembly that still converge in normal order but
+# return the wrong count on some probe input — one subtle (three of seven),
+# one blunter. USE∀ must refuse them: the seat-polymorphic obligations are
+# false of the machines they describe, and its leaf case's own arithmetic —
+# one wrap, one count, the bare seat — is exactly where a miscounting
+# sibling misses.
+_shifted_108 = Serialize.ternary_decode "21212021110102021202120112011200212120012110021212021202120001021202120001120212021200010102121000210200"
+_pruned_108 = Serialize.ternary_decode "2121202111010202120212011201120021212001200212120212021200010212021200011202120212000101120102121000210200"
+Certify.Size.computes_size _shifted_108
+# = false
+Certify.Size.computes_size _pruned_108
+# = false
+Certify.Size.computes_size_eagerly _shifted_108
+# = false
+Certify.Size.computes_size_eagerly _pruned_108
+# = false

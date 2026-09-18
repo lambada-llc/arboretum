@@ -552,7 +552,7 @@ Certify.Size.computes_size_eagerly size__wn_113
 # = false
 
 # Certify.Size.computes_size asks only for the count, in normal order, and its
-# extended rule system (src/certify/size) closes over four of them. For the
+# extended rule system (src/certify/size) closes over six of them. For the
 # 100 and the 104 the induction abstracts away the input copies their states
 # drag one constructor behind the live one, and a tail atom caps the spec
 # their left-nested forks would otherwise grow without bound. The 95 falls
@@ -561,9 +561,13 @@ Certify.Size.computes_size_eagerly size__wn_113
 # residual for accumulator and minted tree for chain. The 78 — the record —
 # falls to the REL pair: its step hands the loop itself in as accumulator
 # and reads its shape, so no residual rides it, and REL instead judges each
-# state against that loop value, paying the difference by co-reduction. A
-# true is a proof that the program returns its argument's node count on
-# every tree — which is more than any run of it below can say.
+# state against that loop value, paying the difference by co-reduction. The
+# 108 and the 113 follow through USE∀: their loops bank each deferred
+# traversal in the continuation itself, so the seat is no closed value USE
+# could name — the obligation quantifies the seat away instead, and every
+# level's grown bank is one of its instances. A true is a proof that the
+# program returns its argument's node count on every tree — which is more
+# than any run of it below can say.
 Certify.Size.computes_size size__wn_78
 # = true
 # The weak record's certificate: three cases, and the machine's whole
@@ -603,6 +607,15 @@ Certify.Size.computes_size size__wn_108
 Certify.Size.computes_size size__wn_113
 # = false
 
+# The lag pair's certificate, drawn below for the 108: the whole descent is
+# REL against the loop value, and inside it every bank the machine defers —
+# a traversal per fork, stacked into the continuation seat — is collapsed by
+# the seat-polymorphic use, obligation first, continuation after.
+_to_string = Option.match "no proof" Certify.Size.render
+Certify.Size.certify_size size__wn_108
+# = SPLIT t
+
+_to_string = Bool.to_source
 # The 95's certificate, drawn: the ported rules in two strokes. RGEN
 # generalizes the accumulator seat this machine never reads, the stem case
 # folds outright — no lag to abstract once the seat is opaque — and
@@ -790,24 +803,28 @@ Certify.Size.certify_size size__wn_100
 _to_string = Bool.to_source
 
 # The remaining falses are the certifier being conservative, not a finding:
-# false has always meant "no proof within bounds" here. The 103, the 106, the
-# 108 and the 113 defeat its junk and continuation heuristics within its
-# depth — their counts lag behind their traversal, so the spec accrues 1s no
-# phase partition here banks to a tail, and REL finds no hypothesis worth
-# paying toward: what they would take is an atom for the count a state has
-# banked but not yet emitted, which no rule here carries. The 78 was the
-# hardest true above: where the 95 never reads its accumulator, the 78's
-# step dispatches on it — _flat reads k's shape — so the opaque residual
-# RGEN seats there blocks the machine instead of riding it; the REL pair
-# judges its states against the loop value they feed themselves instead,
-# and the 90 fell with it, in both provers. All eight run at all
+# false has always meant "no proof within bounds" here. The 103 and the 106
+# defeat its junk and continuation heuristics within its depth: no seat in
+# their states anchors the count they owe — it lives in the dispatch algebra
+# across four-thousand-node states — and what they would take is an atom for
+# the count a state has banked but not yet emitted, which no rule here
+# carries. The 78 was the hardest true above: where the 95 never reads its
+# accumulator, the 78's step dispatches on it — _flat reads k's shape — so
+# the opaque residual RGEN seats there blocks the machine instead of riding
+# it; the REL pair judges its states against the loop value they feed
+# themselves instead, and the 90 fell with it, in both provers. The 108 and
+# the 113 went last, to USE∀: their banks are whole deferred traversals, no
+# closed continuation to collapse toward, so the use obligation is stated
+# once over an opaque seat and an opaque carried copy, and every level of
+# the descent — each grown bank layer included — is an instance of the one
+# statement. All eight run at all
 # only because the certifier reduces over spines (src/quoted/spine.lamb):
 # reading the 103 and the 106 through the term-rebuilding evaluator did not
 # come back under this build's eager runner, which made the analysis a
 # program this repository could not run on its own subject matter.
 #
-# For the 78, the 95, the 100 and the 104 the count claim is proven above.
-# For the other four
+# For the 78, the 95, the 100, the 104, the 108 and the 113 the count claim
+# is proven above. For the other two
 # nothing here establishes they are `size`; what is left of that claim is a
 # smoke test or two apiece below — `_deep_bug` in src/certify/size/test.lamb is
 # not `size`, and returns 5 on id too. The record pair stands additionally on
