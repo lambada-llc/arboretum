@@ -34,8 +34,11 @@ Certify.Size.lean_size_proof "SizeProof100.lean" Snat.size__wn_100
 # only for its own continuations: applied to △ it answers △^(sz t) △, but
 # on a foreign next argument it stacks △ △ wrappers instead — its self at
 # △ then △ △ △ leaves △ △ (△ △ △) — so the quantified theorem is
-# false of it, not merely unproven. Its being `size` stands on the fuzz
-# testing and readback recorded in src/snat/size.lamb, not on a
-# certificate.
+# false of it, not merely unproven. The certifier itself now proves the 90
+# under both its judgments (the REL rules judge the loop against the one
+# continuation it actually feeds itself, src/certify/size), but that
+# continuation-indexed statement is not the every-continuation invariant
+# this emitter states, so no module: extending the export to REL
+# certificates is future work alongside the phase structure.
 Certify.Size.lean_size_proof "SizeProof90.lean" Snat.size__90
 # = none

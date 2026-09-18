@@ -11,7 +11,7 @@
 # abstract Snat: a multiset of `1`s, `|t|`s (the size of tree variable t) and
 # `n`s (the value of an Snat variable). The top goal is `p t ⊨ |t|`. Five rules
 # close it, each either a fact about trees or a step of the induction — the
-# lazy certifier further down extends them with five more, rendered at its
+# lazy certifier further down extends them with seven more, rendered at its
 # own header:
 #   • NORMALIZE  reduce the term symbolically, on a budget; opaque variables
 #                block reduction and the evaluator reports the one it waits on
@@ -33,7 +33,7 @@
 #                it the analysis chases an unbounded family of accumulator
 #                states; with it, the state space is finite.
 #
-# [computes_size_eagerly]'s prover has two rules of its own, added for the
+# [computes_size_eagerly]'s prover has four rules of its own, added for the
 # programs whose recursion is not on a subtree of the input:
 #   • RGEN       a literal △ in argument position down the state's spine — an
 #                accumulator seed — becomes an opaque residual r, and the spec
@@ -51,6 +51,18 @@
 #                is what closes recursion on rebuilt trees — the chain step of
 #                Snat.size__103 among them — where structural FOLD
 #                cannot.
+#   • REL-FOLD   FOLD widened to a goal that is no instance of any
+#                hypothesis: an instance strictly below closes it anyway if
+#                the two states co-reduce apart by exactly what is left of
+#                the spec — the difference is proven, not matched.
+#   • REL-USE    inside that co-reduction, a machine handed its own loop
+#                value as its accumulator is collapsed to that value's
+#                continuation, one size atom paid. An opaque residual blocks
+#                a step that reads its accumulator's shape; this rule rides
+#                it instead, and is what certifies the record pair — the 78
+#                and the 90, whose fork case is self u self v k. Both are
+#                spelled out at their definitions below, and shared with the
+#                lazy prover.
 #
 # Generalization is what makes the certificate style-agnostic: `1+(|a|+|b|)` and
 # an accumulator threaded through the traversal reduce differently, and both
@@ -253,6 +265,226 @@ _rgen_sites = \r fix $ \self triage [] (\_ []) (\f \x
   List.concat (triage [△ f (_var r)] (\_ []) (\_ \_ []) x)
     (List.map (△ f) (self x)))
 
+# ── REL: fold up to co-reduction with a paid difference ──────────────────────
+# The record pair's step hands the loop itself in as its accumulator, so its
+# states grow an argument list — self u₁ self u₂ self … v △ — that no state is
+# ever an instance of, and the certifier climbs a tower it cannot close. Two
+# rules end that, shared by both provers below.
+#
+#   REL(s, b, F): under every instantiation of their shared variables, s
+#   evaluates to sum(F) more successors than b, wherever b's count is defined.
+#
+#   (S,Eh,v) ∈ Γ   σ = [v := w]   w strictly below v   REL(s, σS, E − σEh)
+#   ─────────────────────────────────────────────────────────────── REL-FOLD
+#   Γ ⊢ s ⊨ E
+#
+# — the plain FOLD widened: the goal state need not be an instance of the
+# hypothesis, it only has to cost a difference the spec can pay. REL itself is
+# proved by co-reduction: normalize both sides, strip stems they emit in step,
+# pay a stem only the left side emits with a 1 of the difference, close by
+# syntactic identity once nothing is owed, case-split the variable both sides
+# wait on (recording the goal PAIR as a hypothesis, reusable strictly below
+# its split variable, other variables quantified as ever), and collapse the
+# machine feeding itself forward with:
+#
+#   s = P·x·κC·T   REL(△(P·x·C·T), C·T, [|x|])   (the use obligation)
+#   ─────────────────────────────────────────────────── REL-USE
+#   REL(s, b, F)   from   REL(C·T, △b, F − [|x|])
+#
+# P closed, x the variable s waits on, κC a seat whose head normalization is
+# blocker-free at the closed value C ≠ △ (the reduction consulted no variable,
+# so it reaches C under every instantiation — _seedish generalized), and T
+# alternating (tree, seat) pairs whose seats reduce likewise to C, except the
+# last, to △. The obligation says one △-wrap of the machine-at-x costs |x|
+# over its own continuation at the same tail; the rewrite is then arithmetic:
+# count(s) = |x| − 1 + count(C·T), so count(C·T) = (F − |x|) + count(△b).
+# Obligations are stated for every valid tail and proven by induction on x
+# alone — an obligation whose anchor (P and C, syntactically) matches an
+# ancestor obligation's at a strictly smaller x is closed by that induction
+# hypothesis outright, whatever its tail: on any concrete input the claims
+# instantiate to statements about strict subtrees, so the descent grounds.
+# An obligation reaching its own anchor at the same x fails instead. REL
+# specs never carry a ⟨★⟩ or ⟨r⟩, so neither tail's semantics is ever read
+# here, and no REL node can sit inside a phase for [_ends] to misread.
+
+_closedq = fix $ \self triage true (\_ false) (\f \x Bool.and (self f) (self x))
+_cbudget = Snat.from_nat 2000
+_contish = \x Option.bind (Pair.match $ \t \b Option.match
+    (Bool.match Option.none (Option.some t) (_closedq t)) (\_ Option.none) b)
+  (Quoted.head_normalize _cbudget x)
+# Replace every argument down a state's spine that reduces blocker-free to a
+# closed value by that value: a redex's parametric reduct, so the state's
+# meaning is unchanged and spellings from different routes meet.
+_seat_norm = fix $ \self triage △ (\n _var n)
+  (\f \x _app (self f) (Option.match x id (_contish x)))
+_stemq = triage Option.none (\_ Option.none)
+  (\f \x triage (Option.some x) (\_ Option.none) (\_ \_ Option.none) f)
+_spinel = \t (fix $ \self \t \acc triage (△ △ acc) (\n △ (_var n) acc)
+  (\f \x self f (△ x acc)) t) t []
+_unspine = List.foldl _app
+_split_at_var = \x \args (fix $ \self \pre List.match Option.none (\hd \tl
+  Bool.match (\u _at u self (△ hd pre) tl) (\u Option.some (△ (List.reverse pre) tl))
+    (equal hd (_var x)) △)) [] args
+# The trailing (tree, seat) pairs, seats normalized: C between, △ to close.
+_tailn = \kv fix $ \self List.match Option.none (\v \tl List.match Option.none (\seat \tl2
+  Option.bind (\cv List.match
+      (triage (Option.some [v; △]) (\_ Option.none) (\_ \_ Option.none) cv)
+      (\h2 \t2 Bool.match Option.none (Option.map (\r △ v (△ kv r)) (self tl2)) (equal cv kv))
+      tl2)
+    (_contish seat)) tl)
+_usemark = [Snat.from_nat 10; Snat.from_nat 10]
+# The anchor: △(P·x·C·T) and C·T as complete states, and the anchor key P·◇·C.
+_use_pack = \hd \pre \x \c \tn Option.some (△
+  (_app △ (_unspine hd (List.concat pre (△ (_var x) (△ c tn)))))
+  (△ (_unspine c tn) (_unspine hd (List.concat pre [_var _usemark; c]))))
+_rel_use_scan = \s \x Pair.let (_spinel s) $ \hd \args
+  Bool.match Option.none
+    (Option.bind (Pair.match $ \pre \rest
+      Bool.match Option.none
+        (List.match Option.none (\seat \tl
+          Option.bind (\c
+            Bool.match Option.none
+              (Option.bind (\tn _use_pack hd pre x c tn) (_tailn c tl))
+              (triage false (\_ true) (\_ \_ true) c))
+            (_contish seat)) rest)
+        (List.all _closedq pre))
+      (_split_at_var x args))
+    (triage true (\_ false) (\_ \_ false) hd)
+# REL proof nodes, a small language of their own: [△ tag payload] with
+#   0 SAME   1 FOLD (a pair hypothesis)   2 CASE (△ v kids)
+#   3 USE (△ x (△ obligation continuation))   4 IH (an obligation closed by
+#   the anchor induction)
+_rpf = \tag \payload △ tag payload
+# One co-normalization round: both sides to value and blocker, stems aligned.
+# Answers [△ state (△ blocker (△ state2 (△ blocker2 F)))], none on a budget.
+_rstrips = Snat.from_nat 40
+_rel_norm2 = \nfx fix $ \self \sfu \s \b \df
+  Snat.match Option.none (\sfu
+  Option.bind (Pair.match $ \sv \sb
+  Option.bind (Pair.match $ \bv \bb
+    Option.match
+      (\u2 Option.some (△ sv (△ sb (△ bv (△ bb df)))))
+      (\sx \u2 Option.match
+        (\u3 Option.match (\u4 Option.some (△ sv (△ sb (△ bv (△ bb df)))))
+          (\df2 \u4 _at u4 self sfu sx b df2) (_remove _one df) u3)
+        (\bx \u3 _at u3 self sfu sx bx df)
+        (_stemq bv) u2)
+      (_stemq sv) △)
+    (nfx b))
+  (nfx s)) sfu
+_rel_fold_try = \rasms \sn \bn \df _first (\h Pair.let h $ \hs \r Pair.let r $ \hb \r2
+  Pair.let r2 $ \hf \v
+  Option.bind (\s1 Option.bind (\s2
+      Option.bind (\w Bool.match Option.none
+        (Option.bind (\ren Bool.match Option.none (Option.some △) (_spec_eq ren df))
+          (Option.sequence $ List.map (_rename s2) hf))
+        (_below v w))
+      (_image s2 v))
+    (_match hb bn s1))
+  (_match hs sn [])) rasms
+_relsize = 6000
+_reldepth = Snat.from_nat 5
+_relwork = Snat.from_nat 400
+# USE, always answering [△ fuel2 result] so what a failed attempt spent is
+# spent for the split that follows it too.
+_rel_try_use = \selfr \fuel \sn \bn \sb \df \rasms \obls \depth
+  Option.match (\u △ fuel Option.none) (\x \u
+    Option.match (\u2 △ fuel Option.none) (\df2 \u2
+      Option.match (\u3 △ fuel Option.none) (\info \u3
+        Pair.let info $ \wrapped \r Pair.let r $ \cont \pk
+        (Bool.match
+          (\u4 Bool.match
+            (\u5 # prove the obligation, this anchor now in progress
+              Pair.let (_at u5 selfr fuel wrapped cont [_sz x] [] (△ (△ pk x) obls) _reldepth) $
+                \fuel2 \oblopt
+              Option.match (\u6 △ fuel2 Option.none)
+                (\obl \u6
+                  Pair.let (_at u6 selfr fuel2 cont (_app △ bn) df2 rasms obls depth) $ \fuel3 \copt
+                  △ fuel3 (Option.map (\cpf _rpf (Snat.from_nat 3) (△ x (△ obl cpf))) copt))
+                oblopt △)
+            (\u5 △ fuel Option.none)   # the anchor is this very obligation
+            (List.any (equal (△ pk x)) obls) u4)
+          (\u4 # closed by the anchor induction hypothesis
+            Pair.let (_at u4 selfr fuel cont (_app △ bn) df2 rasms obls depth) $ \fuel3 \copt
+            △ fuel3 (Option.map (\cpf _rpf (Snat.from_nat 3) (△ x (△ (_rpf (Snat.from_nat 4) △) cpf))) copt))
+          (List.any (Pair.match $ \pk2 \x2 Bool.and (equal pk2 pk) (_extends x2 x)) obls) △))
+        (_rel_use_scan sn x) u2)
+      (_remove (_sz x) df) u)
+    sb △
+# The split: the variable the left side waits on when the difference owes its
+# size, else the variable both sides wait on, the difference untouched — case
+# exhaustion needs no atom. The goal pair enters the hypotheses either way.
+_rel_split = \selfr \nfx \fuel \sn \bn \sb \bb \df \rasms \obls \depth
+  Snat.match (\_ △ fuel Option.none) (\d \_
+  Option.match (\u △ fuel Option.none) (\v \u
+    let (△ sn (△ bn (△ df v))) $ \hyp
+    let (_remove (_sz v) df) $ \restF
+    Pair.let ((fix $ \go \fuel \sh List.match (\_ △ fuel (Option.some []))
+        (\hd \tl \_ Pair.let (Pair.let hd $ \shape \atoms
+            _at shape selfr fuel
+              (Quoted.instantiate_eq v shape sn) (Quoted.instantiate_eq v shape bn)
+              (Option.match df (\rf List.concat atoms rf) restF)
+              (△ hyp rasms) obls d) $ \fuel2 \sub
+          Option.match (\u3 △ fuel2 Option.none)
+            (\pf \u3 Pair.let (_at u3 go fuel2 tl) $ \fuel3 \rest
+              △ fuel3 (Option.map (△ pf) rest))
+            sub △)
+        sh △) fuel (_shapes v true)) $ \fuel4 \kids
+    △ fuel4 (Option.map (\ks _rpf Snat.two (△ v ks)) kids))
+    (Option.bind (\x Option.match
+        (Option.bind (\y Bool.match Option.none (Option.some x) (equal x y)) bb)
+        (\_ Option.some x)
+        (_remove (_sz x) df))
+      sb) △) depth △
+
+_rel_use_or_split = \selfr \nfx \fuel \sn \bn \sb \bb \df \rasms \obls \depth
+  Pair.let (_rel_try_use selfr fuel sn bn sb df rasms obls depth) $ \fuel2 \useopt
+  Option.match (\u _at u _rel_split selfr nfx fuel2 sn bn sb bb df rasms obls depth)
+    (\pf \u △ fuel2 (Option.some pf))
+    useopt △
+# _rel nfx fuel q b F rasms obls depth — always [△ fuel2 result], the spent
+# fuel returned through failures too, so the work one attempt may do is
+# bounded whether or not its branches close.
+_rel = \nfx fix $ \selfr \fuel \q \b \df \rasms \obls \depth
+  Snat.match (△ △ Option.none) (\fuel
+  Option.match (\u △ fuel Option.none) (\nr \u
+    Pair.let nr $ \sv \r2 Pair.let r2 $ \sb \r3 Pair.let r3 $ \bv \r4 Pair.let r4 $ \bb \df
+    (Bool.match (\u2 △ fuel Option.none) (\u2
+      let (_seat_norm sv) $ \sn
+      let (_seat_norm bv) $ \bn
+      (Bool.match
+        (\u3 Option.match
+          (\u4 _at u4 _rel_use_or_split selfr nfx fuel sn bn sb bb df rasms obls depth)
+          (\_ \u4 △ fuel (Option.some (_rpf Snat.one △)))
+          (_rel_fold_try rasms sn bn df) u3)
+        (\u3 △ fuel (Option.some (_rpf Snat.zero △)))
+        (Bool.and (List.is_empty df) (equal sn bn)) △))
+      (Nat.is_lte (size sv) _relsize) △))
+    (_rel_norm2 nfx _rstrips q b df) △) fuel
+# One hypothesis, one paid difference: σ sends the hypothesis's only variable
+# — its split variable — to a tree variable the goal's spec owes, strictly
+# below it, and REL pays the rest. Answers [△ w proof].
+_only_var = \v fix $ \self triage true (\n equal n v) (\f \x Bool.and (self f) (self x))
+_tree_atom = _atom4 Option.none Option.some (\_ Option.none) (\_ Option.none)
+_rel_try1 = \nfx \q \e \hst \spec \v
+  (Bool.match (\u Option.none) (\u
+    _at u _first (\at2 Option.match Option.none (\w
+        (Bool.match (\u2 Option.none) (\u2
+          Option.bind (\df
+            Option.map (△ w) $ Pair.snd $
+              _at df _rel nfx _relwork q (Quoted.instantiate_eq v (_var w) hst) df [] [] _reldepth)
+            (Option.bind (\ren _minus ren e)
+              (Option.sequence $ List.map (_rename [△ v (_var w)]) spec)))
+          (_below v w)) △)
+        (_tree_atom at2)) e)
+    (Bool.and (Bool.not (_closedq hst)) (_only_var v hst))) △
+_rel_stage_e = \nf \q \asms \e
+  (Bool.match
+    (\u Option.match false (\_ true) $ _at u _first (\a Pair.let a $ \hst \r
+      Pair.let r $ \spec \v _at v _rel_try1 nf q e hst spec v) asms)
+    (\u false)
+    (_has_res e)) △
+
 # The prover. Every branch that can recurse is handed `self` only once it is
 # taken: under eager reduction a recursive call fires as soon as its arguments
 # are bound, whether or not its branch was selected, so an unguarded `self` here
@@ -282,17 +514,20 @@ _prove = \nf fix $ \self \depth \g \asms \e \q
           (split self) △) $ \split2
     Bool.match                                                  # FOLD, else …
       (\self Option.match                                       # … GENERALIZE, else …
-        (\self Option.match                                     # … GEN-TREE, else read s off:
-          (\self triage
-            (\_ List.is_empty e)                                # a leaf is zero
-            (\v \_ Bool.or (_spec_eq e [_val v]) (_spec_eq e [_res v]))  # a bare variable
-            (\f \x \self triage
-              (\self Option.match (\self split2 self)           # [△ x] is a successor: PEEL a 1
-                (\e2 \self self depth g asms e2 x) (_remove _one e) self)
-              (\_ \self split2 self)                            # stuck under a variable
-              (\ff \_ \self triage (\_ false) (\_ \self split2 self) (\_ \_ \self split2 self) ff self)
-              f self)                                           # …a fork is not an Snat; else stuck
-            s self)
+        (\self Option.match                                     # … GEN-TREE, else REL-FOLD, else read s off:
+          (\self Bool.match
+            (\self triage
+              (\_ List.is_empty e)                              # a leaf is zero
+              (\v \_ Bool.or (_spec_eq e [_val v]) (_spec_eq e [_res v]))  # a bare variable
+              (\f \x \self triage
+                (\self Option.match (\self split2 self)         # [△ x] is a successor: PEEL a 1
+                  (\e2 \self self depth g asms e2 x) (_remove _one e) self)
+                (\_ \self split2 self)                          # stuck under a variable
+                (\ff \_ \self triage (\_ false) (\_ \self split2 self) (\_ \_ \self split2 self) ff self)
+                f self)                                         # …a fork is not an Snat; else stuck
+              s self)
+            (\self true)
+            (_at self _rel_stage_e nf q asms e) self)
           (\gen \self Pair.let gen $ \s2 \e2 self depth g asms e2 s2)
           (_at self _gen_tree asms e s) self)
         (\gen \self Pair.let gen $ \s2 \e2 self depth (Snat.succ g) asms e2 s2)
@@ -343,7 +578,7 @@ computes_size_eagerly = _certify _eagerly
 #   ──────────────────────────────────────────────────────── GENERALIZE
 #   Γ ⊢ s ⊨ E   from   Γ ⊢ s[c:=n] ⊨ (E − σEₕ) ⊎ [n]
 #
-# Five additions. Three are this prover's own, each forced by a measured
+# Seven additions. Three are this prover's own, each forced by a measured
 # obstruction of the __wn programs and none needed by the eager ones:
 #
 # SPEC-SPLIT. A lazy program emits successors before consulting its input, so
@@ -388,17 +623,22 @@ computes_size_eagerly = _certify _eagerly
 # sound exactly when those ends also satisfy the borrowing cut's spec, which
 # is what [_validate] re-checks across the finished proof before a verdict.
 #
-# The last two additions are the eager prover's own RGEN and GEN-TREE,
-# ported: a chain machine recurses on a rebuilt tree no structural FOLD
-# closes, and the weak record pair drives exactly the eager record's chain
-# step — the 95's, tree for tree. Both rules survive the change of judgment
-# as they stand, ⟨r⟩ meaning normal-order evaluation to r under sum(E)
-# successors. What the port adds is spelled at their definitions: a seed is
-# whatever head-normalizes to △ without consulting a variable, the instance
-# match runs on both sides' standalone normal forms, and each rule keeps to
-# res-owing, star-free specs — so neither tail's semantics ever reads the
-# other's, and no RGEN or GEN-TREE node can sit inside a phase for [_ends]
-# to misread.
+# The last four additions are the eager prover's own, shared: RGEN and
+# GEN-TREE, ported — a chain machine recurses on a rebuilt tree no
+# structural FOLD closes, and the weak record pair drives exactly the eager
+# record's chain step, the 95's, tree for tree. Both rules survive the
+# change of judgment as they stand, ⟨r⟩ meaning normal-order evaluation to
+# r under sum(E) successors. What the port adds is spelled at their
+# definitions: a seed is whatever head-normalizes to △ without consulting a
+# variable, the instance match runs on both sides' standalone normal forms,
+# and each rule keeps to res-owing, star-free specs — so neither tail's
+# semantics ever reads the other's, and no RGEN or GEN-TREE node can sit
+# inside a phase for [_ends] to misread. And REL-FOLD with REL-USE, one
+# definition serving both provers on their own normalizers, gated star- and
+# res-free the same way: what they are and why they are sound is at their
+# definitions, and they are what certifies the record pair — the 78 here,
+# where RGEN's opaque residual blocks the accumulator-reading step, and the
+# 90 under both judgments.
 
 # The spec gains a fourth atom: [△ (△ △) k] is ⟨★k⟩, "then whatever the
 # continuation k owes". At most one per spec. RGEN further down adds a
@@ -429,6 +669,7 @@ _n7 = Snat.succ _n6
 _n8 = Snat.succ _n7
 _n9 = Snat.succ _n8
 _n10 = Snat.succ _n9
+_n11 = Snat.succ _n10
 _genname = \p △ Snat.two p
 _jname = \i \p △ _n3 (△ i p)
 _starname = \p △ _n4 p
@@ -456,14 +697,14 @@ _foldx = \a \t Pair.let a $ \state \r Pair.let r $ \spec \r2 Pair.let r2 $ \v \h
 
 # Proof nodes: [△ tag payload], tag an Snat.
 #   0 zero   1 value   2 peel   3 split   4 fold   5 generalize
-#   6 abstract   7 cut   8 end-of-phase   9 rgen   10 gen-tree
+#   6 abstract   7 cut   8 end-of-phase   9 rgen   10 gen-tree   11 rel-fold
 _pf = \tag \payload △ tag payload
 # Handlers take the payload; picking one costs only the tag walk.
-_pf_case = \p \z \va \pe \sp \fo \ge \ab \cu \st \rg \gt Pair.let p $ \tag \pay
+_pf_case = \p \z \va \pe \sp \fo \ge \ab \cu \st \rg \gt \rl Pair.let p $ \tag \pay
   (Snat.match z (\t1 Snat.match va (\t2 Snat.match pe
   (\t3 Snat.match sp (\t4 Snat.match fo (\t5 Snat.match ge
   (\t6 Snat.match ab (\t7 Snat.match cu (\t8 Snat.match st
-  (\t9 Snat.match rg (\_ gt) t9) t8) t7) t6) t5) t4) t3) t2) t1) tag) pay
+  (\t9 Snat.match rg (\t10 Snat.match gt (\_ rl) t10) t9) t8) t7) t6) t5) t4) t3) t2) t1) tag) pay
 
 # The states a phase ends in: every tag-8 leaf naming this tail. An abstract
 # (or generalize) node proved its subtree for fresh variables standing for
@@ -482,6 +723,7 @@ _ends = \star fix $ \self \p _pf_case p
   (Pair.match $ \st \state Bool.match [] [state] (equal st star))
   (Pair.match $ \_ self)
   (Pair.match $ \_ self)
+  (\_ [])
 
 # ── ABSTRACT: induction strengthening ────────────────────────────────────────
 # Walk hypothesis state and goal state in parallel, collecting every variable
@@ -809,6 +1051,29 @@ _stg_gentree = \selfp \depth \path \asms \e \s
       (Bool.and (List.is_empty (_stars e))
         (List.any (\a2 Pair.let a2 $ \st2 \r5 Pair.let r5 $ \sp2 \_ _has_resx sp2) asms)))) △
 
+# REL-FOLD, under the lazy judgment: the same shared [_rel], on this
+# prover's reduction with a smaller full-form budget — a REL state that has
+# a normal form reaches it fast or not at all, and the __wn states never
+# have one, so the big budget only made every attempt that must fail pay
+# full price first. Star- and residual-free goals against star- and
+# residual-free hypotheses only, so neither tail's semantics is ever read
+# by REL — nor misread: the shared renamer speaks the eager prover's four
+# atoms, and this judgment's ⟨★⟩ and ⟨r⟩ are not among them.
+_rel_nfb = Snat.from_nat 300
+_rel_lazily = \q (Option.match
+  (\u _at u Quoted.head_normalize _head_budget q)
+  (\r \_ Option.some r)
+  (Quoted.normalize_lazy _rel_nfb q)) △
+_stg_relfold = \q \asms \e
+  (Bool.match (\u2 Option.none) (\u2
+    _at u2 _first (\a Pair.let a $ \hst \r Pair.let r $ \spec \r2 Pair.let r2 $ \v \hid
+      (Bool.match (\u3 Option.none) (\u3
+        Option.map (Pair.match $ \w \sub _pf _n11 (△ w sub))
+          (_at u3 _rel_try1 _rel_lazily q e hst spec v))
+        (Bool.and (List.is_empty (_stars spec)) (Bool.not (_has_resx spec)))) △)
+      asms)
+    (Bool.and (List.is_empty (_stars e)) (Bool.not (_has_resx e)))) △
+
 _depthx = Snat.from_nat 5
 _sizecap = 20000
 _provex = fix $ \selfp \q \depth \path \ca \asms \e
@@ -818,6 +1083,7 @@ _provex = fix $ \selfp \q \depth \path \ca \asms \e
   let (\u5 _try u5
     [ \u6 _at u6 _stg_gentree selfp depth path asms e s
     ; \u6 _at u6 _stg_star e s
+    ; \u6 _at u6 _stg_relfold q asms e
     ; \u6 _at u6 _stg_cut selfp depth path asms e s blocked
     ; \u6 _at u6 _stg_abs selfp depth path ca asms e s
     ; \u6 _at u6 _stg_read selfp depth path asms e s blocked
@@ -856,6 +1122,7 @@ _walk_cuts = fix $ \self \p _pf_case p (\_ []) (\_ []) self
   (\_ [])
   (Pair.match $ \_ self)
   (Pair.match $ \_ self)
+  (\_ [])
 _walk_splits = fix $ \self \p _pf_case p (\_ []) (\_ []) self
   (Pair.match $ \vp \kids △ (△ (Pair.snd vp) (_pf _n3 (△ vp kids)))
     (List.concat_list (List.map self kids)))
@@ -867,6 +1134,7 @@ _walk_splits = fix $ \self \p _pf_case p (\_ []) (\_ []) self
   (\_ [])
   (Pair.match $ \_ self)
   (Pair.match $ \_ self)
+  (\_ [])
 _walk_borrows = fix $ \self \p _pf_case p (\_ []) (\_ []) self
   (Pair.match $ \_ \kids List.concat_list (List.map self kids))
   (Option.match [] (\c [c]))
@@ -877,6 +1145,7 @@ _walk_borrows = fix $ \self \p _pf_case p (\_ []) (\_ []) self
   (\_ [])
   (Pair.match $ \_ self)
   (Pair.match $ \_ self)
+  (\_ [])
 
 _validate = \proof
   let (_walk_cuts proof) $ \cuts
@@ -917,6 +1186,7 @@ _names_in = fix $ \self \p _pf_case p
   (\_ [])
   (Pair.match $ \r \sub △ r (self sub))
   (Pair.match $ \nc \sub Pair.let nc $ \gn \_ △ gn (self sub))
+  (\_ [])
 
 # Assign the generated names their display names, a counter per kind. A
 # minted GEN-TREE name leads with a fork where every other kind leads with
@@ -966,6 +1236,23 @@ _render_atom = \env _atomx "1"
 _render_spec = \env \e List.concat "["
   (List.concat (List.join "," (List.map (_render_atom env) e)) "]")
 
+# A REL derivation, one co-reduction rule per line: SAME both sides met,
+# FOLD a pair hypothesis closed an instance, CASE a split of the variable
+# the sides wait on, USE the machine collapsed at its own continuation (its
+# obligation first, its continuation after), IH an obligation closed by the
+# anchor induction.
+_render_rel = \env fix $ \self \ind \p Pair.let p $ \tag \pay
+  let (List.concat "  " ind) $ \ind2
+  (Snat.match (\_ [List.concat ind "SAME"])
+   (\t1 Snat.match (\_ [List.concat ind "FOLD"])
+   (\t2 Snat.match (Pair.match $ \v \kids
+       △ (List.concat ind (List.concat "CASE " (_render_name env v)))
+         (List.concat_list (List.map (self ind2) kids)))
+   (\t3 Snat.match (Pair.match $ \x \r Pair.let r $ \obl \cont
+       △ (List.concat ind (List.concat "USE " (_render_name env x)))
+         (List.concat (self ind2 obl) (self ind2 cont)))
+   (\_ \_ [List.concat ind "IH"]) t3) t2) t1) tag) pay
+
 # render pf — the proof tree, one rule per line, indented by depth. Each node
 # contributes its list of lines, prefixed by the indentation it was handed;
 # a child gets two more spaces.
@@ -992,7 +1279,10 @@ render = \pf let (_number_names (_names_in pf)) $ \env
   (Pair.match $ \st \state [List.concat ind "END"])
   (Pair.match $ \r \sub △ (List.concat ind (List.concat "RGEN " (_render_name env r))) (self ind2 sub))
   (Pair.match $ \nc \sub Pair.let nc $ \gn \_
-    △ (List.concat ind (List.concat "GEN-TREE " (_render_name env gn))) (self ind2 sub))) "" pf
+    △ (List.concat ind (List.concat "GEN-TREE " (_render_name env gn))) (self ind2 sub))
+  (Pair.match $ \w \sub
+    △ (List.concat ind (List.concat "REL " (_render_name env w)))
+      (_render_rel env ind2 sub))) "" pf
 
 # certify_size p — the proof that p returns its argument's node count, as an
 # Snat, for every tree, under normal-order evaluation; or none.
@@ -1003,5 +1293,6 @@ certify_size = \p
 # computes_size p — true only if p returns the node count of its argument, as
 # an Snat, for every tree. False means "not certifiable here", not "not size".
 computes_size = \p Option.match false (\_ true) (certify_size p)
+
 
 
