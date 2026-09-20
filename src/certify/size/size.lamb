@@ -415,7 +415,7 @@ _rel_fold_try = \rasms \sn \bn \df _first (\h Pair.let h $ \hs \r Pair.let r $ \
     (_match hb bn s1))
   (_match hs sn [])) rasms
 _relsize = 6000
-_reldepth = Snat.from_nat 5
+_reldepth = Snat.from_nat 7
 _relwork = Snat.from_nat 400
 # USE, always answering [△ fuel2 result] so what a failed attempt spent is
 # spent for the split that follows it too.
@@ -473,33 +473,44 @@ _rel_split = \selfr \nfx \fuel \sn \bn \sb \bb \df \rasms \obls \depth
       sb) △) depth △
 
 # USE∀: the anchor P·x·seat, its obligation stated over an opaque seat ĉ and
-# an opaque r̂ for the prefix's carried copies of x. The key canonicalizes
-# ĉ/r̂ identities by first appearance so the family's statement is one term
-# at every level.
-_canon = \t0 Pair.fst $ (fix $ \self \t \env triage
-    (△ △ env)
-    (\n Bool.match (△ (_var n) env)
-      ((fix $ \go \i \e List.match
-          (△ (_var [Snat.from_nat 13; i]) (List.concat env [n]))
-          (\h \tl Bool.match (go (Snat.succ i) tl) (△ (_var [Snat.from_nat 13; i]) env) (equal h n))
-          e) Snat.zero env)
-      (_kindq n))
-    (\f \a Pair.let (self f env) $ \f2 \env2 Pair.let (self a env2) $ \a2 \env3 △ (_app f2 a2) env3)
-    t) t0 []
-# Answers [△ seat (△ wrapped (△ ĉ key))]: the actual seat for the rewrite,
-# the obligation's sides, and the anchor key.
+# an opaque r̂ for the prefix's carried copies of x. Two anchors are the same
+# family when their keys match up to a bijection of the ĉ/r̂ identities, kind
+# for kind — matched in one pass where keys are compared, which no goal pays
+# for unless it holds anchors to compare against.
+_bij_fwd = \n _first (Pair.match $ \n2 \m2 Bool.match Option.none (Option.some m2) (equal n2 n))
+_bij_bwdq = \m List.any (Pair.match $ \n2 \m2 equal m2 m)
+_khead = List.match △ (\h \tl h)
+# One matched pair of variable names: opaque names must pair bijectively,
+# kind kept; any other name must be the same name. Answers [△ ok pairs].
+_pk_name = \n \m \env Bool.match
+    (△ (Bool.and (Bool.not (_kindq m)) (equal n m)) env)
+    (Bool.match (△ false env)
+      (Option.match
+        (Bool.match (△ true (△ (△ n m) env)) (△ false env) (_bij_bwdq m env))
+        (\m2 △ (equal m2 m) env)
+        (_bij_fwd n env))
+      (Bool.and (_kindq m) (equal (_khead n) (_khead m))))
+    (_kindq n)
+_pk_walk = fix $ \self \t \u \env triage
+    (△ (triage true (\_ false) (\_ \_ false) u) env)
+    (\n triage (△ false env) (\m _pk_name n m env) (\_ \_ △ false env) u)
+    (\f \a triage (△ false env) (\_ △ false env) (\g \b
+      Pair.let (self f g env) $ \ok \env2
+      Bool.match (△ false env2) (\u2 _at u2 self a b env2) ok △) u)
+    t
+_pk_eq = \p \q Pair.fst (_pk_walk p q [])
+# Answers [△ seat (△ prefix-reversed head)]: the seat for the rewrite and the
+# raw anchor pieces. The obligation's sides and the anchor key are built from
+# the pieces only once the gates below ask for them — built here, every goal
+# the gates refuse would still pay for them under the eager evaluator, and
+# almost every goal is refused.
 _rel_usep_scan = \s \x Pair.let (_spinel s) $ \hd \args
   (Bool.match (\u Option.none)
     (\u List.match (\u2 Option.none) (\seat \rev \u2
       List.match (\u3 Option.none) (\xv \prer \u3
         Bool.match (\u4 Option.none) (\u4
           List.match (\u5 Option.none) (\ph \pt \u5
-            let (List.map (Quoted.instantiate_eq x (_var (△ (Snat.from_nat 12) x))) (List.reverse prer)) $ \pre
-            let (_var (△ (Snat.from_nat 11) x)) $ \chat
-            Option.some (△ seat (△
-              (_app △ (_unspine hd (List.concat pre [_var x; chat])))
-              (△ chat
-                 (_canon (_unspine hd (List.concat pre [_var _usemark])))))))
+            Option.some (△ seat (△ prer hd)))
             prer u4)
           (equal xv (_var x)) u3)
         rev u2)
@@ -511,8 +522,9 @@ _containsv = \n fix $ \self triage false (\m equal m n) (\f \a Bool.or (self f) 
 # at the same x, or a seat carrying this anchor's own ĉ (its instantiation
 # would be circular), fails.
 # A legitimate obligation closes in a handful of goals; a doomed one must
-# fail cheaply. The sub-proof runs on its own small budget, and the caller
-# is charged that budget flat.
+# fail cheaply. The sub-proof draws on the caller's own budget, up to a small
+# allowance, so however obligations nest the total work stays what the
+# outermost goal was given.
 _oblwork = Snat.from_nat 60
 _charge = fix $ \self \n \fuel Snat.match (Option.some fuel) (\n2
   Snat.match Option.none (\f2 self n2 f2) fuel) n
@@ -520,21 +532,53 @@ _charge = fix $ \self \n \fuel Snat.match (Option.some fuel) (\n2
 # anchors, and the family handoffs inside obligations, whose own depth is
 # fresh — so a failing descent's deep re-anchors never each buy a search.
 _oblmin = Snat.from_nat 3
-_rel_oblp = \selfr \fuel \pack \x \obls \depth
+# The induction hypothesis closes at any depth; only a fresh spawn is
+# depth-gated. A goal with no anchors in progress and no spawn depth left is
+# refused before the key or the obligation's sides are built.
+# The minted ĉ/r̂ names carry the nesting level k beside x: an obligation
+# whose proof anchors again at the same x mints different identities, so the
+# circularity guard fires only on a seat carrying this very anchor's ĉ.
+_obl_cn = \k \x △ (Snat.from_nat 11) (△ k x)
+_obl_lvl = fix $ \self List.match Snat.zero (\h \tl Snat.succ (self tl))
+_obl_gate = \obls \depth
+  List.match (Option.match false (\_ true) (_charge _oblmin depth)) (\h \tl true) obls
+# The anchor key and the obligation's subject, from the raw pieces: [△ key subject].
+_obl_parts = \raw \x \k Pair.let raw $ \seat \r1 Pair.let r1 $ \prer \hd
+  let (List.map (Quoted.instantiate_eq x (_var (△ (Snat.from_nat 12) (△ k x)))) (List.reverse prer)) $ \pre
+  △ (_unspine hd (List.concat pre [_var _usemark]))
+    (_app △ (_unspine hd (List.concat pre [_var x; _var (_obl_cn k x)])))
+_obl_ihq = \pk \x List.any (Pair.match $ \pk2 \x2 Bool.and (_pk_eq pk2 pk) (_extends x2 x))
+_obl_cycq = \pk \x \k \obls \seat Bool.or
+  (List.any (Pair.match $ \pk2 \x2 Bool.and (equal x2 x) (_pk_eq pk2 pk)) obls)
+  (_containsv (_obl_cn k x) seat)
+# The sub-proof draws on the caller's budget, up to the allowance: what it
+# leaves comes back to the caller, so however obligations nest the total
+# work stays what the outermost goal was given.
+_obl_spawn = \selfr \fuel \wrapped \x \k \pk \obls
+  Option.match
+    (\u Pair.let (_at u selfr fuel wrapped (_var (_obl_cn k x)) [_sz x] []
+        (△ (△ pk x) obls) _reldepth) $ \rem \oblopt △ rem oblopt)
+    (\rest \u Pair.let (_at u selfr _oblwork wrapped (_var (_obl_cn k x)) [_sz x] []
+        (△ (△ pk x) obls) _reldepth) $ \rem \oblopt △ (Snat.add rest rem) oblopt)
+    (_charge _oblwork fuel) △
+# The induction hypothesis closes at any depth; only a fresh spawn is
+# depth-gated. A goal with no anchors in progress and no spawn depth left is
+# refused before the key or the obligation's sides are built.
+_rel_oblp = \selfr \fuel \raw \x \obls \depth
   Bool.match (\u0 △ fuel Option.none) (\u0
-  Pair.let pack $ \seat \r1 Pair.let r1 $ \wrapped \r2 Pair.let r2 $ \chat \pk
+  let (_obl_lvl obls) $ \k
+  Pair.let (_at u0 _obl_parts raw x k) $ \pk \wrapped
   Bool.match
     (\u Bool.match
-      (\u2 Option.match (\u3 △ fuel Option.none) (\fuel2 \u3
-        Pair.let (_at u3 selfr _oblwork wrapped chat [_sz x] [] (△ (△ pk x) obls) _reldepth) $
-          \spent \oblopt △ fuel2 oblopt)
-        (_charge _oblwork fuel) u2)
+      (\u2 Bool.match
+        (\u3 △ fuel Option.none)
+        (\u3 _at u3 _obl_spawn selfr fuel wrapped x k pk obls)
+        (Option.match false (\_ true) (_charge _oblmin depth)) u2)
       (\u2 △ fuel Option.none)
-      (Bool.or (List.any (equal (△ pk x)) obls)
-        (_containsv (△ (Snat.from_nat 11) x) seat)) u)
+      (_obl_cycq pk x k obls (Pair.fst raw)) u)
     (\u △ fuel (Option.some (_rpf (Snat.from_nat 4) △)))
-    (List.any (Pair.match $ \pk2 \x2 Bool.and (equal pk2 pk) (_extends x2 x)) obls) △)
-  (Option.match false (\_ true) (_charge _oblmin depth)) △
+    (_obl_ihq pk x obls) △)
+  (_obl_gate obls depth) △
 # USE∀², both sides anchored at the shared blocked variable: the |x| − 1
 # payments cancel and the difference passes untouched to the seat pair.
 _rel_try_usep2 = \selfr \lz \fuel \sn \bn \sb \bb \df \rasms \obls \depth
@@ -610,18 +654,26 @@ _rel_use_or_split_e = \selfr \nfx \fuel \sn \bn \sb \bb \df \rasms \obls \depth
 _rel_use_or_split = \selfr \nfx \fuel \sn \bn \sb \bb \df \rasms \obls \depth
   Pair.let (_rel_try_use selfr fuel sn bn sb df rasms obls depth) $ \fuel2 \useopt
   Option.match (\u
-    Pair.let (_at u _rel_try_usep2 selfr true fuel2 sn bn sb bb df rasms obls depth) $ \fuel3 \p2opt
-    Option.match (\u2
-      Pair.let (_at u2 _rel_try_usep selfr true fuel3 sn bn sb df rasms obls depth) $ \fuel4 \p1opt
-      Option.match (\u3
-        Pair.let (_at u3 _rel_try_usepw selfr nfx true fuel4 sn bn df rasms obls depth) $ \fuel5 \pwopt
-        Option.match (\u4 _at u4 _rel_split selfr nfx fuel5 sn bn sb bb df rasms obls depth)
-          (\pf \u4 △ fuel5 (Option.some pf))
-          pwopt △)
-        (\pf \u3 △ fuel4 (Option.some pf))
-        p1opt △)
-      (\pf \u2 △ fuel3 (Option.some pf))
-      p2opt △)
+    # With no anchors in progress and no spawn depth left, no stage can
+    # answer: their obligations all refuse. The goal goes straight to the
+    # split, and the stages — large closures whose application is paid per
+    # goal — are not even applied.
+    Bool.match
+      (\ug _at ug _rel_split selfr nfx fuel2 sn bn sb bb df rasms obls depth)
+      (\ug
+        Pair.let (_at ug _rel_try_usep2 selfr true fuel2 sn bn sb bb df rasms obls depth) $ \fuel3 \p2opt
+        Option.match (\u2
+          Pair.let (_at u2 _rel_try_usep selfr true fuel3 sn bn sb df rasms obls depth) $ \fuel4 \p1opt
+          Option.match (\u3
+            Pair.let (_at u3 _rel_try_usepw selfr nfx true fuel4 sn bn df rasms obls depth) $ \fuel5 \pwopt
+            Option.match (\u4 _at u4 _rel_split selfr nfx fuel5 sn bn sb bb df rasms obls depth)
+              (\pf \u4 △ fuel5 (Option.some pf))
+              pwopt △)
+            (\pf \u3 △ fuel4 (Option.some pf))
+            p1opt △)
+          (\pf \u2 △ fuel3 (Option.some pf))
+          p2opt △)
+      (List.match (Option.match false (\_ true) (_charge _oblmin depth)) (\h \tl true) obls) u)
     (\pf \u △ fuel2 (Option.some pf))
     useopt △
 # _rel nfx fuel q b F rasms obls depth — always [△ fuel2 result], the spent
