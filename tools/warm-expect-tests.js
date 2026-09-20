@@ -24,7 +24,7 @@
 
 const { fork } = require('child_process');
 const { readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } = require('fs');
-const { availableParallelism, tmpdir } = require('os');
+const { availableParallelism, tmpdir, totalmem } = require('os');
 const { join, resolve } = require('path');
 
 const runtime = require(resolve(
@@ -80,9 +80,13 @@ function main() {
 
   const bundle_path = argv.find(a => !a.startsWith('--'))
     ?? (() => { throw new Error('usage: warm-expect-tests.js <bundle> [--jobs N]'); })();
+  // A worker evaluating a certifier test can hold several GB of native
+  // arena; one worker per core on a small-memory runner kills the VM
+  // outright (the runner agent itself gets the shutdown), so the default
+  // grants each worker a generous memory share and lets --jobs override.
   const jobs = argv.includes('--jobs')
     ? Number(argv[argv.indexOf('--jobs') + 1])
-    : availableParallelism();
+    : Math.max(1, Math.min(availableParallelism(), Math.floor(totalmem() / (8 * 1024 ** 3))));
 
   // Warming pays only when reductions go through the native runner, which is
   // where the reduction cache lives; on the pure-Node path this would evaluate
@@ -148,6 +152,7 @@ function main() {
         settle();
         return;
       }
+      process.stderr.write(`  evaluating ${task.symbol}\n`);
       child.send({ type: 'task', shared: shared_path, symbol: task.symbol, payload: task.payload });
     };
     child.on('message', message => {
