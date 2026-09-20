@@ -516,7 +516,12 @@ _containsv = \n fix $ \self triage false (\m equal m n) (\f \a Bool.or (self f) 
 _oblwork = Snat.from_nat 60
 _charge = fix $ \self \n \fuel Snat.match (Option.some fuel) (\n2
   Snat.match Option.none (\f2 self n2 f2) fuel) n
-_rel_oblp = \selfr \fuel \pack \x \obls
+# Every legitimate spawn sits near the top of its proof — a try's first
+# anchors, and the family handoffs inside obligations, whose own depth is
+# fresh — so a failing descent's deep re-anchors never each buy a search.
+_oblmin = Snat.from_nat 3
+_rel_oblp = \selfr \fuel \pack \x \obls \depth
+  Bool.match (\u0 △ fuel Option.none) (\u0
   Pair.let pack $ \seat \r1 Pair.let r1 $ \wrapped \r2 Pair.let r2 $ \chat \pk
   Bool.match
     (\u Bool.match
@@ -528,7 +533,8 @@ _rel_oblp = \selfr \fuel \pack \x \obls
       (Bool.or (List.any (equal (△ pk x)) obls)
         (_containsv (△ (Snat.from_nat 11) x) seat)) u)
     (\u △ fuel (Option.some (_rpf (Snat.from_nat 4) △)))
-    (List.any (Pair.match $ \pk2 \x2 Bool.and (equal pk2 pk) (_extends x2 x)) obls) △
+    (List.any (Pair.match $ \pk2 \x2 Bool.and (equal pk2 pk) (_extends x2 x)) obls) △)
+  (Option.match false (\_ true) (_charge _oblmin depth)) △
 # USE∀², both sides anchored at the shared blocked variable: the |x| − 1
 # payments cancel and the difference passes untouched to the seat pair.
 _rel_try_usep2 = \selfr \lz \fuel \sn \bn \sb \bb \df \rasms \obls \depth
@@ -538,9 +544,9 @@ _rel_try_usep2 = \selfr \lz \fuel \sn \bn \sb \bb \df \rasms \obls \depth
         Bool.match (\u4 △ fuel Option.none) (\u4
           Option.match (\u5 △ fuel Option.none) (\pl \u5
             Option.match (\u6 △ fuel Option.none) (\pr \u6
-              Pair.let (_at u6 _rel_oblp selfr fuel pl x obls) $ \fuel2 \olopt
+              Pair.let (_at u6 _rel_oblp selfr fuel pl x obls depth) $ \fuel2 \olopt
               Option.match (\u7 △ fuel2 Option.none) (\ol \u7
-                Pair.let (_at u7 _rel_oblp selfr fuel2 pr x obls) $ \fuel3 \oropt
+                Pair.let (_at u7 _rel_oblp selfr fuel2 pr x obls depth) $ \fuel3 \oropt
                 Option.match (\u8 △ fuel3 Option.none) (\og \u8
                   Pair.let pl $ \seatl \rl
                   Pair.let pr $ \seatr \rr
@@ -560,7 +566,7 @@ _rel_try_usep = \selfr \lz \fuel \sn \bn \sb \df \rasms \obls \depth
     Option.match (\u2 △ fuel Option.none) (\x \u2
       Option.match (\u3 △ fuel Option.none) (\df2 \u3
         Option.match (\u4 △ fuel Option.none) (\pl \u4
-          Pair.let (_at u4 _rel_oblp selfr fuel pl x obls) $ \fuel2 \oblopt
+          Pair.let (_at u4 _rel_oblp selfr fuel pl x obls depth) $ \fuel2 \oblopt
           Option.match (\u5 △ fuel2 Option.none) (\obl \u5
             Pair.let pl $ \seat \rl
             Pair.let (_at u5 selfr fuel2 seat (_app △ bn) df2 rasms obls depth) $ \fuel3 \copt
@@ -580,7 +586,7 @@ _rel_try_usepw = \selfr \nfx \lz \fuel \sn \bn \df \rasms \obls \depth
         Option.match (\u4 △ fuel Option.none) (\x \u4
           Option.match (\u5 △ fuel Option.none) (\df2 \u5
             Option.match (\u6 △ fuel Option.none) (\pl \u6
-              Pair.let (_at u6 _rel_oblp selfr fuel pl x obls) $ \fuel2 \oblopt
+              Pair.let (_at u6 _rel_oblp selfr fuel pl x obls depth) $ \fuel2 \oblopt
               Option.match (\u7 △ fuel2 Option.none) (\obl \u7
                 Pair.let pl $ \seat \rl
                 Pair.let (_at u7 selfr fuel2 seat bn df2 rasms obls depth) $ \fuel3 \copt
