@@ -152,6 +152,7 @@ function main() {
         settle();
         return;
       }
+      process.stderr.write(`  evaluating ${task.symbol}\n`);
       child.send({ type: 'task', shared: shared_path, symbol: task.symbol, payload: task.payload });
     };
     child.on('message', message => {
