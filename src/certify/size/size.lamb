@@ -516,12 +516,20 @@ _containsv = \n fix $ \self triage false (\m equal m n) (\f \a Bool.or (self f) 
 # strictly smaller x, else proven fresh with this anchor in progress; a cycle
 # at the same x, or a seat carrying this anchor's own ĉ (its instantiation
 # would be circular), fails.
+# A legitimate obligation closes in a handful of goals; a doomed one must
+# fail cheaply. The sub-proof runs on its own small budget, and the caller
+# is charged that budget flat.
+_oblwork = Snat.from_nat 60
+_charge = fix $ \self \n \fuel Snat.match (Option.some fuel) (\n2
+  Snat.match Option.none (\f2 self n2 f2) fuel) n
 _rel_oblp = \selfr \fuel \pack \x \obls
   Pair.let pack $ \seat \r1 Pair.let r1 $ \wrapped \r2 Pair.let r2 $ \chat \pk
   Bool.match
     (\u Bool.match
-      (\u2 Pair.let (_at u2 selfr fuel wrapped chat [_sz x] [] (△ (△ pk x) obls) _reldepth) $
-        \fuel2 \oblopt △ fuel2 oblopt)
+      (\u2 Option.match (\u3 △ fuel Option.none) (\fuel2 \u3
+        Pair.let (_at u3 selfr _oblwork wrapped chat [_sz x] [] (△ (△ pk x) obls) _reldepth) $
+          \spent \oblopt △ fuel2 oblopt)
+        (_charge _oblwork fuel) u2)
       (\u2 △ fuel Option.none)
       (Bool.or (List.any (equal (△ pk x)) obls)
         (_containsv (△ (Snat.from_nat 11) x) seat)) u)
