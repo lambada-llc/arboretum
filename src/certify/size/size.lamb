@@ -598,14 +598,23 @@ _rel_try_usepw = \selfr \nfx \lz \fuel \sn \bn \df \rasms \obls \depth
         (nfx inner) △)
       (_stemq sn) △)
     lz △
-_rel_use_or_split = \selfr \nfx \lz \fuel \sn \bn \sb \bb \df \rasms \obls \depth
+# The eager judgment's dispatch is the shipped one, chosen once when _rel is
+# built: the seat-polymorphic stages must not even be constructed on its
+# goals — building their closures per goal is a cost the eager prover's
+# searches multiply.
+_rel_use_or_split_e = \selfr \nfx \fuel \sn \bn \sb \bb \df \rasms \obls \depth
+  Pair.let (_rel_try_use selfr fuel sn bn sb df rasms obls depth) $ \fuel2 \useopt
+  Option.match (\u _at u _rel_split selfr nfx fuel2 sn bn sb bb df rasms obls depth)
+    (\pf \u △ fuel2 (Option.some pf))
+    useopt △
+_rel_use_or_split = \selfr \nfx \fuel \sn \bn \sb \bb \df \rasms \obls \depth
   Pair.let (_rel_try_use selfr fuel sn bn sb df rasms obls depth) $ \fuel2 \useopt
   Option.match (\u
-    Pair.let (_at u _rel_try_usep2 selfr lz fuel2 sn bn sb bb df rasms obls depth) $ \fuel3 \p2opt
+    Pair.let (_at u _rel_try_usep2 selfr true fuel2 sn bn sb bb df rasms obls depth) $ \fuel3 \p2opt
     Option.match (\u2
-      Pair.let (_at u2 _rel_try_usep selfr lz fuel3 sn bn sb df rasms obls depth) $ \fuel4 \p1opt
+      Pair.let (_at u2 _rel_try_usep selfr true fuel3 sn bn sb df rasms obls depth) $ \fuel4 \p1opt
       Option.match (\u3
-        Pair.let (_at u3 _rel_try_usepw selfr nfx lz fuel4 sn bn df rasms obls depth) $ \fuel5 \pwopt
+        Pair.let (_at u3 _rel_try_usepw selfr nfx true fuel4 sn bn df rasms obls depth) $ \fuel5 \pwopt
         Option.match (\u4 _at u4 _rel_split selfr nfx fuel5 sn bn sb bb df rasms obls depth)
           (\pf \u4 △ fuel5 (Option.some pf))
           pwopt △)
@@ -644,7 +653,8 @@ _rel = \nfx \lz fix $ \selfr \fuel \q \b \df \rasms \obls \depth
       let (_seat_norm bv) $ \bn
       (Bool.match
         (\u3 Option.match
-          (\u4 _at u4 _rel_use_or_split selfr nfx lz fuel sn bn sb bb df rasms obls depth)
+          (\u4 _at u4 (Bool.match _rel_use_or_split_e _rel_use_or_split lz)
+            selfr nfx fuel sn bn sb bb df rasms obls depth)
           (\_ \u4 △ fuel (Option.some (_rpf Snat.one △)))
           (_rel_fold_try rasms sn bn df) u3)
         (\u3 △ fuel (Option.some (_rpf Snat.zero △)))
