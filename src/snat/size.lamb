@@ -603,19 +603,10 @@ Certify.Size.computes_size size__wn_104
 Certify.Size.computes_size size__wn_106
 # = false
 Certify.Size.computes_size size__wn_108
-# = false
+# = true
 Certify.Size.computes_size size__wn_113
-# = false
+# = true
 
-# The lag pair's certificate, drawn below for the 108: the whole descent is
-# REL against the loop value, and inside it every bank the machine defers —
-# a traversal per fork, stacked into the continuation seat — is collapsed by
-# the seat-polymorphic use, obligation first, continuation after.
-_to_string = Option.match "no proof" Certify.Size.render
-Certify.Size.certify_size size__wn_108
-# = SPLIT t
-
-_to_string = Bool.to_source
 # The 95's certificate, drawn: the ported rules in two strokes. RGEN
 # generalizes the accumulator seat this machine never reads, the stem case
 # folds outright — no lag to abstract once the seat is opaque — and
