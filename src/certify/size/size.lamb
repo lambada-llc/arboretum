@@ -491,10 +491,6 @@ _canon = \t0 Pair.fst $ (fix $ \self \t \env triage
 _rel_usep_scan = \s \x Pair.let (_spinel s) $ \hd \args
   (Bool.match (\u Option.none)
     (\u List.match (\u2 Option.none) (\seat \rev \u2
-      # open seats only: one that head-normalizes blocker-free to a closed
-      # value is classic USE's domain, and anchoring it here only duplicates
-      # work the cheap rule already does, or correctly fails.
-      Option.match (\u2b _at u2b
       List.match (\u3 Option.none) (\xv \prer \u3
         Bool.match (\u4 Option.none) (\u4
           List.match (\u5 Option.none) (\ph \pt \u5
@@ -506,9 +502,7 @@ _rel_usep_scan = \s \x Pair.let (_spinel s) $ \hd \args
                  (_canon (_unspine hd (List.concat pre [_var _usemark])))))))
             prer u4)
           (equal xv (_var x)) u3)
-        rev u2b)
-      (\cv \u2b Option.none)
-      (_contish seat) u2)
+        rev u2)
       (List.reverse args) u)
     (triage true (\_ false) (\_ \_ false) hd)) △
 _containsv = \n fix $ \self triage false (\m equal m n) (\f \a Bool.or (self f) (self a))
