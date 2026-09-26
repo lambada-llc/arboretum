@@ -30,7 +30,6 @@ mk_generator = \leaf \stem \fork \alt \f triage
     (Option.match (\_ \_ alt) (Pair.match $ \g1 \g2 g1 (\_ alt) (\u g2 alt (\v f $ △ u v))) fork)
 
 gen_bool = mk_gen_stem gen_leaf
-gen_any1 = \g mk_generator (Option.some △) (Option.some g) (Option.some $ △ g g)
 gen_list = \gelem fix $ \self \max_len List.match
   gen_leaf
   (\hd \tl mk_gen_fork gelem $ self $ Nat.pred $ △ hd tl)

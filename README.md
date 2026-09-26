@@ -78,10 +78,17 @@ which knows about [DAGs](https://github.com/lambada-llc/tree-calculus/tree/main/
    the result back into the source file it came from. A test symbol is named
    after that source line (`:test.Bool.Bool.12`), so no separate bookkeeping is
    needed to find it again.
-4. **Export the compiler** — `dag extract` takes `Lambada.compile` and
-   `Lambada.compile_to_dag` back out of the bundle as DAGs that stand on their
-   own, and writes them to `submodules/lambada/compiler/`, which is where the
-   [compiler source](./src/lambada/compiler.lamb) is published as a tree.
+4. **Export the compiler** — `dag extract` takes `Lambada.compile_to_dag` back
+   out of the bundle as a DAG that stands on its own. Its destination,
+   `submodules/lambada/compiler/`, is both where the
+   [compiler source](./src/lambada/compiler.lamb) is published as a tree and
+   the compiler the *next* build will run, so a broken export would brick that
+   build: the extraction is probed on a small program first, and only installed
+   if the probe answers correctly — otherwise the build fails and the shipped
+   compiler is left alone.
+5. **Export demo environments** — `dag extract` also cuts out the scopes the
+   [codemirror demo](https://github.com/lambada-llc/lambada/tree/main/codemirror)
+   offers, into `submodules/lambada/codemirror/demo/env-dags/`.
 
 Steps 1 and 3 are the ones that reduce trees, and both hand that to the C++
 runner — see [Setup](#setup).
@@ -145,7 +152,7 @@ content hash:
 
 ```lamb
 # src/expect_test.lamb
-△ (△ "hello.txt" "text/plain") "Hello, LambAda!"
+file "hello.txt" "text/plain" "Hello, LambAda!"
 # = hello.txt sha256:169f0107cf1f…
 ```
 
@@ -154,6 +161,12 @@ succeeds either way. An unnoticed diff is a test failure.
 
 ## Running compiled programs
 
+The build writes *modules* — a `.dag` of definitions per source, and the
+bundle — and `-dag -file` demands a single value. Extract one symbol first
+(the extraction ends with the entry-point line that makes it a value):
+
 ```bash
-node submodules/tree-calculus/bin/main.js -dag -file <file.dag> -bool true -bool
+node submodules/tree-calculus/bin/dag.js extract --symbol Bool.not src/.dag-bundle-canonical > /tmp/not.dag
+node submodules/tree-calculus/bin/main.js -dag -file /tmp/not.dag -bool true -bool
+# → false
 ```
