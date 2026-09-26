@@ -35,13 +35,14 @@ $dag link $(find src -name '.*.dag' | sort) \
 node tools/warm-expect-tests.js src/.dag-bundle-canonical
 $lambada expect-test src/.dag-bundle-canonical --root src
 
-# Take the compiler back out of the bundle it is part of, so that the lambada
-# submodule ships the compiler this repository just built from its source.
-# Everything above runs on that same compile_to_dag.dag, so a broken one would
-# brick the next build: extract first, probe, and only then install.
+# Take the compilers back out of the bundle they are part of, so that the lambada
+# submodule ships what this repository just built from its source: the compiler,
+# and the one that also reports each definition's span. Everything above runs on
+# that same compile_to_dag.dag, so a broken one would brick the next build:
+# extract first, probe, and only then install.
 >&2 echo "Exporting compiler"
 compiler=submodules/lambada/compiler
-for symbol in compile compile_to_dag; do
+for symbol in compile_to_dag compile_to_dag_with_spans; do
   $dag extract --symbol "Lambada.$symbol" src/.dag-bundle-canonical \
     | $dag canonicalize > "$compiler/$symbol.dag.new"
 done
@@ -49,7 +50,7 @@ done
 probe=$(node submodules/tree-calculus/bin/main.js \
   -dag -file "$compiler/compile_to_dag.dag.new" -string 'x = △' -string 2>/dev/null || true)
 case "$probe" in
-  ':t '*) for symbol in compile compile_to_dag; do mv "$compiler/$symbol.dag.new" "$compiler/$symbol.dag"; done ;;
+  ':t '*) for symbol in compile_to_dag compile_to_dag_with_spans; do mv "$compiler/$symbol.dag.new" "$compiler/$symbol.dag"; done ;;
   *) rm -f "$compiler"/*.dag.new
      >&2 echo "ERROR: the extracted compiler cannot compile 'x = △'; the shipped one is left alone."
      exit 1 ;;
