@@ -42,15 +42,17 @@ $lambada expect-test src/.dag-bundle-canonical --root src --jobs "$jobs"
 
 # Take the compilers back out of the bundle they are part of, so that the
 # lambada submodule ships what this repository just built from its source: the
-# compiler, the one that also reports each expression's span, and the prelude —
-# a compiled chunk refers to the combinator labels and leaves defining them to
-# the module, which puts the prelude at the top of one, once. Everything above
+# compiler of a whole file, which is what builds run; the compiler of one
+# statement, and the one that also reports each expression's span, which is
+# what an editor runs as it goes; and the prelude — compiled code refers to the
+# combinator labels and leaves defining them to the module, which puts the
+# prelude at the top of one, once. Everything above
 # runs on that same compiler and prelude, so a broken one would brick the next
 # build: extract, probe, and only then install.
 >&2 echo "Exporting compiler"
 compiler=submodules/lambada/compiler
 main="node submodules/tree-calculus/bin/main.js"
-compilers="compile_to_dag compile_to_dag_with_spans"
+compilers="compile_file compile_to_dag compile_to_dag_with_spans"
 for symbol in $compilers; do
   $dag extract --symbol "Lambada.$symbol" src/.dag-bundle-canonical \
     | $dag canonicalize > "$compiler/$symbol.dag.new"
