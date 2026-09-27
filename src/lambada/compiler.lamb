@@ -949,7 +949,16 @@ _syntax_emit_adt = \type_name \items
 # and nothing dispatches twice.
 _native_expr_of = \annotated [Native_expr (Pair.fst (Pair.snd annotated))]
 _native_null = [Native_expr (_emk_leaf ":t")]
-syntax_to_native = \syntax
+# The statement under a stack of spans, if it is one. The spanned parser wraps
+# whatever it parses, a definition included — and a definition is not an
+# expression: lowered as one it is nothing.
+_statement_under = fix $ \self \syntax syntax
+    (\_ Option.none) Option.none (\_ Option.none) (\_ Option.none) (\_ Option.none)
+    (\_ Option.none) (\_ \_ Option.none) (\_ \_ Option.none)
+    (\_ \_ Option.some syntax) (\_ \_ Option.some syntax)
+    (\_ \_ \inner self inner)
+
+syntax_to_native = fix $ \self \syntax
     syntax
         (\name       [Native_expr (_emk_leaf name)])
         (            _native_null)
@@ -963,7 +972,12 @@ syntax_to_native = \syntax
         (\type_name \pairs
             (_syntax_emit_adt type_name (List.mapi △ pairs))
         )
-        (\start \end \inner _native_expr_of (_klow_span start end inner _klower_open []))
+        # A span marks an expression. Over a definition it is dropped, and the
+        # definition lowers as itself; what its body carries stays its body's.
+        (\start \end \inner Option.match
+            (_native_expr_of (_klow_span start end inner _klower_open []))
+            self
+            (_statement_under inner))
 
 # The combinator labels a compiled chunk refers to, as the combinators they
 # are, serialized — so each is defined once, as the readable thing, and the DAG
@@ -1035,43 +1049,43 @@ _to_string = id
 compile_to_dag_bench "x"
 # = Tokenize: 230
 #   Parse:    323
-#   Lower:    230
+#   Lower:    264
 #   Emit:     90
 
 compile_to_dag_bench "42"
 # = Tokenize: 393
 #   Parse:    180
-#   Lower:    194
+#   Lower:    228
 #   Emit:     676
 
 compile_to_dag_bench "1337"
 # = Tokenize: 872
 #   Parse:    180
-#   Lower:    194
+#   Lower:    228
 #   Emit:     937
 
 compile_to_dag_bench "[42]"
 # = Tokenize: 824
 #   Parse:    887
-#   Lower:    610
+#   Lower:    644
 #   Emit:     1322
 
 compile_to_dag_bench "\\x x"
 # = Tokenize: 747
 #   Parse:    641
-#   Lower:    643
+#   Lower:    677
 #   Emit:     92
 
 compile_to_dag_bench "x = 42"
 # = Tokenize: 969
 #   Parse:    515
-#   Lower:    313
+#   Lower:    347
 #   Emit:     756
 
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
 # = Tokenize: 14966
 #   Parse:    22222
-#   Lower:    9047
+#   Lower:    9081
 #   Emit:     10588
 
 # An ADT declaration: two variants, each emitting a constructor and a
@@ -1089,7 +1103,7 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 5378
 #   Parse:    1297
-#   Lower:    12676
+#   Lower:    12710
 #   Emit:     19344
 
 # Abstraction over an application spine, which used to be exponential in how
@@ -1103,7 +1117,7 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 # = Tokenize: 5114
 #   Parse:    6141
-#   Lower:    16738
+#   Lower:    16772
 #   Emit:     17673
 
 # Literal size. A string literal is linear in both directions: a fixed ~75
@@ -1115,7 +1129,7 @@ compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 # = Tokenize: 7501
 #   Parse:    187
-#   Lower:    186
+#   Lower:    220
 #   Emit:     18701
 
 # A nat literal is quadratic to tokenize, and stays that way: Horner's rule has
@@ -1129,7 +1143,7 @@ compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 compile_to_dag_bench $ List.repeat 100 '1'
 # = Tokenize: 104701
 #   Parse:    180
-#   Lower:    194
+#   Lower:    228
 #   Emit:     17341
 
 # What a compiled chunk can refer to that the chunk does not define. The
@@ -1276,3 +1290,35 @@ _to_string = \s compiler_emit_dag $ Option.get_or []
 #   0 f::0,1 1::2,7
 #   0::0,7 0
 #   0::0,7
+# A definition is not an expression, whatever spans the parser put around it:
+# it lowers as a definition, and only its body keeps positions.
+_to_string = \s s
+compile_to_dag_with_spans "x = △"
+# = △::4,5 △
+#   x △::4,5
+compile_to_dag_with_spans "f = \\a not a"
+# = not::7,10 not
+#   0 :b not::7,10
+#   :i::11,12 :i
+#   0 0 :i::11,12
+#   0::4,12 0
+#   f 0::4,12
+compile_to_dag_with_spans "T = A x | B"
+# = 1 :b :k
+#   0 :b 1
+#   1 :c :i
+#   0 0 1
+#   A 0
+#   0 :b :c
+#   1 :c :i
+#   0 0 1
+#   A_Dispatch 0
+#   0 :k :i
+#   B 0
+#   1 :b :c
+#   11 :c :i
+#   01 :b 11
+#   01 01 :k
+#   1 1 01
+#   0 :c 1
+#   B_Dispatch 0
