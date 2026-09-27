@@ -35,23 +35,27 @@ $dag link $(find src -name '.*.dag' | sort) \
 node tools/warm-expect-tests.js src/.dag-bundle-canonical
 $lambada expect-test src/.dag-bundle-canonical --root src
 
-# Take the compilers back out of the bundle they are part of, so that the lambada
-# submodule ships what this repository just built from its source: the compiler,
-# and the one that also reports each definition's span. Everything above runs on
-# that same compile_to_dag.dag, so a broken one would brick the next build:
-# extract first, probe, and only then install.
+# Take the compiler back out of the bundle it is part of, so that the lambada
+# submodule ships the compiler this repository just built from its source.
+# Everything above runs on that same compile_to_dag.dag, so a broken one would
+# brick the next build: extract, probe, and only then install.
+#
+# compile_to_dag_with_spans is not extracted here. Built from these sources it
+# cannot answer the probe at all: its result is not a list, so nothing can read
+# it as a DAG. No test covers it either — the spanned tests reach
+# syntax_to_native directly rather than through _compiler_lower, which is the
+# step it takes and they do not. Until that is fixed, the working copy lambada
+# ships beats the one this would install over it.
 >&2 echo "Exporting compiler"
 compiler=submodules/lambada/compiler
-for symbol in compile_to_dag compile_to_dag_with_spans; do
-  $dag extract --symbol "Lambada.$symbol" src/.dag-bundle-canonical \
-    | $dag canonicalize > "$compiler/$symbol.dag.new"
-done
+$dag extract --symbol Lambada.compile_to_dag src/.dag-bundle-canonical \
+  | $dag canonicalize > "$compiler/compile_to_dag.dag.new"
 
 probe=$(node submodules/tree-calculus/bin/main.js \
   -dag -file "$compiler/compile_to_dag.dag.new" -string 'x = △' -string 2>/dev/null || true)
 case "$probe" in
-  ':t '*) for symbol in compile_to_dag compile_to_dag_with_spans; do mv "$compiler/$symbol.dag.new" "$compiler/$symbol.dag"; done ;;
-  *) rm -f "$compiler"/*.dag.new
+  ':t '*) mv "$compiler/compile_to_dag.dag.new" "$compiler/compile_to_dag.dag" ;;
+  *) rm -f "$compiler/compile_to_dag.dag.new"
      >&2 echo "ERROR: the extracted compiler cannot compile 'x = △'; the shipped one is left alone."
      exit 1 ;;
 esac
