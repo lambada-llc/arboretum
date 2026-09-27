@@ -36,9 +36,11 @@ node tools/warm-expect-tests.js src/.dag-bundle-canonical
 $lambada expect-test src/.dag-bundle-canonical --root src
 
 # Take the compiler back out of the bundle it is part of, so that the lambada
-# submodule ships the compiler this repository just built from its source.
-# Everything above runs on that same compile_to_dag.dag, so a broken one would
-# brick the next build: extract, probe, and only then install.
+# submodule ships the compiler this repository just built from its source. Two
+# values, because a compiled chunk is a chunk: it refers to the combinator
+# labels and leaves defining them to the module, which puts the prelude at the
+# top of one, once. Everything above runs on that same pair, so a broken one
+# would brick the next build: extract, probe, and only then install.
 #
 # compile_to_dag_with_spans is not extracted here. Built from these sources it
 # cannot answer the probe at all: its result is not a list, so nothing can read
@@ -48,15 +50,27 @@ $lambada expect-test src/.dag-bundle-canonical --root src
 # ships beats the one this would install over it.
 >&2 echo "Exporting compiler"
 compiler=submodules/lambada/compiler
+main="node submodules/tree-calculus/bin/main.js"
 $dag extract --symbol Lambada.compile_to_dag src/.dag-bundle-canonical \
   | $dag canonicalize > "$compiler/compile_to_dag.dag.new"
 
-probe=$(node submodules/tree-calculus/bin/main.js \
-  -dag -file "$compiler/compile_to_dag.dag.new" -string 'x = △' -string 2>/dev/null || true)
+# The prelude goes out as the DAG lines it is, not as a tree that encodes them,
+# so putting it in front of a chunk is concatenating a file.
+$dag extract --symbol Lambada.prelude src/.dag-bundle-canonical \
+  | $dag canonicalize | $main -dag -file /dev/stdin -string > "$compiler/prelude.dag.new"
+
+# Probed together, the way a caller uses them: compile `x = △` and read `x`
+# back out of the module the prelude and that chunk make.
+probe=$( { cat "$compiler/prelude.dag.new"
+           $main -dag -file "$compiler/compile_to_dag.dag.new" -string 'x = △' -string
+         } | $dag eval --symbol x --format term 2>/dev/null || true)
 case "$probe" in
-  ':t '*) mv "$compiler/compile_to_dag.dag.new" "$compiler/compile_to_dag.dag" ;;
-  *) rm -f "$compiler/compile_to_dag.dag.new"
-     >&2 echo "ERROR: the extracted compiler cannot compile 'x = △'; the shipped one is left alone."
+  '△') for symbol in compile_to_dag prelude; do
+         mv "$compiler/$symbol.dag.new" "$compiler/$symbol.dag"
+       done ;;
+  *) rm -f "$compiler"/*.dag.new
+     >&2 echo "ERROR: the extracted compiler and prelude do not compile 'x = △' to the leaf;"
+     >&2 echo "       the shipped ones are left alone. Got: $probe"
      exit 1 ;;
 esac
 
