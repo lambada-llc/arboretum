@@ -456,7 +456,6 @@ parse_exprs = Parser.many parse_expr
 
 # Token list => Syntax_tree list option
 compiler_parse = Parser.value_if_consumed parse_exprs
-compiler_parse_expr_exn = Parser.value parse_expr
 
 # Span-aware parser operating on positioned token lists
 # Each positioned token is △ (△ start end) token
@@ -966,37 +965,26 @@ syntax_to_native = \syntax
         )
         (\start \end \inner _native_expr_of (_klow_span start end inner _klower_open []))
 
-syntax_error = Syntax_identifier "ERROR"
-
-# The prelude's own definitions are written as △ and applications of it and
-# nothing else, which this says: every identifier is the leaf, and a literal, a
-# lambda or a binding is an error. △ can be read as the leaf here because the
-# prelude is emitted once, at the top of a module, above anything a source binds.
-to_leaf_app = fix $ \self \syntax syntax
-  (\name       Syntax_identifier "△")
-  (            syntax_error)
-  (\value      syntax_error)
-  (\value      syntax_error)
-  (\list       syntax_error)
-  (\kvlist     syntax_error)
-  (\name \body syntax_error)
-  (\o1 \o2     Syntax_app (self o1) (self o2))
-  (\_name \_o  syntax_error)
-  (\_type_name \_pairs syntax_error)
-  (\_start \_end \inner self inner)
-
-quick_parse_exn = \s to_leaf_app $ Option.get_or syntax_error (Option.bind compiler_parse_expr_exn $ compiler_tokenize s)
-syntax_prelude =
-  [ Syntax_assignment ":t" $ quick_parse_exn "△"
-  ; Syntax_assignment ":k" $ quick_parse_exn "△ △"
-  ; Syntax_assignment ":i" $ quick_parse_exn "△ (△ (△ △)) △"
-  ; Syntax_assignment ":s" $ quick_parse_exn "△ (△ (△ △ △)) △"
-  ; Syntax_assignment ":b" $ quick_parse_exn "△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ △)"
-  ; Syntax_assignment ":c" $ quick_parse_exn "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
+# The combinator labels a compiled chunk refers to, as the combinators they
+# are, serialized — so each is defined once, as the readable thing, and the DAG
+# lines follow. Emitted once, at the top of a module: there △ is still the leaf,
+# whatever a source binds it to further down, which is what lets these say △.
+# (Emitting it in front of every chunk instead, as this compiler used to, needed
+# a name for the leaf no source could bind, and wrote these fifty-odd lines in
+# front of every snippet.)
+prelude = List.concat_map
+  (\entry Pair.let entry $ \label \value
+    Pair.let (Serialize.to_dag value) $ \dag \root
+    List.concat_list [dag; label; " "; root; "\n"])
+  [ △ ":t"  △
+  ; △ ":k"  (\a \b a)
+  ; △ ":i"  (\x x)
+  ; △ ":s"  (\a \b \c a c (b c))
+  ; △ ":b"  (\a \b \c a (b c))
+  ; △ ":c"  (\a \b \c a c b)
   # [△ true], the cons stem every set bit of every literal is built from
-  ; Syntax_assignment ":ct" $ quick_parse_exn "△ (△ △)"
+  ; △ ":ct" (△ (△ △))
   ]
-native_prelude = List.concat_map syntax_to_native syntax_prelude
 
 # Syntax list => Native list option
 _compiler_lower = \synts some $ List.concat_map syntax_to_native synts
@@ -1013,12 +1001,6 @@ native_def_to_ddag = \n n
 
 compiler_emit_dag = \natives List.foldr native_def_to_ddag "" natives
 
-# The combinator labels every compiled chunk refers to, defined from △. It
-# belongs to the module, not to the chunk: emitted once at the top of one, where
-# △ is still the leaf, it serves every chunk below it. Emitting it with each
-# chunk instead — as this compiler used to — needed a name for the leaf that no
-# source could bind, and wrote the same fifty-odd lines in front of every snippet.
-prelude = compiler_emit_dag native_prelude
 compile_to_dag = \s
     Option.get_or ""
         (Option.map compiler_emit_dag
@@ -1156,7 +1138,6 @@ compile_to_dag_bench $ List.repeat 100 '1'
 # combinators as host values.
 _compiler_env =
   Map.pmap_set "△" △ $
-  Map.pmap_set "t" △ $
   Map.pmap_set "Map.set" Map.set $
   Map.empty
 
@@ -1257,7 +1238,7 @@ compile "{△ △ △, △: △}"
 # count, printing it is pages of triangles.
 _to_string = \v Nat.to_source (size v)
 compile ""
-# = 3765
+# = 5461
 
 # The spanned pipeline's exact text, pinned by example. A span is an
 # end-exclusive character range of the source; the node it wraps emits
