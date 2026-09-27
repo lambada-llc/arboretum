@@ -37,8 +37,6 @@ src/                     LambAda sources; symbols are namespaced by directory
   core.lamb                → id, compose, fix, …          (root, unqualified)
   bool/bool.lamb           → Bool.not, Bool.and, …        (Bool.* namespace)
   expect_test.lamb         → example tests
-tools/                   build orchestration of this repository's own
-                         (currently: warming the reduction cache in parallel)
 .cache/lambada/          compiler output cache (gitignored)
 .cache/tree-calculus/    reduction cache: evaluated modules and per-term
                          results, content-addressed (gitignored)
@@ -66,10 +64,8 @@ which knows about [DAGs](https://github.com/lambada-llc/tree-calculus/tree/main/
    per test *term*. A term's cache address is a fingerprint of its structure, so
    results survive the global renumbering canonicalization does on any change —
    a rebuild re-evaluates only the tests whose dependencies actually changed.
-   [`tools/warm-expect-tests.js`](./tools/warm-expect-tests.js) computes this
-   build's missing answers first, on every core; step 3 then finds each one
-   already written. All of it is optional: wipe the cache and the same build
-   produces the same bytes, just slower.
+   All of it is optional: wipe the cache and the same build produces the same
+   bytes, just slower.
 2. **Link** — `dag link` orders those modules so dependencies come first and
    concatenates them, rejecting duplicate exports and dependency cycles;
    `dag canonicalize` then hash-conses the whole thing into globally unique
