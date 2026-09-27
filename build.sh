@@ -14,6 +14,11 @@ export TREE_CALCULUS_RUNNER=eager
 # modules, and per-term results the expect tests below are answered from.
 # Content-addressed, so a stale entry cannot exist — only a missing one.
 export TREE_CALCULUS_CACHE="$PWD/.cache/tree-calculus"
+# Using an entry stamps it, so what no build has needed lately can go: an
+# evaluated module after three days (one per version of the library, and each
+# large), anything else after thirty.
+find "$TREE_CALCULUS_CACHE/module-v1" -type f -mtime +3 -delete 2>/dev/null || true
+find "$TREE_CALCULUS_CACHE" -type f -mtime +30 -delete 2>/dev/null || true
 lambada="node submodules/lambada/bin/lambada.js"
 dag="node submodules/tree-calculus/bin/dag.js"
 
@@ -27,13 +32,13 @@ $lambada compile --root src --cache .cache/lambada
 $dag link $(find src -name '.*.dag' | sort) \
   | $dag canonicalize > src/.dag-bundle-canonical
 
-# Evaluate the top-level expressions, recording results in the sources.
-# The warm pass computes the answers that are not in the cache yet, on every
-# core; expect-test then finds each one already written. Skipping the warm
-# pass changes nothing but the time this takes.
+# Evaluate the top-level expressions, recording results in the sources. A
+# thread evaluating a certifier test can hold several GB of native arena, and
+# one per core on a small-memory runner kills the VM outright, so each thread
+# is granted 8 GB of the machine's memory.
 >&2 echo "Running tests"
-node tools/warm-expect-tests.js src/.dag-bundle-canonical
-$lambada expect-test src/.dag-bundle-canonical --root src
+jobs=$(node -p 'const os = require("os"); Math.max(1, Math.min(os.availableParallelism(), Math.floor(os.totalmem() / 8 / 2 ** 30)))')
+$lambada expect-test src/.dag-bundle-canonical --root src --jobs "$jobs"
 
 # Take the compilers back out of the bundle they are part of, so that the
 # lambada submodule ships what this repository just built from its source: the
