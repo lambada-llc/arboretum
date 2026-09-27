@@ -967,8 +967,13 @@ syntax_to_native = \syntax
         (\start \end \inner _native_expr_of (_klow_span start end inner _klower_open []))
 
 syntax_error = Syntax_identifier "ERROR"
-to_internal△ = fix $ \self \syntax syntax
-  (\name       Syntax_identifier "__ENV△")
+
+# The prelude's own definitions are written as △ and applications of it and
+# nothing else, which this says: every identifier is the leaf, and a literal, a
+# lambda or a binding is an error. △ can be read as the leaf here because the
+# prelude is emitted once, at the top of a module, above anything a source binds.
+to_leaf_app = fix $ \self \syntax syntax
+  (\name       Syntax_identifier "△")
   (            syntax_error)
   (\value      syntax_error)
   (\value      syntax_error)
@@ -980,7 +985,7 @@ to_internal△ = fix $ \self \syntax syntax
   (\_type_name \_pairs syntax_error)
   (\_start \_end \inner self inner)
 
-quick_parse_exn = \s to_internal△ $ Option.get_or syntax_error (Option.bind compiler_parse_expr_exn $ compiler_tokenize s)
+quick_parse_exn = \s to_leaf_app $ Option.get_or syntax_error (Option.bind compiler_parse_expr_exn $ compiler_tokenize s)
 syntax_prelude =
   [ Syntax_assignment ":t" $ quick_parse_exn "△"
   ; Syntax_assignment ":k" $ quick_parse_exn "△ △"
@@ -994,10 +999,6 @@ syntax_prelude =
 native_prelude = List.concat_map syntax_to_native syntax_prelude
 
 # Syntax list => Native list option
-compiler_lower = \synts some $ Dlist.from_list
-  native_prelude
-  (List.concat_map syntax_to_native synts)
-
 _compiler_lower = \synts some $ List.concat_map syntax_to_native synts
 
 native_def_to_ddag = \n n
@@ -1011,17 +1012,23 @@ native_def_to_ddag = \n n
    )
 
 compiler_emit_dag = \natives List.foldr native_def_to_ddag "" natives
-_compiler_emit_dag = \natives Dlist.from_list (compiler_emit_dag native_prelude) (compiler_emit_dag natives)
+
+# The combinator labels every compiled chunk refers to, defined from △. It
+# belongs to the module, not to the chunk: emitted once at the top of one, where
+# △ is still the leaf, it serves every chunk below it. Emitting it with each
+# chunk instead — as this compiler used to — needed a name for the leaf that no
+# source could bind, and wrote the same fifty-odd lines in front of every snippet.
+prelude = compiler_emit_dag native_prelude
 compile_to_dag = \s
     Option.get_or ""
-        (Option.map _compiler_emit_dag
+        (Option.map compiler_emit_dag
         $ Option.bind _compiler_lower
         $ Option.bind compiler_parse
         $ compiler_tokenize s)
 
 compile_to_dag_with_spans = \s
     Option.get_or ""
-        (Option.map _compiler_emit_dag
+        (Option.map compiler_emit_dag
         $ Option.bind _compiler_lower
         $ Option.bind _compiler_parse_spanned
         $ compiler_tokenize_positioned s)
@@ -1031,10 +1038,10 @@ compile_to_dag_bench = \s
   let (compiler_tokenize s) $ Option.match _ $ \s
   let (Reflect.count_eval_steps compiler_parse s) $ \n_parse
   let (compiler_parse s) $ Option.match _ $ \s
-  let (Reflect.count_eval_steps compiler_lower s) $ \n_lower
+  let (Reflect.count_eval_steps _compiler_lower s) $ \n_lower
   let (_compiler_lower s) $ Option.match _ $ \s
   let (Reflect.count_eval_steps compiler_emit_dag s) $ \n_emit
-  let (_compiler_emit_dag s) $ \s
+  let (compiler_emit_dag s) $ \s
   List.concat_list [
     "Tokenize: "; Nat.to_string n_tokenize; "\n";
     "Parse:    "; Nat.to_string n_parse; "\n";
@@ -1046,43 +1053,43 @@ _to_string = id
 compile_to_dag_bench "x"
 # = Tokenize: 230
 #   Parse:    323
-#   Lower:    248
+#   Lower:    230
 #   Emit:     90
 
 compile_to_dag_bench "42"
 # = Tokenize: 393
 #   Parse:    180
-#   Lower:    212
+#   Lower:    194
 #   Emit:     676
 
 compile_to_dag_bench "1337"
 # = Tokenize: 872
 #   Parse:    180
-#   Lower:    212
+#   Lower:    194
 #   Emit:     937
 
 compile_to_dag_bench "[42]"
 # = Tokenize: 824
 #   Parse:    887
-#   Lower:    628
+#   Lower:    610
 #   Emit:     1322
 
 compile_to_dag_bench "\\x x"
 # = Tokenize: 747
 #   Parse:    641
-#   Lower:    661
+#   Lower:    643
 #   Emit:     92
 
 compile_to_dag_bench "x = 42"
 # = Tokenize: 969
 #   Parse:    515
-#   Lower:    331
+#   Lower:    313
 #   Emit:     756
 
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
 # = Tokenize: 14966
 #   Parse:    22222
-#   Lower:    9065
+#   Lower:    9047
 #   Emit:     10588
 
 # An ADT declaration: two variants, each emitting a constructor and a
@@ -1100,7 +1107,7 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 5378
 #   Parse:    1297
-#   Lower:    12694
+#   Lower:    12676
 #   Emit:     19344
 
 # Abstraction over an application spine, which used to be exponential in how
@@ -1114,7 +1121,7 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 # = Tokenize: 5114
 #   Parse:    6141
-#   Lower:    16756
+#   Lower:    16738
 #   Emit:     17673
 
 # Literal size. A string literal is linear in both directions: a fixed ~75
@@ -1126,7 +1133,7 @@ compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 # = Tokenize: 7501
 #   Parse:    187
-#   Lower:    204
+#   Lower:    186
 #   Emit:     18701
 
 # A nat literal is quadratic to tokenize, and stays that way: Horner's rule has
@@ -1140,24 +1147,24 @@ compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 compile_to_dag_bench $ List.repeat 100 '1'
 # = Tokenize: 104701
 #   Parse:    180
-#   Lower:    212
+#   Lower:    194
 #   Emit:     17341
 
+# What a compiled chunk can refer to that the chunk does not define. The
+# combinator labels are not here: the prelude defines them, and `compile` puts it
+# in front of the chunk rather than keeping a second copy of the same
+# combinators as host values.
 _compiler_env =
   Map.pmap_set "△" △ $
   Map.pmap_set "t" △ $
-  Map.pmap_set ":t" △ $
-  Map.pmap_set ":k" (\a \b a) $
-  Map.pmap_set ":i" (\x x) $
-  Map.pmap_set ":s" (\a \b \c a c (b c)) $
-  Map.pmap_set ":b" (\a \b \c a (b c)) $
-  Map.pmap_set ":c" (\a \b \c a c b) $
   Map.pmap_set "Map.set" Map.set $
   Map.empty
 
 dag_to_val = Serialize.from_dag_with_env _compiler_env
 
-compile = compose dag_to_val compile_to_dag
+# Source text to the value it denotes: the prelude and the chunk, read together,
+# which is what any caller of compile_to_dag has to assemble.
+compile = \s dag_to_val $ Dlist.from_list prelude (compile_to_dag s)
 
 # End to end: source text in, the value it denotes out. Each group renders with
 # whatever the programs under it evaluate to.
