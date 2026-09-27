@@ -1003,15 +1003,20 @@ prelude = List.concat_map
 # Syntax list => Native list option
 _compiler_lower = \synts some $ List.concat_map syntax_to_native synts
 
-native_def_to_ddag = \n n
+# How a bare expression's value is written is the caller's: a statement ends
+# on its name, alone on a line; a file names it after its line first (see
+# compile_file).
+_native_to_ddag = \value_line \n n
    (\literal \em
      em 0 $ \res \l
       \tl res $ Dlist.from_list literal $ space $ l $ newline $ tl
    )
    (\em
      em 0 $ \res \l
-      \tl res $ l $ newline $ tl
+      \tl res $ value_line l tl
    )
+
+native_def_to_ddag = _native_to_ddag $ \l \tl l $ newline $ tl
 
 compiler_emit_dag = \natives List.foldr native_def_to_ddag "" natives
 
@@ -1028,6 +1033,85 @@ compile_to_dag_with_spans = \s
         $ Option.bind _compiler_lower
         $ Option.bind _compiler_parse_spanned
         $ compiler_tokenize_positioned s)
+
+# A source file is statements laid out by indentation: a line that starts at
+# column 0 starts one, and the indented lines below it continue it. Blank lines
+# and comment lines are not code. Counting only the rest names a statement by
+# the code line it ends on, so the result comments a build writes below a test
+# renumber nothing, and neither does editing the prose around it.
+_is_code_line = List.match false (\c \_ Bool.not (_is_hash c))
+_is_indented = List.match false (\c \_ Fn.p_or (equal_const ' ') (equal_const 9) c)
+_statement_of = \current Pair.let current $ \n \lines △ n (List.join "\n" (List.reverse lines))
+# One line at a time, over (code lines so far, the statement being read, the
+# statements done). Each branch takes, and uses, what it goes on with: under
+# eager evaluation a lambda that ignored its argument would be built by
+# evaluating its body, so only a branch that needs its argument waits until it
+# is chosen.
+_statement_step = \state \line Bool.match
+    (\state state)
+    (\state
+      Pair.let state $ \n \more Pair.let more $ \current \done
+      let (Nat.succ n) $ \n
+      let (\done △ n (△ (some (△ n [line])) done)) $ \start
+      Option.match
+        (start done)
+        (\c Bool.match
+          (\c start (△ (_statement_of c) done))
+          (\c △ n (△ (some (△ n (△ line (Pair.snd c)))) done))
+          (_is_indented line) c)
+        current)
+    (_is_code_line line) state
+
+# str => (nat * str) list: each statement's text, with the code line it ends on
+statements = \s
+    Pair.let (List.foldl _statement_step (△ 0 (△ none [])) (List.split_on 10 s)) $ \_n \more
+    Pair.let more $ \current \done
+    List.reverse $ Option.match done (\c △ (_statement_of c) done) current
+
+# A whole source file: each statement compiled on its own, in turn — it is a
+# map, and nothing but the order the results are written in joins them. A bare
+# expression's value is named after the code line its statement ends on,
+# `:line.<n>`, which is what a test is found and named by, and the file ends on
+# that name like a statement ends on its value's. A statement that does not
+# compile is recorded as `:fail.<n>`, so the one to fix is named, and the rest
+# still compile.
+#
+# Each statement is written in front of what the ones after it wrote, the way a
+# statement's own definitions are, so nothing is copied to join them.
+compile_file = \s List.foldr
+    (\statement \rest Pair.let statement $ \n \text
+      let (\prefix \tl Dlist.from_list prefix $ Dlist.from_list (Nat.to_string n) $ tl) $ \label
+      Option.match
+        (label ":fail." $ Dlist.from_list " △" $ newline rest)
+        (List.foldr (_native_to_ddag (\l \tl label ":line." $ space $ l $ newline $ label ":line." $ newline $ tl)) rest)
+        (Option.bind _compiler_lower $ Option.bind compiler_parse $ compiler_tokenize text))
+    ""
+    (statements s)
+
+_to_string = \l List.join " | " $ List.map (\st Pair.let st $ \n \t List.concat_list [Nat.to_string n; ": "; t]) l
+statements "a = 1\n\n# prose\n  b\nc\n\td\n  # not prose\ne = f\n"
+# = 2: a = 1
+#     b | 5: c
+#   	d
+#     # not prose | 6: e = f
+statements ""
+# = 
+statements "  x\ny\n"
+# = 1:   x | 2: y
+
+_to_string = id
+compile_file "x = △\n\n# a test\nx\n"
+# = x △
+#   :line.2 x
+#   :line.2
+compile_file "id = \\a a\nid\n  id\n)\nid\n"
+# = id :i
+#   0 id id
+#   :line.3 0
+#   :line.3
+#   :fail.4 △
+#   :line.5 id
+#   :line.5
 
 compile_to_dag_bench = \s
   let (Reflect.count_eval_steps compiler_tokenize s) $ \n_tokenize
