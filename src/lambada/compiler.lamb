@@ -1039,34 +1039,72 @@ compile_to_dag_with_spans = \s
 # and comment lines are not code. Counting only the rest names a statement by
 # the code line it ends on, so the result comments a build writes below a test
 # renumber nothing, and neither does editing the prose around it.
-_is_code_line = List.match false (\c \_ Bool.not (_is_hash c))
-_is_indented = List.match false (\c \_ Fn.p_or (equal_const ' ') (equal_const 9) c)
-_statement_of = \current Pair.let current $ \n \lines △ n (List.join "\n" (List.reverse lines))
-# One line at a time, over (code lines so far, the statement being read, the
-# statements done). Each branch takes, and uses, what it goes on with: under
-# eager evaluation a lambda that ignored its argument would be built by
-# evaluating its body, so only a branch that needs its argument waits until it
-# is chosen.
-_statement_step = \state \line Bool.match
-    (\state state)
-    (\state
-      Pair.let state $ \n \more Pair.let more $ \current \done
-      let (Nat.succ n) $ \n
-      let (\done △ n (△ (some (△ n [line])) done)) $ \start
-      Option.match
-        (start done)
-        (\c Bool.match
-          (\c start (△ (_statement_of c) done))
-          (\c △ n (△ (some (△ n (△ line (Pair.snd c)))) done))
-          (_is_indented line) c)
-        current)
-    (_is_code_line line) state
+#
+# Nothing here takes the source apart into lines: that materialized every line,
+# comments and the results a build writes into a source included, only for one
+# character of it to be looked at, at some fifteen reductions a character. What
+# is not code is skipped where it stands, and a statement's text is copied out
+# of the source piece by piece, a piece being lines that follow one another.
+_is_lf = equal_const 10
+_is_indent = Fn.p_or (equal_const ' ') (equal_const 9)
+
+# The input after its first line, the newline included; [] when it has none.
+# Two reductions a character: the list's triage, and the character's branch —
+# which for every character but the newline is [skip_line] itself, re-entered
+# on the tail, and so is answered from the memo of a hash-consing evaluator
+# from the second time that character is seen on. The newline test is exact on
+# any tree, not just on characters: [skip_line △ = △], [skip_line (△ 10 t) = t]
+# and [skip_line (△ c t) = skip_line t] for every other tree [c], a spec that a
+# runtime can run the tree natively by, and that a proof can hold it to.
+skip_line = self_apply $ \self triage △ _ (\c Bool.match (\self self self) (\_self \t t) (_is_lf c) self)
+
+# The input from its next code line on. A blank line costs what a character of
+# [skip_line] does, a comment line one [skip_line]; a code line's branch is the
+# stem [△ c], which put back on the tail is the input it was taken from.
+_nc_code = \c \_self △ c
+_nc_blank = \_c \self self self
+_nc_comment = \_c \self \t self self (skip_line t)
+_next_code = self_apply $ \self triage △ _ (\c Bool.match (Bool.match _nc_code _nc_comment (_is_hash c)) _nc_blank (_is_lf c) c self)
+
+# A statement's text from where one of its pieces starts: the line and each
+# indented line right after it, joined by newlines, and then [tail], which the
+# loop is closed over and so hands back when applied to []. At a newline only
+# the next character is looked at, so nothing that is not code is ever read
+# here. A character is five reductions, and the loop that ends a statement's
+# text, closed over [], is the same one for every statement.
+_piece_char = \c \self \t △ c (self self t)
+_piece_on = \self \t △ 10 (self self t)
+_piece_off = \self \_t self self []
+_piece_newline = \_c \self \t triage _piece_off _ (\c \_ Bool.match _piece_off _piece_on (_is_indent c)) t self t
+_piece = \tail self_apply $ \self triage tail _ (\c Bool.match _piece_char _piece_newline (_is_lf c) c self)
+
+# A statement's text from its pieces, last first: each copied onto what the
+# ones after it make. Over the sources here this costs less than List.foldl
+# does, most statements being one piece, and less than a loop that holds the
+# text so far before the pieces left.
+_text_step = \p \ps \self \text self self ps (_piece (△ 10 text) p)
+_text_loop = self_apply $ \self triage (\text text) _ (\p \ps _text_step p ps self)
+_statement_text = triage [] _ (\p \ps _text_loop ps (_piece [] p))
+
+# One line at a time, with the statement being read pending as its pieces and
+# the code lines so far. An indented line counts and goes on; any other closes
+# the pending statement and opens its own. A run of lines that are not code is
+# left to [_next_code], and the line it ends at taken in hand right there: an
+# indented one starts a piece. So no line that is not code is read twice, with
+# or without a memo to answer the second reading. Each recursive call leads
+# with a position only its branch binds, so under eager evaluation none is made
+# before its branch is chosen; the knot comes before the state the branches
+# pass on, which measured cheaper than after it.
+_st_end = \_self \ps \n [△ n (_statement_text ps)]
+_st_more = \_c \t \self \ps \n self (skip_line t) self ps (Nat.succ n)
+_st_new = \c \t \self \ps \n △ (△ n (_statement_text ps)) (self (skip_line t) self [△ c t] (Nat.succ n))
+_st_piece = \c \t \self \ps \n _st_more c t self (△ (△ c t) ps) n
+_st_after_gap = triage _st_end _ (\c Bool.match _st_new _st_piece (_is_indent c) c)
+_st_gap = \c \t \self \ps \n _st_after_gap (_next_code (△ c t)) self ps n
+_statementsE = triage _st_end _ (\c Bool.match (Bool.match (Bool.match _st_new _st_more (_is_indent c)) _st_gap (_is_hash c)) _st_gap (_is_lf c) c)
 
 # str => (nat * str) list: each statement's text, with the code line it ends on
-statements = \s
-    Pair.let (List.foldl _statement_step (△ 0 (△ none [])) (List.split_on 10 s)) $ \_n \more
-    Pair.let more $ \current \done
-    List.reverse $ Option.match done (\c △ (_statement_of c) done) current
+statements = \s triage [] _ (\c \t _statementsE (skip_line t) _statementsE [△ c t] 1) (_next_code s)
 
 # A whole source file: each statement compiled on its own, in turn — it is a
 # map, and nothing but the order the results are written in joins them. A bare
@@ -1098,6 +1136,11 @@ statements ""
 # = 
 statements "  x\ny\n"
 # = 1:   x | 2: y
+statements "a =\n  b\n# c\n\n  d\n\t\ne"
+# = 4: a =
+#     b
+#     d
+#   	 | 5: e
 
 _to_string = id
 compile_file "x = △\n\n# a test\nx\n"
@@ -1112,6 +1155,19 @@ compile_file "id = \\a a\nid\n  id\n)\nid\n"
 #   :fail.4 △
 #   :line.5 id
 #   :line.5
+
+skip_line "# prose\nx = 1"
+# = x = 1
+skip_line "\nx = 1"
+# = x = 1
+skip_line "x = 1"
+# = 
+skip_line ""
+# = 
+# Only the tree 10 ends a line: not 10 with a zero bit on top, a number it
+# is a prefix of or that is a prefix of it, a bit, or 10 under a stem.
+skip_line [[△; △ △; △; △ △; △]; 26; 2; △ △; △ 10; 10; 'x']
+# = x
 
 compile_to_dag_bench = \s
   let (Reflect.count_eval_steps compiler_tokenize s) $ \n_tokenize
