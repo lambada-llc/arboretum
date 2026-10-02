@@ -31,10 +31,9 @@ jobs:
         with:
           node-version: '22'
 
-      # Both caches are content-addressed — compiler hash + chunk source for
-      # compiled chunks, term fingerprints for reduction results — so a
-      # restored entry can only miss, never serve the wrong output for changed
-      # input. PR runs write to their own cache scope, not the base branch's.
+      # The cache is content-addressed — compiler and source for compiled
+      # sources, term fingerprints for reduction results — so a restored entry
+      # can only miss, never serve the wrong output for changed input. PR runs write to their own cache scope, not the base branch's.
       - uses: actions/cache@v4
         with:
           path: .cache

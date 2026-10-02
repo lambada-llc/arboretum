@@ -1,5 +1,5 @@
 # Hidden paths are ignored by default — everything generated here is hidden
-# (src/.bool.dag, src/.dag-bundle-canonical, .cache/lambada). Hand-written
+# (src/.bool.dag, src/.dag-bundle-canonical, .cache/tree-calculus). Hand-written
 # hidden paths are re-included explicitly below.
 .*
 *.exe

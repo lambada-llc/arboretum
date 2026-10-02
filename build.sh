@@ -10,8 +10,9 @@ cd "$(dirname "$0")"
 # Use the pinned submodule rather than a published runtime.
 export LAMBADA_TREE_CALCULUS="$PWD/submodules/tree-calculus"
 export TREE_CALCULUS_RUNNER=eager
-# Where the runtime keeps what reduction it has already done: evaluated
-# modules, and per-term results the expect tests below are answered from.
+# Where the runtime keeps what reduction it has already done: compiled sources,
+# evaluated modules, and per-term results the expect tests below are answered
+# from.
 # Content-addressed, so a stale entry cannot exist — only a missing one.
 export TREE_CALCULUS_CACHE="$PWD/.cache/tree-calculus"
 # Using an entry stamps it, so what no build has needed lately can go: an
@@ -24,7 +25,7 @@ dag="node submodules/tree-calculus/bin/dag.js"
 
 # Compile each .lamb into a sibling .dag module, namespaced by its path
 >&2 echo "Compiling"
-$lambada compile --root src --cache .cache/lambada
+$lambada compile --root src
 
 # Order the modules so dependencies come first, concatenate them, and hash-cons
 # the result into globally unique ids
