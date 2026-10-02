@@ -37,9 +37,8 @@ src/                     LambAda sources; symbols are namespaced by directory
   core.lamb                → id, compose, fix, …          (root, unqualified)
   bool/bool.lamb           → Bool.not, Bool.and, …        (Bool.* namespace)
   expect_test.lamb         → example tests
-.cache/lambada/          compiler output cache (gitignored)
-.cache/tree-calculus/    reduction cache: evaluated modules and per-term
-                         results, content-addressed (gitignored)
+.cache/tree-calculus/    reduction cache: compiled sources, evaluated modules
+                         and per-term results, content-addressed (gitignored)
 ```
 
 There is no "import" statement or similar: Dependencies between modules are resolved automatically by the build system, cycles forbidden.
