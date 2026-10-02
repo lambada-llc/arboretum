@@ -1054,8 +1054,11 @@ _is_indent = Fn.p_or (equal_const ' ') (equal_const 9)
 # on the tail, and so is answered from the memo of a hash-consing evaluator
 # from the second time that character is seen on. The newline test is exact on
 # any tree, not just on characters: [skip_line △ = △], [skip_line (△ 10 t) = t]
-# and [skip_line (△ c t) = skip_line t] for every other tree [c], a spec that a
-# runtime can run the tree natively by, and that a proof can hold it to.
+# and [skip_line (△ c t) = skip_line t] for every other tree [c]. By that spec
+# tree-calculus's eager runner takes this tree's steps natively, as a jet proven
+# in Lean to be what the tree does (its implementation/lean/Cpp/trees/skipLine.dag
+# is this tree's normal form): a different tree here compiles the same, only
+# without the jet, until that file is regenerated and the proof re-checked.
 skip_line = self_apply $ \self triage △ _ (\c Bool.match (\self self self) (\_self \t t) (_is_lf c) self)
 
 # The input from its next code line on. A blank line costs what a character of
