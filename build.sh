@@ -33,12 +33,12 @@ $lambada compile --root src
 $dag link $(find src -name '.*.dag' | sort) \
   | $dag canonicalize > src/.dag-bundle-canonical
 
-# Evaluate the top-level expressions, recording results in the sources. A
-# thread evaluating a certifier test can hold several GB of native arena, and
-# one per core on a small-memory runner kills the VM outright, so each thread
-# is granted 8 GB of the machine's memory.
+# Evaluate the top-level expressions, recording results in the sources. Each
+# thread drives a runner of its own, which peaks at about 1.1 GB under the
+# default RUNNER_RSS_THRESHOLD_MB, so each is granted 3 GB of the machine's
+# memory: a thread per core on a 16 GB machine, fewer on a smaller one.
 >&2 echo "Running tests"
-jobs=$(node -p 'const os = require("os"); Math.max(1, Math.min(os.availableParallelism(), Math.floor(os.totalmem() / 8 / 2 ** 30)))')
+jobs=$(node -p 'const os = require("os"); Math.max(1, Math.min(os.availableParallelism(), Math.floor(os.totalmem() / 3 / 2 ** 30)))')
 $lambada expect-test src/.dag-bundle-canonical --root src --jobs "$jobs"
 
 # Take the compilers back out of the bundle they are part of, so that the
