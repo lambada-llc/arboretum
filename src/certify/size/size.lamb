@@ -205,9 +205,13 @@ _fold = \a \t Pair.let a $ \state \r Pair.let r $ \spec \v
     (_image s v))
     (_match state t [])
 
-# Generalization: a subterm a hypothesis proves is a known Snat.
+# Generalization: a subterm a hypothesis proves is a known Snat. Every caller
+# folds a hypothesis whose split variable must land on a variable, so a closed
+# subterm is never an instance: it is left out, and nothing under it is walked.
+_closedq = fix $ \self triage true (\_ false) (\f \x Bool.and (self f) (self x))
 _subterms = \t (fix $ \self \t \acc triage acc (\_ acc)
-  (\f \x △ f $ self f $ △ x $ self x acc) t) t []
+  (\f \x let (\u \l Bool.match (\l △ u (self u l)) (\l l) (_closedq u) l) $ \keep
+    keep f $ keep x acc) t) t []
 _replace = \needle \v fix $ \self \t
   Bool.match (triage △ (\a △ a) (\f \x △ (self f) (self x)) t) v (equal t needle)
 _generalize = \g \asms \e \s
@@ -336,7 +340,6 @@ _rgen_sites = \r fix $ \self triage [] (\_ []) (\f \x
 # the normal-order judgment: eagerly a banked traversal is not a value, and
 # the states these anchors describe never normalize.
 
-_closedq = fix $ \self triage true (\_ false) (\f \x Bool.and (self f) (self x))
 _cbudget = Snat.from_nat 2000
 _contish = \x Option.bind (Pair.match $ \t \b Option.match
     (Bool.match Option.none (Option.some t) (_closedq t)) (\_ Option.none) b)
