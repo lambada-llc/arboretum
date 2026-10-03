@@ -177,9 +177,11 @@ _temper = \y
   _u32_xor y3 (Nat.shr 18 y3)
 
 # === genrand_uint32: returns Pair value new_state ===
+# Bool.match picks between functions here, not their results: as arguments,
+# both would be evaluated, so `_twist mt` would twist a state that needs none.
 genrand_uint32 = Pair.match $ \mt \mti
   let (Nat.is_gte mti _N) $ \needs_twist
-  let (Bool.match mt (_twist mt) needs_twist) $ \mt2
+  let (Bool.match id _twist needs_twist mt) $ \mt2
   let (Bool.match mti 0 needs_twist) $ \i
   Pair.create (_temper (_get_at i mt2)) (Pair.create mt2 (Nat.succ i))
 
