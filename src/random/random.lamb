@@ -11,12 +11,13 @@
 #   is the next index to draw from. `mti = 624` triggers a `_twist` on the
 #   next draw, which is CPython's lazy refill.
 #
-# Cost: `mt` is a list, so an update walks to its index and rebuilds the way
-# back — quadratic where the published algorithm indexes an array. Seeding and
-# each twist pay that 624 times over, and they are the only expensive things
-# here; a draw between twists is cheap. The tests at the bottom of this file
-# are the cheap ones (bit ops, tempering, chunking), and test.lamb threads a
-# whole session through each seed so that the expensive part is paid once.
+# Cost: `mt` is a list where the published algorithm indexes an array. Seeding
+# and the twist rewrite every entry in order, so they walk the list instead —
+# reaching each mt[i] by its index would make them quadratic. They are still
+# the only expensive things here; a draw between twists is cheap. The tests at
+# the bottom of this file are the cheap ones (bit ops, tempering, chunking), and
+# test.lamb threads a whole session through each seed so that the expensive part
+# is paid once.
 #
 # Recursion discipline: every recursive helper destructures a value to gate its
 # own recursion, so that nothing unfolds until the argument it consumes is
@@ -84,49 +85,52 @@ _init_genrand = \s
       i)
 
 # === init_by_array: CPython's seed-from-int path ===
-# Iterate each phase `count` times over its state machine via Fn.pow.
+# mt = init_genrand(19650218); i = 1; j = 0
+# repeat max(N, klen) times:
+#   mt[i] = (mt[i] ^ ((mt[i-1] ^ (mt[i-1] >> 30)) * 1664525)) + key[j] + j
+#   i += 1; j += 1
+#   if i >= N: mt[0] = mt[N-1]; i = 1
+#   if j >= klen: j = 0
+# repeat N-1 times:
+#   mt[i] = (mt[i] ^ ((mt[i-1] ^ (mt[i-1] >> 30)) * 1566083941)) - i
+#   i += 1
+#   if i >= N: mt[0] = mt[N-1]; i = 1
+# mt[0] = 0x80000000
+#
+# A step reads mt[i-1] and mt[i], then moves on to i+1, so mt is held as a
+# zipper: `rev` is mt[i-1] down to mt[0], `rest` is mt[i] up to mt[N-1]. Walking
+# off the end of `rest` is the `i >= N` wrap above.
+_wrap = \rev Pair.create (List.take 1 rev) (List.drop 1 (List.reverse rev))
 
-_phase1_step = \key \klen \state
-  Pair.match (\mt \ij Pair.match (\i \j
-    let (_get_at i mt) $ \mti
-    let (_get_at (Nat.pred i) mt) $ \mtim1
-    let (_u32_mul (_u32_xor mtim1 (Nat.shr 30 mtim1)) 1664525) $ \scaled
-    let (_u32_add (_u32_add (_u32_xor mti scaled) (_get_at j key)) j) $ \new_mti
-    let (_set_at i new_mti mt) $ \mt2
-    let (Nat.succ i) $ \i_next
-    let (Nat.succ j) $ \j_next
-    let (Nat.is_gte i_next _N) $ \i_at_max
-    let (Bool.match mt2 (_set_at 0 (_get_at (Nat.pred _N) mt2) mt2) i_at_max) $ \mt3
-    let (Bool.match i_next 1 i_at_max) $ \i_final
-    let (Nat.is_gte j_next klen) $ \j_at_max
-    let (Bool.match j_next 0 j_at_max) $ \j_final
-    Pair.create mt3 (Pair.create i_final j_final)
-  ) ij) state
+# `count` steps of mt[i] = step mt[i-1] mt[i] c, where c is the loop's own
+# counter and `next` advances it. Returns the zipper.
+_phase = \step \next fix $ \self \count \rev \rest \c
+  Nat.match
+    (Pair.create rev rest)
+    (\pred List.match [] (\prev \_ List.match [] (\cur \tl
+      let (△ (step prev cur c) rev) $ \rev2
+      Pair.match (\r \t self pred r t (next c))
+        (List.match _wrap (\h \t \r Pair.create r (△ h t)) tl rev2))
+      rest) rev)
+    count
 
-_phase2_step = \state
-  Pair.match (\mt \i
-    let (_get_at i mt) $ \mti
-    let (_get_at (Nat.pred i) mt) $ \mtim1
-    let (_u32_mul (_u32_xor mtim1 (Nat.shr 30 mtim1)) 1566083941) $ \scaled
-    let (_u32_sub (_u32_xor mti scaled) i) $ \new_mti
-    let (_set_at i new_mti mt) $ \mt2
-    let (Nat.succ i) $ \i_next
-    let (Nat.is_gte i_next _N) $ \i_at_max
-    let (Bool.match mt2 (_set_at 0 (_get_at (Nat.pred _N) mt2) mt2) i_at_max) $ \mt3
-    let (Bool.match i_next 1 i_at_max) $ \i_final
-    Pair.create mt3 i_final
-  ) state
+# The counter after c: c + 1, or `start` once that reaches `bound`.
+_next = \start \bound \c
+  let (Nat.succ c) $ \c1
+  Bool.match c1 start (Nat.is_gte c1 bound)
 
 _init_by_array = \key
   let (List.length key) $ \klen
-  let (stage _init_genrand 19650218 key) $ \mt0
-  let (Nat.max _N klen) $ \k1
-  Pair.match (\mt1 \ij1
-    let (Pair.fst ij1) $ \i1
-    Pair.match (\mt2 \_
-      _set_at 0 _UPPER_MASK mt2
-    ) (Fn.pow (Nat.pred _N) _phase2_step (Pair.create mt1 i1))
-  ) (Fn.pow k1 (_phase1_step key klen) (Pair.create mt0 (Pair.create 1 0)))
+  let (\prev \cur \j _u32_add (_u32_add (_u32_xor cur (_u32_mul (_u32_xor prev (Nat.shr 30 prev)) 1664525)) (_get_at j key)) j) $ \step1
+  let (\prev \cur \i _u32_sub (_u32_xor cur (_u32_mul (_u32_xor prev (Nat.shr 30 prev)) 1566083941)) i) $ \step2
+  List.match [] (\m0 \ms
+    Pair.match (\rev1 \rest1
+      # Phase 2 picks up at the i phase 1 left off at: the length of `rev`.
+      Pair.match (\rev2 \rest2
+        List.match [] (\_ \t △ _UPPER_MASK t) (List.concat (List.reverse rev2) rest2))
+      (_phase step2 (_next 1 _N) (Nat.pred _N) rev1 rest1 (List.length rev1)))
+    (_phase step1 (_next 0 klen) (Nat.max _N klen) [m0] ms 0))
+  (stage _init_genrand 19650218 key)
 
 # === Public seed: from a non-negative integer (Python-compatible) ===
 # CPython splits |n| into 32-bit little-endian chunks; key has at least one chunk.
@@ -145,25 +149,22 @@ seed = \n
 # for i in 0..N:
 #   y = (mt[i] & UPPER_MASK) | (mt[(i+1) % N] & LOWER_MASK)
 #   mt[i] = mt[(i+M) % N] ^ (y >> 1) ^ (MATRIX_A if y & 1 else 0)
-_twist_step = \mt \i
-  let (_get_at i mt) $ \mi
-  let (_get_at (Nat.mod (Nat.succ i) _N) mt) $ \mi1
-  let (_u32_or (_u32_and mi _UPPER_MASK) (_u32_and mi1 _LOWER_MASK)) $ \y
-  let (_get_at (Nat.mod (Nat.add i _M) _N) mt) $ \mim
-  let (Nat.match 0 (\_ _MATRIX_A) (_u32_and y 1)) $ \mag
-  _u32_xor (_u32_xor mim (Nat.shr 1 y)) mag
-
-# Update mt entries in place: at iteration i, mt[i] is recomputed from
-# the *current* mt (which already reflects updates 0..i-1). CPython's twist
-# is an in-place loop, and from i = _N - _M onward the (i + _M) % _N index
-# wraps back into the already-updated prefix — so a "compute everything from
-# old mt" version produces a different sequence.
-_twist = \mt0
-  Pair.fst (Fn.pow _N
-    (\state Pair.match (\mt \i
-      let (_twist_step mt i) $ \v
-      Pair.create (_set_at i v mt) (Nat.succ i)) state)
-    (Pair.create mt0 0))
+#
+# That is mt[i] = mt[(i+M) % N] ^ _mix mt[i] mt[(i+1) % N], in place. What
+# `_mix` reads is still old (but for mt[0], which step N-1 reads after step 0
+# rewrote it), while from i = N - M = 227 on, mt[(i+M) % N] is the new
+# mt[i-227]. So the new mt comes in runs of 227, each xor'd onto the run before
+# it, the first onto the old mt[M..N-1].
+_mix = \x \x1
+  let (_u32_or (_u32_and x _UPPER_MASK) (_u32_and x1 _LOWER_MASK)) $ \y
+  _u32_xor (Nat.shr 1 y) (Nat.match 0 (\_ _MATRIX_A) (_u32_and y 1))
+_twist = \mt
+  # `_mix` of steps 0 to N-2; step N-1's needs the new mt[0].
+  let (List.zip_with _mix mt (List.drop 1 mt)) $ \mixed
+  let (List.zip_with _u32_xor mixed (List.drop _M mt)) $ \a
+  let (List.zip_with _u32_xor (List.drop 227 mixed) a) $ \b
+  let (List.concat (List.drop 454 mixed) [_mix (_get_at 623 mt) (_get_at 0 a)]) $ \mixed_c
+  List.concat a (List.concat b (List.zip_with _u32_xor mixed_c b))
 
 # === Tempering of a single u32 ===
 # y ^= y >> 11
