@@ -799,7 +799,10 @@ _prove = \nf fix $ \self \depth \g \asms \e \q
 # is confluent — so running the lazy one over the eager one's result is not more
 # reduction, only the blocker read off it.
 _budget = Snat.from_nat 1000            # rule applications, eagerly
-_head_budget = Snat.from_nat 40000      # head reductions, in normal order
+# Head reductions, in normal order. The same tree as Snat.from_nat 40000, which
+# counts down from 40000 one at a time; composing succ by squaring takes an
+# eighth of the reduction steps.
+_head_budget = Fn.pow_fast 40000 compose id Snat.succ Snat.zero
 _lazily = Quoted.normalize_lazy _head_budget
 _eagerly = \q Option.bind _lazily $ Quoted.normalize_eager _budget q
 
