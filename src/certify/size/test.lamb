@@ -18,20 +18,11 @@ _shifted = fix $ \self triage Snat.one (\a Snat.succ (self a)) (\a \b Snat.add (
 _accumulating = \x (fix $ \self \x \n triage
   (Snat.succ n) (\a Snat.succ (self a n)) (\a \b Snat.succ (self b (self a n))) x) x Snat.zero
 
-_to_string = Bool.to_source
-Certify.Size.computes_size _naive
-# = true
-Certify.Size.computes_size _swapped
-# = true
-Certify.Size.computes_size _shifted
-# = true
-Certify.Size.computes_size _accumulating
-# = true
-
-# A true is backed by a proof tree that can be looked at: SPLIT with a case
-# per shape of the split variable, PEEL per emitted successor, GEN naming a
-# subterm's count, CUT opening a phase against a tail that END closes, FOLD
-# closing an instance of an induction hypothesis.
+# computes_size is whether certify_size finds a proof, and the proof is a tree
+# that can be looked at, so the first is drawn in place of its true: SPLIT with
+# a case per shape of the split variable, PEEL per emitted successor, GEN
+# naming a subterm's count, CUT opening a phase against a tail that END closes,
+# FOLD closing an instance of an induction hypothesis.
 _to_string = Option.match "no proof" Certify.Size.render
 Certify.Size.certify_size _naive
 # = SPLIT t
@@ -50,6 +41,12 @@ Certify.Size.certify_size _naive
 #                 FOLD
 #           VALUE g2
 _to_string = Bool.to_source
+Certify.Size.computes_size _swapped
+# = true
+Certify.Size.computes_size _shifted
+# = true
+Certify.Size.computes_size _accumulating
+# = true
 
 # The same four in the stronger reading: `size` whatever the reduction order,
 # so none of them leans on a rule discarding a subterm before it is reduced.
@@ -117,7 +114,8 @@ Certify.Size.computes_size_eagerly (compose Snat.from_nat size)
 # Recursion on a rebuilt tree, right and wrong. A chain step counts a fork's
 # left child by stacking it onto the right child — self u v reduces to △ⁿ v —
 # and recursing on that chain, which is no subtree of the input. The eager
-# certifier's size-measure rules close the real one, and the accounting
+# certifier's size-measure rules close the real one — Snat.size__103, tree for
+# tree, whose trues src/snat/size.lamb records — and the accounting
 # rejects the mutants: counting u twice needs parts that are not disjoint,
 # dropping v leaves a size the spec still owes unmatched, and a missing
 # successor leaves a 1 unpaid.
@@ -125,7 +123,7 @@ _chain = \x (fix $ \self \x compose Snat.succ $ triage id self (\u \v self (self
 _chain_twice = \x (fix $ \self \x compose Snat.succ $ triage id self (\u \v self (self u u)) x) x △
 _chain_dropped = \x (fix $ \self \x compose Snat.succ $ triage id self (\u \v self (self u △)) x) x △
 _chain_unpaid = \x (fix $ \self \x triage id self (\u \v self (self u v)) x) x △
-Certify.Size.computes_size_eagerly _chain
+equal _chain Snat.size__103
 # = true
 Certify.Size.computes_size_eagerly _chain_twice
 # = false
@@ -138,8 +136,6 @@ Certify.Size.computes_size_eagerly _chain_unpaid
 # ported there: the real one closes identically — residual for the
 # accumulator seat, a minted tree for the chain — and the accounting
 # rejects the mutants for the same reasons as above.
-Certify.Size.computes_size _chain
-# = true
 Certify.Size.computes_size _chain_twice
 # = false
 Certify.Size.computes_size _chain_dropped
