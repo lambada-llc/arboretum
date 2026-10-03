@@ -949,16 +949,19 @@ _syntax_emit_adt = \type_name \items
 # and nothing dispatches twice.
 _native_expr_of = \annotated [Native_expr (Pair.fst (Pair.snd annotated))]
 _native_null = [Native_expr (_emk_leaf ":t")]
-# The statement under a stack of spans, if it is one. The spanned parser wraps
-# whatever it parses, a definition included — and a definition is not an
-# expression: lowered as one it is nothing.
+_native_def = \name \o [Native_assignment name (_syntax_to_native o)]
+_native_adt = \type_name \pairs _syntax_emit_adt type_name (List.mapi △ pairs)
+# The lowered statement under a stack of spans, if it is one. The spanned
+# parser wraps whatever it parses, a definition included — and a definition is
+# not an expression: lowered as one it is nothing.
 _statement_under = fix $ \self \syntax syntax
     (\_ Option.none) Option.none (\_ Option.none) (\_ Option.none) (\_ Option.none)
     (\_ Option.none) (\_ \_ Option.none) (\_ \_ Option.none)
-    (\_ \_ Option.some syntax) (\_ \_ Option.some syntax)
+    (\name \o Option.some $ _native_def name o)
+    (\type_name \pairs Option.some $ _native_adt type_name pairs)
     (\_ \_ \inner self inner)
 
-syntax_to_native = fix $ \self \syntax
+syntax_to_native = \syntax
     syntax
         (\name       [Native_expr (_emk_leaf name)])
         (            _native_null)
@@ -968,15 +971,12 @@ syntax_to_native = fix $ \self \syntax
         (\kvlist     _native_expr_of (_klow_map kvlist _klower_open []))
         (\name \body _native_expr_of (_klow_abs name body _klower_open []))
         (\o1 \o2     _native_expr_of (_klow_app o1 o2 _klower_open []))
-        (\name \o    [Native_assignment name (_syntax_to_native o)])
-        (\type_name \pairs
-            (_syntax_emit_adt type_name (List.mapi △ pairs))
-        )
+        _native_def
+        _native_adt
         # A span marks an expression. Over a definition it is dropped, and the
         # definition lowers as itself; what its body carries stays its body's.
-        (\start \end \inner Option.match
+        (\start \end \inner Option.get_or
             (_native_expr_of (_klow_span start end inner _klower_open []))
-            self
             (_statement_under inner))
 
 # The combinator labels a compiled chunk refers to, as the combinators they
@@ -1192,43 +1192,43 @@ _to_string = id
 compile_to_dag_bench "x"
 # = Tokenize: 230
 #   Parse:    323
-#   Lower:    264
+#   Lower:    230
 #   Emit:     90
 
 compile_to_dag_bench "42"
 # = Tokenize: 393
 #   Parse:    180
-#   Lower:    228
+#   Lower:    194
 #   Emit:     676
 
 compile_to_dag_bench "1337"
 # = Tokenize: 872
 #   Parse:    180
-#   Lower:    228
+#   Lower:    194
 #   Emit:     937
 
 compile_to_dag_bench "[42]"
 # = Tokenize: 824
 #   Parse:    887
-#   Lower:    644
+#   Lower:    610
 #   Emit:     1322
 
 compile_to_dag_bench "\\x x"
 # = Tokenize: 747
 #   Parse:    641
-#   Lower:    677
+#   Lower:    643
 #   Emit:     92
 
 compile_to_dag_bench "x = 42"
 # = Tokenize: 969
 #   Parse:    515
-#   Lower:    347
+#   Lower:    313
 #   Emit:     756
 
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
 # = Tokenize: 14966
 #   Parse:    22222
-#   Lower:    9081
+#   Lower:    9047
 #   Emit:     10588
 
 # An ADT declaration: two variants, each emitting a constructor and a
@@ -1246,7 +1246,7 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 5378
 #   Parse:    1297
-#   Lower:    12710
+#   Lower:    12676
 #   Emit:     19344
 
 # Abstraction over an application spine, which used to be exponential in how
@@ -1260,7 +1260,7 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 # = Tokenize: 5114
 #   Parse:    6141
-#   Lower:    16772
+#   Lower:    16738
 #   Emit:     17673
 
 # Literal size. A string literal is linear in both directions: a fixed ~75
@@ -1272,7 +1272,7 @@ compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 # = Tokenize: 7501
 #   Parse:    187
-#   Lower:    220
+#   Lower:    186
 #   Emit:     18701
 
 # A nat literal is quadratic to tokenize, and stays that way: Horner's rule has
@@ -1286,7 +1286,7 @@ compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 compile_to_dag_bench $ List.repeat 100 '1'
 # = Tokenize: 104701
 #   Parse:    180
-#   Lower:    228
+#   Lower:    194
 #   Emit:     17341
 
 # What a compiled chunk can refer to that the chunk does not define. The
