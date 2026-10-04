@@ -68,23 +68,29 @@ Bench.run [is_alpha_char; 'x']
 
 fail = "fail"
 
-# special chars
-Special_char = Schar_paren_open
-             | Schar_paren_close
-             | Schar_backslash
-             | Schar_equals
-             | Schar_separator
-             | Schar_pipe
-             | Schar_dollar
-             | Schar_colon
-             | Schar_sqbracket_open
-             | Schar_sqbracket_close
-             | Schar_curly_open
-             | Schar_curly_close
-
-schar_eq =
-  let (\s s 0 1 2 3 4 5 6 7 8 9 10 11) $ \id
-  \a \b equal (id a) (id b)
+# Special chars are 4-bit indices rather than a Scott-encoded ADT: testing or
+# dispatching on one is a precomputed trie walk over the index (~15 reductions)
+# instead of a 12-way elimination that distributes its handlers through every
+# arm (~40-85) — and an expression makes several such probes. [_schar_d i] is
+# the dispatcher for index i, in the ADT dispatcher's shape [\f \alt \x]: the
+# trie keeps f exactly at i and lands on alt elsewhere, indices beyond the
+# four bits (no schar has them) included.
+_schar_paren_open = 0
+_schar_paren_close = 1
+_schar_backslash = 2
+_schar_equals = 3
+_schar_separator = 4
+_schar_pipe = 5
+_schar_dollar = 6
+_schar_colon = 7
+_schar_sqbracket_open = 8
+_schar_sqbracket_close = 9
+_schar_curly_open = 10
+_schar_curly_close = 11
+_schar_gen = Memo.gen_list Memo.gen_bool 4
+_schar_d = \i
+    let (Memo.precompute_alt _schar_gen (\f \alt alt) (\x Bool.match (\f \alt alt) (\f \alt f) (equal x i))) $ \tab
+    \f \alt \x tab x f alt
 
 # tokens. Comments are not among them: a comment is gap text, skipped where
 # whitespace is (see the gap dispatch below), so it never becomes data that
@@ -139,19 +145,19 @@ parse_char_map = \map List.match Parser.fail_result $ \head \tail Option.match P
 # :: Parser Token
 parse_special_char = parse_char_map
         {
-            '(': Schar_paren_open;
-            ')': Schar_paren_close;
-            '\': Schar_backslash;
-            '=': Schar_equals;
-            ';': Schar_separator;
-            ',': Schar_separator;
-            '|': Schar_pipe;
-            '$': Schar_dollar;
-            ':': Schar_colon;
-            '[': Schar_sqbracket_open;
-            ']': Schar_sqbracket_close;
-            '{': Schar_curly_open;
-            '}': Schar_curly_close;
+            '(': _schar_paren_open;
+            ')': _schar_paren_close;
+            '\': _schar_backslash;
+            '=': _schar_equals;
+            ';': _schar_separator;
+            ',': _schar_separator;
+            '|': _schar_pipe;
+            '$': _schar_dollar;
+            ':': _schar_colon;
+            '[': _schar_sqbracket_open;
+            ']': _schar_sqbracket_close;
+            '{': _schar_curly_open;
+            '}': _schar_curly_close;
         }
 _is_quot = equal_const '"'
 # Escape sequences, JSON's simple ones and only those. Anything else after a
@@ -303,9 +309,8 @@ parse_abs_tail = \e
             )
             Parser.fail)
 
-# Each caller knows the expected special char statically, so match the parsed schar
-# with that constructor's *_Dispatch — a single elimination — instead of mapping
-# both schars to indices and comparing them via [schar_eq].
+# Each caller knows the expected special char statically, so apply that
+# index's *_Dispatch — one trie walk — instead of comparing two indices.
 parse_schar = \schar_dispatch
     _one_then
         (Token_special_char_Dispatch
@@ -317,13 +322,13 @@ parse_identifier = _one_then
 parse_identifier_adt = _one_then
         (Token_identifier_adt_Dispatch Parser.return Parser.fail)
 
-parse_paren_close = parse_schar Schar_paren_close_Dispatch
-parse_sqbracket_close = parse_schar Schar_sqbracket_close_Dispatch
-parse_curly_close = parse_schar Schar_curly_close_Dispatch
-parse_separator = parse_schar Schar_separator_Dispatch
-parse_colon = parse_schar Schar_colon_Dispatch
-parse_equals = parse_schar Schar_equals_Dispatch
-parse_pipe = parse_schar Schar_pipe_Dispatch
+parse_paren_close = parse_schar (_schar_d _schar_paren_close)
+parse_sqbracket_close = parse_schar (_schar_d _schar_sqbracket_close)
+parse_curly_close = parse_schar (_schar_d _schar_curly_close)
+parse_separator = parse_schar (_schar_d _schar_separator)
+parse_colon = parse_schar (_schar_d _schar_colon)
+parse_equals = parse_schar (_schar_d _schar_equals)
+parse_pipe = parse_schar (_schar_d _schar_pipe)
 
 
 parse_list_tail = \e Parser.seq_fst
@@ -358,7 +363,7 @@ parse_map_tail = \e Parser.seq_fst
                     (Parser.either parse_curly_close (Parser.seq_fst parse_separator parse_curly_close))
 
 # (Replacing the assignment lookahead with a next-token peek that dispatches
-# straight on Schar_equals was measured and loses ~2.5x on a bare identifier:
+# straight on _schar_equals was measured and loses ~2.5x on a bare identifier:
 # the nested dispatch closures put the recursive parser and the identifier
 # many lambda layers deep, and distributing them through those layers costs
 # more than the failed equals-parse ever did — which short-circuits at its
@@ -381,25 +386,27 @@ parse_adt_tail = \literal \e Parser.map
 # The recursive parser [e] is applied *after* the token dispatch, so each
 # handler takes its own [e]. This keeps [parse__expr e] cheap to instantiate:
 # [e] flows to a single position instead of being substituted into every
-# branch, so only the dispatched branch's body is built per call.
+# branch, so only the dispatched branch's body is built per call. The schar
+# arm is a table over the index, in index order; one trie walk lands on the
+# arm to run.
+_expr_schar_arms = Memo.precompute_alt _schar_gen (\_e Parser.fail) $
+    \i List.nth_or (\_e Parser.fail) i
+      [ (\e Parser.seq_fst e parse_paren_close)
+      ; (\_ Parser.fail)
+      ; parse_abs_tail
+      ; (\_ Parser.fail)
+      ; (\_ Parser.fail)
+      ; (\_ Parser.fail)
+      ; (\_ Parser.fail)
+      ; (\_ Parser.fail)
+      ; parse_list_tail
+      ; (\_ Parser.fail)
+      ; parse_map_tail
+      ]
 parse__expr = \e
     _one_then
         (\token token
-            (\schar \e schar
-                (\e Parser.seq_fst e parse_paren_close)
-                (\_ Parser.fail)
-                parse_abs_tail
-                (\_ Parser.fail)
-                (\_ Parser.fail)
-                (\_ Parser.fail)
-                (\_ Parser.fail)
-                (\_ Parser.fail)
-                parse_list_tail
-                (\_ Parser.fail)
-                parse_map_tail
-                (\_ Parser.fail)
-                e
-            )
+            (\schar \e _expr_schar_arms schar e)
             (\literal \e
                 Parser.either
                     (parse_assign_tail literal e)
@@ -423,7 +430,7 @@ _expr_tail = \e \acc \input List.match
     (\_e \acc △ acc [])
     (\tok \rest \e \acc
         Token_special_char_Dispatch
-          (\schar \e \acc \tok \rest Schar_dollar_Dispatch
+          (\schar \e \acc \tok \rest (_schar_d _schar_dollar)
               (\e \acc \_tok \rest Parser.map_result (Syntax_app acc) (e rest))
               (\_e \acc \tok \rest △ acc (△ tok rest))
               schar e acc tok rest)
@@ -467,15 +474,15 @@ _ptok_end = \ptok Pair.snd (Pair.fst ptok)
 _pone = List.match Parser.fail_result (\h \t Parser.return (Pair.snd h) t)
 
 _pschar = \schar_expected Parser.compose_dep _pone
-    (Token_special_char_Dispatch (\schar Bool.match Parser.fail (Parser.return id) (schar_eq schar_expected schar)) Parser.fail)
-_pparen_close = _pschar Schar_paren_close
-_psqbracket_close = _pschar Schar_sqbracket_close
-_pcurly_close = _pschar Schar_curly_close
-_pseparator = _pschar Schar_separator
-_pcolon = _pschar Schar_colon
-_pequals = _pschar Schar_equals
-_ppipe = _pschar Schar_pipe
-_pdollar = _pschar Schar_dollar
+    (Token_special_char_Dispatch (\schar Bool.match Parser.fail (Parser.return id) (equal schar_expected schar)) Parser.fail)
+_pparen_close = _pschar _schar_paren_close
+_psqbracket_close = _pschar _schar_sqbracket_close
+_pcurly_close = _pschar _schar_curly_close
+_pseparator = _pschar _schar_separator
+_pcolon = _pschar _schar_colon
+_pequals = _pschar _schar_equals
+_ppipe = _pschar _schar_pipe
+_pdollar = _pschar _schar_dollar
 _pidentifier = Parser.compose_dep _pone (Token_identifier_Dispatch Parser.return Parser.fail)
 _pidentifier_adt = Parser.compose_dep _pone (Token_identifier_adt_Dispatch Parser.return Parser.fail)
 
@@ -495,6 +502,20 @@ _padt_variant = Parser.seq_pair _pidentifier_adt (Parser.many _pidentifier)
 _padt_tail = \literal \e Parser.map (\list [Syntax_adt literal list])
     (Parser.seq_snd _pequals (Parser.seq_pair _padt_variant (Parser.many (Parser.seq_snd _ppipe _padt_variant))))
 
+_p_schar_arms = Memo.precompute_alt _schar_gen (\_e Parser.fail) $
+    \i List.nth_or (\_e Parser.fail) i
+      [ (\e Parser.seq_fst (Parser.map (\x [x]) e) _pparen_close)
+      ; (\_ Parser.fail)
+      ; _pabs_tail
+      ; (\_ Parser.fail)
+      ; (\_ Parser.fail)
+      ; (\_ Parser.fail)
+      ; (\_ Parser.fail)
+      ; (\_ Parser.fail)
+      ; _plist_tail
+      ; (\_ Parser.fail)
+      ; _pmap_tail
+      ]
 # Spanned atom parser: wraps each atom result with its source span
 _p__expr = \e \ptoks
   let (List.match 0 (\h \_ _ptok_start h) ptoks) $ \start
@@ -505,10 +526,7 @@ _p__expr = \e \ptoks
     let (_ptok_end $ _last $ List.take consumed_n ptoks) $ \end
     Parser.return (List.map (Syntax_spanned start end) items) remaining
   ) (Parser.compose_dep _pone (\token token
-      (\schar schar
-          (Parser.seq_fst (Parser.map (\x [x]) e) _pparen_close)
-          Parser.fail (_pabs_tail e) Parser.fail Parser.fail Parser.fail Parser.fail Parser.fail
-          (_plist_tail e) Parser.fail (_pmap_tail e) Parser.fail)
+      (\schar _p_schar_arms schar e)
       (\literal Parser.either (_passign_tail literal e) (Parser.return [Syntax_identifier literal]))
       (\literal Parser.either (_padt_tail literal e) (Parser.return [Syntax_identifier literal]))
       (\value \escapes Parser.return $ [Syntax_const_str value])
@@ -1209,25 +1227,25 @@ compile_to_dag_bench "1337"
 
 compile_to_dag_bench "[42]"
 # = Tokenize: 824
-#   Parse:    887
+#   Parse:    763
 #   Lower:    610
 #   Emit:     1322
 
 compile_to_dag_bench "\\x x"
 # = Tokenize: 747
-#   Parse:    641
+#   Parse:    594
 #   Lower:    643
 #   Emit:     92
 
 compile_to_dag_bench "x = 42"
 # = Tokenize: 969
-#   Parse:    515
+#   Parse:    476
 #   Lower:    313
 #   Emit:     756
 
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
 # = Tokenize: 14966
-#   Parse:    22222
+#   Parse:    18169
 #   Lower:    9047
 #   Emit:     10588
 
@@ -1245,7 +1263,7 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 # self-hosting the tax is gone.
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 5378
-#   Parse:    1297
+#   Parse:    1225
 #   Lower:    12676
 #   Emit:     19344
 
@@ -1259,7 +1277,7 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # flat 4088 apiece.
 compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 # = Tokenize: 5114
-#   Parse:    6141
+#   Parse:    5426
 #   Lower:    16738
 #   Emit:     17673
 
