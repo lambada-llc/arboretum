@@ -959,6 +959,88 @@ _syntax_emit_adt = \type_name \items
         (Pair.match (\pair \index _syntax_emit_adt_variant items n index (Pair.snd pair) (Pair.fst pair)))
         items
 
+# The tree-shaped encoding, for a declaration spelled [=]. A value of variant
+# i with fields a1..ak is the fork [△ i payload]: i the variant's index as a
+# nat, the payload the leaf for k = 0, the field itself for k = 1 and, for
+# k >= 2, the fields as right-nested forks [△ a1 (△ a2 (… ak))]. Eliminating
+# one is a triage walk down the tag's bits — a couple of steps per bit where
+# the lambda-shaped encoding pays a combinator step per variant — and the
+# eliminators generated for it are trees built from their handlers: applied to
+# closed handlers (the idiom here, branches as closures taking the live data as
+# trailing arguments), the application reduces to one tree at bundle reduction
+# and every use pays the walk alone. Besides the constructors and *_Dispatch
+# both spellings generate, a declaration [T = …] gets [T_match h0 … h_{n-1}],
+# the handlers in declaration order and the value last.
+# The generated definitions are spelled as syntax and lowered by the pass
+# above like user code: declarations are rare enough that no closed form has
+# to be kept in step with the combiner's rules for them.
+_tapp = Syntax_app
+_tleaf = Syntax_const_null
+# Binders are named by index — a digit string is no identifier a source can
+# spell, so nothing a handler or field refers to can be captured.
+_tid = \j Syntax_identifier (Nat.to_string j)
+_tK = Syntax_identifier ":k"
+_tB = Syntax_identifier ":b"
+# [△ (△ △ △)]: applied to a handler and a fork, hands the fork's halves to the
+# handler — a triage whose leaf and stem cases are never taken.
+_tTF = _tapp _tleaf (_tapp (_tapp _tleaf _tleaf) _tleaf)
+# The splitter for 2 + m fields: feeds the handler the first field and splits
+# the rest into what that returns.
+_tsplit = fix $ \self \m Nat.match _tTF (\mp _tapp (_tapp _tB _tTF) (_tapp _tB (self mp))) m
+# The handler [h] of a k-field variant, applied to the payload: under a
+# constant for no field, itself for one, through the splitter otherwise.
+_tunpack = \k \h Nat.match (_tapp _tK h) (\kp Nat.match h (\m _tapp (_tsplit m) h) kp) k
+# The payload of fields [a1..ak] as syntax.
+_tpayload = fix $ \self List.match _tleaf (\hd \tl List.match hd (\_ \_ _tapp (_tapp _tleaf hd) (self tl)) tl)
+_tabs = \names \body List.foldr (\name Syntax_abs (Nat.to_string name)) body names
+# Constructor for variant i with k fields: \a1..ak △ i payload.
+_tctor = \i \k let (List.range k) $ \fields
+    _tabs fields (_tapp (_tapp _tleaf (Syntax_const_nat i)) (_tpayload (List.map _tid fields)))
+# The trie over the tags 0..n-1, as the triage tree that walks a tag's bits
+# and ends on [leaf i] for tag i. A node is reached with the bits read so far
+# denoting [v], the next bit worth [bit]; it is [△ (△ L :t) F]: L for a tag
+# ending here, which is a tag only if the bits so far are a canonical nat
+# ([ends]: none, or the last one set), and F for one going on, a triage over
+# the next bit into the two children. A child no tag reaches is the leaf; the
+# recursion into one is a branch, so the eager evaluator takes it only there.
+_tnone = \_v \_bit _tleaf
+_ttrie = \n \leaf fix $ \self \v \bit \ends
+    let (Nat.double bit) $ \bit2
+    _tapp (_tapp _tleaf (_tapp (_tapp _tleaf (Bool.match (\_v _tleaf) leaf ends v)) _tleaf))
+      (Bool.match _tnone
+        (\v \bit2 _tapp (_tapp _tleaf (_tapp (_tapp _tleaf
+            (Bool.match _tnone (\v \bit2 self v bit2 false) (Nat.is_lt (Nat.add v bit2) n) v bit2))
+            (_tapp _tK (self (Nat.add v bit) bit2 true)))) _tleaf)
+        (Nat.is_lt (Nat.add v bit) n) v bit2)
+# Eliminators: a fork split handing the tag to the trie and the payload to the
+# leaf it ends on. [_tdispatch n i k] is \f \alt \x, hitting variant i's
+# handler and dropping every other tag to alt; [_tmatch arities] is
+# \h0 … \h_{n-1} \x over the variants' field counts.
+_telim = \n \leaf _tapp _tTF (_ttrie n leaf 0 1 true)
+_tdispatch = \n \i \k _tabs [0; 1] $ _telim n $ \v Bool.match (_tapp _tK (_tid 1)) (_tunpack k (_tid 0)) (equal v i)
+_tmatch = \arities let (List.length arities) $ \n
+    _tabs (List.range n) $ _telim n $ \v _tunpack (Option.get_or 0 (List.nth v arities)) (_tid v)
+# The same eliminator over the lambda-shaped encoding, so a type can change
+# encoding without its uses changing with it: \h0 … \h_{n-1} \x x h0 … h_{n-1}.
+# Like that encoding's constructors and dispatchers it is a closed form of n —
+# the spine folds to M_1 = :c :i, M_n = (:b^(n-1) :c) M_(n-1) — held to the
+# pass's answer on the lambda term, [_smatch], by a grid test near the end.
+_ematch = \n (fix $ \self \m Nat.match _eT (\mp _eapp (_ebn m _eC) (self mp)) m) (Nat.pred n)
+_smatch = \n let (List.range n) $ \hs
+    _tabs (List.concat hs [n]) $ List.foldl (\acc \h _tapp acc (_tid h)) (_tid n) hs
+_tmatch_name = \type_name List.concat type_name "_match"
+_syntax_emit_tree_adt = \type_name \pairs
+    let (List.length pairs) $ \n
+    List.concat
+      (List.concat_map (Pair.match $ \pair \i Pair.let pair $ \name \args let (List.length args) $ \k
+          [ Native_assignment name (_syntax_to_native (_tctor i k))
+          ; Native_assignment (List.concat name "_Dispatch") (_syntax_to_native (_tdispatch n i k)) ])
+        (List.mapi △ pairs))
+      [Native_assignment (_tmatch_name type_name) (_syntax_to_native (_tmatch (List.map (\pair List.length (Pair.snd pair)) pairs)))]
+_syntax_emit_scott_adt = \type_name \pairs
+    List.concat (_syntax_emit_adt type_name (List.mapi △ pairs))
+      [Native_assignment (_tmatch_name type_name) (_ematch (List.length pairs))]
+
 # Top-level identifiers and constants skip the abstraction pass entirely: no
 # binder can be in scope, so their lowered form is the plain emitter itself,
 # with none of the machinery triple built just to be unwrapped again. The
@@ -969,10 +1051,9 @@ _syntax_emit_adt = \type_name \items
 _native_expr_of = \annotated [Native_expr (Pair.fst (Pair.snd annotated))]
 _native_null = [Native_expr (_emk_leaf ":t")]
 _native_def = \name \o [Native_assignment name (_syntax_to_native o)]
-# [scott] records how the declaration was spelled. Both spellings lower to
-# the Scott encoding for now; the tree-shaped encoding for [=] comes next, and
-# this flag is what will select between them.
-_native_adt = \type_name \pairs \_scott _syntax_emit_adt type_name (List.mapi △ pairs)
+# [scott] records how the declaration was spelled: [\=] asks for the
+# lambda-shaped encoding, [=] gets the tree-shaped one.
+_native_adt = \type_name \pairs \scott Bool.match _syntax_emit_tree_adt _syntax_emit_scott_adt scott type_name pairs
 # The lowered statement under a stack of spans, if it is one. The spanned
 # parser wraps whatever it parses, a definition included — and a definition is
 # not an expression: lowered as one it is nothing.
@@ -1265,11 +1346,18 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 # more at lowering time than the recurrences did and, in exchange, generates
 # the same application-lean encodings as lowered user code — under
 # self-hosting the tax is gone.
+compile_to_dag_bench "Foo \\= Foo x x4 x1 | Bar x0 x1 x2 x4"
+# = Tokenize: 5418
+#   Parse:    1349
+#   Lower:    13730
+#   Emit:     20637
+# The tree-shaped declaration spells its definitions as syntax and lowers them
+# through the pass, so it pays the general machinery the closed forms avoid.
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 5378
 #   Parse:    1363
-#   Lower:    12683
-#   Emit:     19344
+#   Lower:    130108
+#   Emit:     80472
 
 # Abstraction over an application spine, which used to be exponential in how
 # many applications the bound variable reaches: each further [a] under \a
@@ -1360,15 +1448,14 @@ compile "\\f \\g \\x f (g x)"
 compile "\\f \\x \\y f y x"
 # = (△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △)))
 
-# End-to-end coverage of the generated constructors and dispatchers: compiling
+# End-to-end coverage of the generated constructors and eliminators: compiling
 # an ADT declaration alone hands back the accumulated environment, so each
 # generated definition can be fetched and exercised — a value of each variant
-# eliminated by hand-passed continuations, dispatch hit and miss, and a nullary
-# variant.
+# through T_match, dispatch hit and miss, and a nullary variant.
 _to_string = Nat.to_source
-let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "Ca" env 42 (\v v) (\v \w w)
+let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "T2_match" env (\v v) (\v \w w) (Map.pmap_get "Ca" env 42)
 # = 42
-let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "Cb" env 1 2 (\v v) (\v \w w)
+let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "T2_match" env (\v v) (\v \w w) (Map.pmap_get "Cb" env 1 2)
 # = 2
 let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "Ca_Dispatch" env (\v v) 9 (Map.pmap_get "Ca" env 42)
 # = 42
@@ -1380,12 +1467,50 @@ let (compile "N0 = Z | S x") $ \env Map.pmap_get "Z_Dispatch" env 7 0 (Map.pmap_
 # = 7
 let (compile "N0 = Z | S x") $ \env Map.pmap_get "S_Dispatch" env (\v v) 0 (Map.pmap_get "S" env 3)
 # = 3
-# [\=] declares the same type with the lambda-shaped encoding spelled out;
-# both spellings lower identically until [=] gets the tree-shaped encoding.
+let (compile "N0 = Z | S x") $ \env Map.pmap_get "N0_match" env 7 (\v v) (Map.pmap_get "S" env 3)
+# = 3
+# Five variants walk every shape of the tag trie — tags of one to three bits,
+# a tag that is a prefix of another — and a three-field variant the nested
+# payload split.
+_t5 = compile "T5 = A | B x | C x y | D x y z | E"
+_t5_match = Map.pmap_get "T5_match" _t5 10 (\x x) (\x \y Nat.add x y) (\x \y \z Nat.mul z (Nat.add x y)) 50
+_t5_match (Map.pmap_get "A" _t5)
+# = 10
+_t5_match (Map.pmap_get "B" _t5 11)
+# = 11
+_t5_match (Map.pmap_get "C" _t5 20 3)
+# = 23
+_t5_match (Map.pmap_get "D" _t5 20 3 2)
+# = 46
+_t5_match (Map.pmap_get "E" _t5)
+# = 50
+Map.pmap_get "D_Dispatch" _t5 (\x \y \z z) 0 (Map.pmap_get "D" _t5 1 2 3)
+# = 3
+Map.pmap_get "D_Dispatch" _t5 (\x \y \z z) 0 (Map.pmap_get "E" _t5)
+# = 0
+Map.pmap_get "E_Dispatch" _t5 8 0 (Map.pmap_get "E" _t5)
+# = 8
+Map.pmap_get "E_Dispatch" _t5 8 0 (Map.pmap_get "A" _t5)
+# = 0
+# The values themselves: the variant's index as a nat, then the payload.
+_to_string = Serialize.to_source
+Map.pmap_get "A" _t5
+# = (△ △ △)
+Map.pmap_get "B" _t5 △
+# = (△ (△ (△ △) △) △)
+Map.pmap_get "D" _t5 △ △ △
+# = (△ (△ (△ △) (△ (△ △) △)) (△ △ (△ △ △)))
+# [\=] declares the same type with the lambda-shaped encoding — a value is a
+# function of one continuation per variant — and gets the same T_match over it.
+_to_string = Nat.to_source
+let (compile "T2 \\= Ca x | Cb x y") $ \env Map.pmap_get "Cb" env 1 2 (\v v) (\v \w w)
+# = 2
 let (compile "T2 \\= Ca x | Cb x y") $ \env Map.pmap_get "Cb_Dispatch" env (\v \w w) 9 (Map.pmap_get "Cb" env 1 2)
 # = 2
 let (compile "T2 \\= Ca x | Cb x y") $ \env Map.pmap_get "Ca_Dispatch" env (\v v) 9 (Map.pmap_get "Cb" env 1 2)
 # = 9
+let (compile "T2 \\= Ca x | Cb x y") $ \env Map.pmap_get "T2_match" env (\v v) (\v \w w) (Map.pmap_get "Cb" env 1 2)
+# = 2
 # The operator is one token two characters wide; a space between makes it a
 # lambda's backslash and an equals sign.
 List.length (Option.get_or [] (compiler_tokenize "\\="))
@@ -1415,6 +1540,11 @@ List.all (\case Pair.let case $ \index \items
             (List.range n))
         (_arity_vectors n))
       (List.map Nat.succ (List.range 3)))
+# = true
+# And the eliminator text, up to six variants.
+List.all (\n equal (compiler_emit_dag [Native_expr (_ematch n)])
+                  (compiler_emit_dag [Native_expr (_syntax_to_native (_smatch n))]))
+    (List.map Nat.succ (List.range 6))
 # = true
 
 # Map literals lower to Map.set over the empty map, so what comes back is a
@@ -1482,7 +1612,8 @@ compile_to_dag_with_spans "f = \\a not a"
 #   0 0 :i::11,12
 #   0::4,12 0
 #   f 0::4,12
-compile_to_dag_with_spans "T = A x | B"
+# A declaration carries no spans; the lambda-shaped one keeps the text short.
+compile_to_dag_with_spans "T \\= A x | B"
 # = 1 :b :k
 #   0 :b 1
 #   1 :c :i
@@ -1501,3 +1632,7 @@ compile_to_dag_with_spans "T = A x | B"
 #   1 1 01
 #   0 :c 1
 #   B_Dispatch 0
+#   0 :b :c
+#   1 :c :i
+#   0 0 1
+#   T_match 0
