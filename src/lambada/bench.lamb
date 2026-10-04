@@ -1,61 +1,61 @@
 Lambada.compile_to_dag_bench "foo bar"
 # = Tokenize: 1116
-#   Parse:    493
-#   Lower:    589
-#   Emit:     360
+#   Parse:    484
+#   Lower:    580
+#   Emit:     356
 Lambada.compile_to_dag_bench "Nat.add"
 # = Tokenize: 1104
-#   Parse:    248
-#   Lower:    344
-#   Emit:     96
+#   Parse:    245
+#   Lower:    343
+#   Emit:     92
 
 Lambada.compile_to_dag_bench "42"
 # = Tokenize: 383
-#   Parse:    147
-#   Lower:    143
-#   Emit:     670
+#   Parse:    142
+#   Lower:    138
+#   Emit:     666
 Lambada.compile_to_dag_bench "'a'"
 # = Tokenize: 241
-#   Parse:    147
-#   Lower:    143
-#   Emit:     718
+#   Parse:    142
+#   Lower:    138
+#   Emit:     714
 Lambada.compile_to_dag_bench ['"'; 'h'; 'i'; '"']
 # = Tokenize: 618
-#   Parse:    150
-#   Lower:    138
-#   Emit:     2458
+#   Parse:    146
+#   Lower:    133
+#   Emit:     2454
 
 Lambada.compile_to_dag_bench "\\x x"
 # = Tokenize: 726
-#   Parse:    440
-#   Lower:    546
-#   Emit:     86
+#   Parse:    351
+#   Lower:    540
+#   Emit:     82
 Lambada.compile_to_dag_bench "(x)"
 # = Tokenize: 600
-#   Parse:    459
-#   Lower:    170
-#   Emit:     84
+#   Parse:    433
+#   Lower:    169
+#   Emit:     80
 Lambada.compile_to_dag_bench "[1, 2]"
 # = Tokenize: 1139
-#   Parse:    803
-#   Lower:    773
-#   Emit:     2210
+#   Parse:    727
+#   Lower:    758
+#   Emit:     2206
 Lambada.compile_to_dag_bench "{a: b}"
 # = Tokenize: 1126
-#   Parse:    1138
-#   Lower:    788
-#   Emit:     902
+#   Parse:    1044
+#   Lower:    781
+#   Emit:     898
 
 Lambada.compile_to_dag_bench "x = y"
 # = Tokenize: 779
-#   Parse:    420
-#   Lower:    247
-#   Emit:     158
+#   Parse:    408
+#   Lower:    236
+#   Emit:     156
 Lambada.compile_to_dag_bench "f $ x"
 # = Tokenize: 767
-#   Parse:    539
-#   Lower:    473
-#   Emit:     352
+#   Parse:    512
+#   Lower:    464
+#   Emit:     348
 Lambada.compile_to_dag_bench "# note"
 # = Tokenize: 301
 #   Parse:    45
