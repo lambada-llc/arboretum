@@ -959,18 +959,29 @@ _syntax_emit_adt = \type_name \items
         (Pair.match (\pair \index _syntax_emit_adt_variant items n index (Pair.snd pair) (Pair.fst pair)))
         items
 
-# The tree-shaped encoding, for a declaration spelled [=]. A value of variant
-# i with fields a1..ak is the fork [△ i payload]: i the variant's index as a
-# nat, the payload the leaf for k = 0, the field itself for k = 1 and, for
-# k >= 2, the fields as right-nested forks [△ a1 (△ a2 (… ak))]. Eliminating
-# one is a triage walk down the tag's bits — a couple of steps per bit where
-# the lambda-shaped encoding pays a combinator step per variant — and the
-# eliminators generated for it are trees built from their handlers: applied to
-# closed handlers (the idiom here, branches as closures taking the live data as
-# trailing arguments), the application reduces to one tree at bundle reduction
-# and every use pays the walk alone. Besides the constructors and *_Dispatch
-# both spellings generate, a declaration [T = …] gets [T_match h0 … h_{n-1}],
-# the handlers in declaration order and the value last.
+# The tree-shaped encoding, for a declaration spelled [=]. A value is a tree
+# whose shape, read by triage, names its variant. The three shapes a triage
+# tells apart hold up to three variants: a nullary one as the leaf; one under
+# a stem, its payload the child (the leaf for no field, the field itself for
+# one, right-nested forks [△ a1 (△ a2 (… ak))] for more); one as a fork, two
+# fields its children ([△ a1 (△ a2 …)] for more, [△ △ a] for one, [△ △ △] for
+# none). Bool, Option, List and Pair as the core writes them by hand are what
+# the smallest types come out as. More variants than that go into the fork as
+# [△ code payload]: the code a constant tree naming the variant among them,
+# the payload as under a stem — or, when none of them has a field, under the
+# stem as the bare [△ code]. The codes are themselves laid out on a trie of
+# shapes — the leaf, [△ △] and [△ △ △] as terminals, [△ code'] and [△ △ code']
+# continuing — so eliminating a value costs one triage step per level, where
+# the lambda-shaped encoding pays a combinator step per variant, and a variant
+# with one field is built at no cost at all, the constructor being the stem
+# [△ code] (or [△] itself). Nullary variants are constants either way.
+# The eliminators are trees built from their handlers: applied to closed
+# handlers (the idiom here, branches as closures taking the live data as
+# trailing arguments) they reduce to one triage tree at bundle reduction and
+# every use pays the walk alone. Besides the constructors and *_Dispatch both
+# spellings generate, a declaration [T = …] gets [T_match h0 … h_{n-1}], the
+# handlers in declaration order and the value last. Variants are laid out in
+# declaration order, so the first few are the cheapest to reach.
 # The generated definitions are spelled as syntax and lowered by the pass
 # above like user code: declarations are rare enough that no closed form has
 # to be kept in step with the combiner's rules for them.
@@ -981,45 +992,121 @@ _tleaf = Syntax_const_null
 _tid = \j Syntax_identifier (Nat.to_string j)
 _tK = Syntax_identifier ":k"
 _tB = Syntax_identifier ":b"
+_tabs = \names \body List.foldr (\name Syntax_abs (Nat.to_string name)) body names
+_tKn = \n Fn.pow n (_tapp _tK)
+_ttriage2 = \l \s _tapp _tleaf (_tapp (_tapp _tleaf l) s)
+_ttriage = \l \s \f _tapp (_ttriage2 l s) f
 # [△ (△ △ △)]: applied to a handler and a fork, hands the fork's halves to the
 # handler — a triage whose leaf and stem cases are never taken.
-_tTF = _tapp _tleaf (_tapp (_tapp _tleaf _tleaf) _tleaf)
-# The splitter for 2 + m fields: feeds the handler the first field and splits
-# the rest into what that returns.
+_tTF = _ttriage2 _tleaf _tleaf
+# The splitter for 2 + m right-nested fields: feeds the handler the first and
+# splits the rest into what that returns.
 _tsplit = fix $ \self \m Nat.match _tTF (\mp _tapp (_tapp _tB _tTF) (_tapp _tB (self mp))) m
-# The handler [h] of a k-field variant, applied to the payload: under a
-# constant for no field, itself for one, through the splitter otherwise.
-_tunpack = \k \h Nat.match (_tapp _tK h) (\kp Nat.match h (\m _tapp (_tsplit m) h) kp) k
-# The payload of fields [a1..ak] as syntax.
+# Fields [a1..ak] right-nested, the leaf for none and the field itself for one.
 _tpayload = fix $ \self List.match _tleaf (\hd \tl List.match hd (\_ \_ _tapp (_tapp _tleaf hd) (self tl)) tl)
-_tabs = \names \body List.foldr (\name Syntax_abs (Nat.to_string name)) body names
-# Constructor for variant i with k fields: \a1..ak △ i payload.
-_tctor = \i \k let (List.range k) $ \fields
-    _tabs fields (_tapp (_tapp _tleaf (Syntax_const_nat i)) (_tpayload (List.map _tid fields)))
-# The trie over the tags 0..n-1, as the triage tree that walks a tag's bits
-# and ends on [leaf i] for tag i. A node is reached with the bits read so far
-# denoting [v], the next bit worth [bit]; it is [△ (△ L :t) F]: L for a tag
-# ending here, which is a tag only if the bits so far are a canonical nat
-# ([ends]: none, or the last one set), and F for one going on, a triage over
-# the next bit into the two children. A child no tag reaches is the leaf; the
-# recursion into one is a branch, so the eager evaluator takes it only there.
-_tnone = \_v \_bit _tleaf
-_ttrie = \n \leaf fix $ \self \v \bit \ends
-    let (Nat.double bit) $ \bit2
-    _tapp (_tapp _tleaf (_tapp (_tapp _tleaf (Bool.match (\_v _tleaf) leaf ends v)) _tleaf))
-      (Bool.match _tnone
-        (\v \bit2 _tapp (_tapp _tleaf (_tapp (_tapp _tleaf
-            (Bool.match _tnone (\v \bit2 self v bit2 false) (Nat.is_lt (Nat.add v bit2) n) v bit2))
-            (_tapp _tK (self (Nat.add v bit) bit2 true)))) _tleaf)
-        (Nat.is_lt (Nat.add v bit) n) v bit2)
-# Eliminators: a fork split handing the tag to the trie and the payload to the
-# leaf it ends on. [_tdispatch n i k] is \f \alt \x, hitting variant i's
-# handler and dropping every other tag to alt; [_tmatch arities] is
-# \h0 … \h_{n-1} \x over the variants' field counts.
-_telim = \n \leaf _tapp _tTF (_ttrie n leaf 0 1 true)
-_tdispatch = \n \i \k _tabs [0; 1] $ _telim n $ \v Bool.match (_tapp _tK (_tid 1)) (_tunpack k (_tid 0)) (equal v i)
-_tmatch = \arities let (List.length arities) $ \n
-    _tabs (List.range n) $ _telim n $ \v _tunpack (Option.get_or 0 (List.nth v arities)) (_tid v)
+
+# The slot kinds, 0 leaf, 1 stem, 2 fork, number the children a terminal's
+# payload has to fill. A variant's payload in a slot of a kind, and what a
+# handler [h] for it is wrapped in to receive the fields: under a stem (and
+# after a code) the payload is one tree to be split, in a fork the first field
+# is already a child of its own.
+_tpack_f = List.match (_tapp (_tapp _tleaf _tleaf) _tleaf)
+    (\hd \tl List.match (_tapp (_tapp _tleaf _tleaf) hd) (\_ \_ _tapp (_tapp _tleaf hd) (_tpayload tl)) tl)
+_tpack = \kind \fs Nat.match _tleaf (\kp Nat.match (_tapp _tleaf (_tpayload fs)) (\_ _tpack_f fs) kp) kind
+_tunpack_s = \k \h Nat.match (_tapp _tK h) (\kp Nat.match h (\m _tapp (_tsplit m) h) kp) k
+_tunpack_f = \k \h Nat.match (_tKn 2 h)
+    (\kp Nat.match (_tapp _tK h) (\kpp Nat.match h (\m _tapp (_tapp _tB (_tsplit m)) h) kpp) kp) k
+_tunpack = \kind Nat.match (\_k \h h) (\kp Nat.match _tunpack_s (\_ _tunpack_f) kp) kind
+
+# A node is [△ (△ leaf stem) fork] over slots; a variant is its index with
+# its arity. At the root a subtrie holds the codes of the rest of the variants
+# — bare under the stem, before their payloads in the fork; in a code trie it
+# is the codes continuing under [△ code'] and [△ △ code'].
+Shape_slot = Slot_none | Slot_term variant | Slot_sub node
+_tnullary = \v Nat.is_zero (Pair.snd v)
+_tdrop_first = \p fix $ \self List.match [] (\hd \tl Bool.match (△ hd (self tl)) tl (p hd))
+_thalves = \vs let (Nat.div (Nat.succ (List.length vs)) 2) $ \n1 △ (List.take n1 vs) (List.drop n1 vs)
+_tterm = List.match Slot_none (\v \_ Slot_term v)
+# Codes: three or fewer variants fill a node, more put the first at the leaf
+# and split the rest in halves over the stem and fork, a half of one variant
+# being a terminal.
+_tcsub = \self \vs List.match Slot_none (\v \rest List.match (Slot_term v) (\_ \_ Slot_sub (self vs)) rest) vs
+_tcodes = fix $ \self \vs
+    Pair.let (Bool.match
+        (\rest Pair.let (_thalves rest) $ \a \b △ (_tcsub self a) (_tcsub self b))
+        (\rest △ (_tterm rest) (_tterm (List.drop 1 rest)))
+        (Nat.is_lte (List.length vs) 3) (List.drop 1 vs)) $ \s \f
+    △ (△ (_tterm vs) s) f
+# The root: a nullary variant as the leaf; of the rest, one at the stem and one
+# as the fork when that is all of them — the fork to the one with more fields,
+# the later one on a tie — else the first at the stem and the others coded in
+# the fork, or all of them coded under the stem when none has a field.
+_tone = \a Bool.match (△ (Slot_term a) Slot_none) (△ Slot_none (Slot_term a)) (Nat.is_gte (Pair.snd a) 2)
+_ttwo = \a \b Bool.match (△ (Slot_term b) (Slot_term a)) (△ (Slot_term a) (Slot_term b)) (Nat.is_gte (Pair.snd b) (Pair.snd a))
+_tassign = \vs
+    let (List.filter _tnullary vs) $ \zs
+    let (List.match vs (\_ \_ _tdrop_first _tnullary vs) zs) $ \rest
+    Pair.let (Bool.match
+        (\rest Bool.match
+            (\rest △ (_tterm rest) (Slot_sub (_tcodes (List.drop 1 rest))))
+            (\rest △ (Slot_sub (_tcodes rest)) Slot_none)
+            (List.all _tnullary rest) rest)
+        (\rest List.match (△ Slot_none Slot_none) (\a \tl List.match (_tone a) (\b \_ _ttwo a b) tl) rest)
+        (Nat.is_lte (List.length rest) 2) rest) $ \s \f
+    △ (△ (_tterm zs) s) f
+# Every coded variant with its code, by walking the paths: [wrap] rebuilds the
+# code above the node.
+_tcodevalues = fix $ \self \wrap \node Pair.let node $ \ls \f Pair.let ls $ \l \s
+    let (\kind \cont Shape_slot_match [] (\v [△ (Pair.fst v) (wrap (_tpack kind []))]) (\sub self (\c wrap (cont c)) sub)) $ \slot
+    List.concat_list [slot 0 id l; slot 1 (_tapp _tleaf) s; slot 2 (_tapp (_tapp _tleaf _tleaf)) f]
+# Every variant with the syntax of its value given its fields.
+_tcoded = \value \codes List.map (Pair.match $ \i \code △ i (value code)) (_tcodevalues id codes)
+_tvalues = \node Pair.let node $ \ls \f Pair.let ls $ \l \s
+    let (\kind \coded Shape_slot_match [] (\v [△ (Pair.fst v) (_tpack kind)]) (_tcoded coded)) $ \slot
+    List.concat_list
+      [ slot 0 (\_code \_fs _tleaf) l
+      ; slot 1 (\code \_fs _tapp _tleaf code) s
+      ; slot 2 (\code \fs _tapp (_tapp _tleaf code) (_tpayload fs)) f ]
+_tcontains = \i \codes List.any (\p equal (Pair.fst p) i) (_tcodevalues id codes)
+# Constructor for variant i with k fields: \a1..ak its value.
+_tctor = \node \i \k let (List.range k) $ \fields
+    _tabs fields (Option.get_or (\_ _tleaf) (List.lookup i (_tvalues node)) (List.map _tid fields))
+# The eliminator over a code trie, a triage per node that ends on [term v]
+# applied to the payload: [term] receives it after the code, so a terminal at
+# the stem or fork drops the leaves the code spelled there, and a subtrie
+# under a fork sits in its right child. [sub kind node self] decides what a
+# subtrie's slot holds given the recursion, so a dispatcher can cut one off.
+_tcode_elim = \term \sub fix $ \self \node Pair.let node $ \ls \f Pair.let ls $ \l \s
+    _ttriage (Shape_slot_match _tleaf (term 0) (sub 0 self) l)
+             (Shape_slot_match _tleaf (term 1) (sub 1 self) s)
+             (Shape_slot_match _tleaf (term 2) (sub 2 self) f)
+_tcsub_elim = \kind \self \node _tKn (Nat.pred kind) (self node)
+# The eliminator over the root: a triage whose stem and fork cases may be a
+# code trie's — the stem's bare, [bare] its terminals and subtries, the fork's
+# followed by the payload, [code] its.
+_tnode = \term \bare \code \node Pair.let node $ \ls \f Pair.let ls $ \l \s
+    _ttriage (Shape_slot_match _tleaf (term 0) (\_ _tleaf) l)
+             (Shape_slot_match _tleaf (term 1) (Pair.match _tcode_elim bare) s)
+             (Shape_slot_match _tleaf (term 2) (Pair.match _tcode_elim code) f)
+# [_tmatch node n] is \h0 … \h_{n-1} \x; [_tdispatch node i] is \f \alt \x,
+# hitting variant i's handler and dropping every other variant — a whole
+# subtrie without i at one stroke — to alt.
+_tmatch = \node \n _tabs (List.range n) $ _tnode
+    (\kind \v _tunpack kind (Pair.snd v) (_tid (Pair.fst v)))
+    (△ (\kind \v _tKn kind (_tid (Pair.fst v))) _tcsub_elim)
+    (△ (\kind \v _tKn kind (_tunpack_s (Pair.snd v) (_tid (Pair.fst v)))) _tcsub_elim)
+    node
+_tmiss = \n _tKn n (_tid 1)
+# A miss in a code trie: alt under as many binders as the slot's handler takes
+# — [extra] more than the kind for the payload that follows a code.
+_tcode_dispatch = \i \extra \hit △
+    (\kind \v Bool.match (_tmiss (Nat.add extra kind)) (_tKn kind (hit (Pair.snd v))) (equal (Pair.fst v) i))
+    (\kind \self \node Bool.match (\node _tmiss (Nat.add extra kind)) (\node _tcsub_elim kind self node) (_tcontains i node) node)
+_tdispatch = \node \i _tabs [0; 1] $ _tnode
+    (\kind \v Bool.match (_tmiss kind) (_tunpack kind (Pair.snd v) (_tid 0)) (equal (Pair.fst v) i))
+    (_tcode_dispatch i 0 (\_k _tid 0))
+    (_tcode_dispatch i 1 (\k _tunpack_s k (_tid 0)))
+    node
 # The same eliminator over the lambda-shaped encoding, so a type can change
 # encoding without its uses changing with it: \h0 … \h_{n-1} \x x h0 … h_{n-1}.
 # Like that encoding's constructors and dispatchers it is a closed form of n —
@@ -1030,13 +1117,13 @@ _smatch = \n let (List.range n) $ \hs
     _tabs (List.concat hs [n]) $ List.foldl (\acc \h _tapp acc (_tid h)) (_tid n) hs
 _tmatch_name = \type_name List.concat type_name "_match"
 _syntax_emit_tree_adt = \type_name \pairs
-    let (List.length pairs) $ \n
+    let (_tassign (List.mapi (\pair \i △ i (List.length (Pair.snd pair))) pairs)) $ \node
     List.concat
-      (List.concat_map (Pair.match $ \pair \i Pair.let pair $ \name \args let (List.length args) $ \k
-          [ Native_assignment name (_syntax_to_native (_tctor i k))
-          ; Native_assignment (List.concat name "_Dispatch") (_syntax_to_native (_tdispatch n i k)) ])
+      (List.concat_map (Pair.match $ \pair \i Pair.let pair $ \name \args
+          [ Native_assignment name (_syntax_to_native (_tctor node i (List.length args)))
+          ; Native_assignment (List.concat name "_Dispatch") (_syntax_to_native (_tdispatch node i)) ])
         (List.mapi △ pairs))
-      [Native_assignment (_tmatch_name type_name) (_syntax_to_native (_tmatch (List.map (\pair List.length (Pair.snd pair)) pairs)))]
+      [Native_assignment (_tmatch_name type_name) (_syntax_to_native (_tmatch node (List.length pairs)))]
 _syntax_emit_scott_adt = \type_name \pairs
     List.concat (_syntax_emit_adt type_name (List.mapi △ pairs))
       [Native_assignment (_tmatch_name type_name) (_ematch (List.length pairs))]
@@ -1356,8 +1443,8 @@ compile_to_dag_bench "Foo \\= Foo x x4 x1 | Bar x0 x1 x2 x4"
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 5378
 #   Parse:    1363
-#   Lower:    130108
-#   Emit:     80472
+#   Lower:    114390
+#   Emit:     36622
 
 # Abstraction over an application spine, which used to be exponential in how
 # many applications the bound variable reaches: each further [a] under \a
@@ -1492,14 +1579,29 @@ Map.pmap_get "E_Dispatch" _t5 8 0 (Map.pmap_get "E" _t5)
 # = 8
 Map.pmap_get "E_Dispatch" _t5 8 0 (Map.pmap_get "A" _t5)
 # = 0
-# The values themselves: the variant's index as a nat, then the payload.
+# The values themselves: A the leaf, B under the stem, and C, D and E coded
+# in the fork — the leaf, [△ △] and [△ △ △] before their payloads; Ca and Cb a
+# stem and a fork, Z and S the leaf and a stem — Option, Pair and the naturals
+# as the core spells them.
 _to_string = Serialize.to_source
 Map.pmap_get "A" _t5
-# = (△ △ △)
+# = △
+Map.pmap_get "E" _t5
+# = (△ (△ △ △) △)
 Map.pmap_get "B" _t5 △
-# = (△ (△ (△ △) △) △)
+# = (△ △)
+Map.pmap_get "C" _t5 △ (△ △)
+# = (△ △ (△ △ (△ △)))
 Map.pmap_get "D" _t5 △ △ △
-# = (△ (△ (△ △) (△ (△ △) △)) (△ △ (△ △ △)))
+# = (△ (△ △) (△ △ (△ △ △)))
+let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "Ca" env △
+# = (△ △)
+let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "Cb" env △ (△ △)
+# = (△ △ (△ △))
+let (compile "N0 = Z | S x") $ \env Map.pmap_get "Z" env
+# = △
+let (compile "N0 = Z | S x") $ \env Map.pmap_get "S" env △
+# = (△ △)
 # [\=] declares the same type with the lambda-shaped encoding — a value is a
 # function of one continuation per variant — and gets the same T_match over it.
 _to_string = Nat.to_source
