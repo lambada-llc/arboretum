@@ -7,11 +7,10 @@
 
 to_array = \x (fix $ \self \x \rest △ '[' $ triage (\rest rest) self (\x \y \rest self y $ △ ',' $ self x rest) x $ △ ']' rest) x ""
 
-# A program mapping its stdin to its stdout (string -> string) becomes a
-# JavaScript arrow function doing the same, with no imports: the array
-# literal, a dozen-line reduction loop, and string<->tree conversions on the
-# way in and out.
-of_stdin_stdout = \program List.concat_list ["arg => {
+# A program mapping a string to a string becomes a JavaScript arrow function
+# doing the same, with no imports: the array literal, a dozen-line reduction
+# loop, and string<->tree conversions on the way in and out.
+of_string_string = \program List.concat_list ["arg => {
   const program = "; to_array program; ";
   // Read input string and turn it into a tree
   const ofB = b => b ? [[]] : [];
@@ -56,5 +55,5 @@ to_array id
 # = "[[],[[[]]]]"
 
 # The identity program is cat.
-△ (△ "cat.js" "text/javascript") $ of_stdin_stdout id
+△ (△ "cat.js" "text/javascript") $ of_string_string id
 # = cat.js sha256:89553a6861ffce81c15d43384178b17f6bb68cbb22bad3f0908dd668ce55ab1c
