@@ -37,8 +37,12 @@ $dag link $(find src -name '.*.dag' | sort) \
 # thread drives a runner of its own, which peaks at about 1.1 GB under the
 # default RUNNER_RSS_THRESHOLD_MB, so each is granted 3 GB of the machine's
 # memory: a thread per core on a 16 GB machine, fewer on a smaller one.
+# Memory is the container's limit where one is set: inside a container,
+# os.totalmem() reports the host's.
 >&2 echo "Running tests"
-jobs=$(node -p 'const os = require("os"); Math.max(1, Math.min(os.availableParallelism(), Math.floor(os.totalmem() / 3 / 2 ** 30)))')
+jobs=$(node -p '
+  const os = require("os"), memory = Math.min(os.totalmem(), process.constrainedMemory() || Infinity);
+  Math.max(1, Math.min(os.availableParallelism(), Math.floor(memory / 3 / 2 ** 30)))')
 $lambada expect-test src/.dag-bundle-canonical --root src --jobs "$jobs"
 
 # Take the compilers back out of the bundle they are part of, so that the
