@@ -1580,29 +1580,84 @@ Map.pmap_get "E_Dispatch" _t5 8 0 (Map.pmap_get "E" _t5)
 # = 8
 Map.pmap_get "E_Dispatch" _t5 8 0 (Map.pmap_get "A" _t5)
 # = 0
-# The values themselves: A the leaf, B under the stem, and C, D and E coded
-# in the fork — the leaf, [△ △] and [△ △ △] before their payloads; Ca and Cb a
-# stem and a fork, Z and S the leaf and a stem — Option, Pair and the naturals
-# as the core spells them.
-_to_string = Serialize.to_source
-Map.pmap_get "A" _t5
-# = △
-Map.pmap_get "E" _t5
-# = (△ (△ △ △) △)
-Map.pmap_get "B" _t5 △
-# = (△ △)
-Map.pmap_get "C" _t5 △ (△ △)
-# = (△ △ (△ △ (△ △)))
-Map.pmap_get "D" _t5 △ △ △
-# = (△ (△ △) (△ △ (△ △ △)))
-let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "Ca" env △
-# = (△ △)
-let (compile "T2 = Ca x | Cb x y") $ \env Map.pmap_get "Cb" env △ (△ △)
-# = (△ △ (△ △))
-let (compile "N0 = Z | S x") $ \env Map.pmap_get "Z" env
-# = △
-let (compile "N0 = Z | S x") $ \env Map.pmap_get "S" env △
-# = (△ △)
+# How a declaration translates, read off the generated definitions: every
+# constructor applied to its fields, by name, and the eliminator applied to
+# one handler per variant, named after it — rendered as the trees they are,
+# a field or handler showing up wherever the string standing in for it does.
+_adt_decl = \src let (△ "" []) $ \none
+    Syntax_tree_match (\_ none) none (\_ none) (\_ none) (\_ none) (\_ none) (\_ \_ none) (\_ \_ none) (\_ \_ none)
+        (\type_name \pairs \_scott △ type_name pairs) (\_ \_ \_ none)
+        (List.head_or Syntax_const_null (Option.get_or [] (Option.bind compiler_parse (compiler_tokenize src))))
+_adt_paren = \atomic \self \t Bool.match (\t List.concat_list ["("; self t; ")"]) self (atomic t) t
+_adt_render = \names
+    let (List.map (\n △ n n) names) $ \table
+    let (\t Bool.or (triage true (\_ false) (\_ \_ false) t) (Option.match false (\_ true) (List.lookup t table))) $ \atomic
+    fix $ \self \t Option.get_or
+        (triage "△" (\u List.concat "△ " (_adt_paren atomic self u)) (\u \v List.concat_list ["△ "; _adt_paren atomic self u; " "; _adt_paren atomic self v]) t)
+        (List.lookup t table)
+_adt_line = \env \name \args List.concat_list
+    [List.join " " (△ name args); " = "; _adt_render args (List.foldl (\f \arg f arg) (Map.pmap_get name env) args)]
+_adt_show = \src Pair.let (_adt_decl src) $ \type_name \pairs
+    let (compile src) $ \env
+    List.join "\n" $ List.concat
+        (List.map (Pair.match $ _adt_line env) pairs)
+        [_adt_line env (_tmatch_name type_name) (List.map Pair.fst pairs)]
+_to_string = id
+# The three shapes hold three variants outright: a nullary one is the leaf,
+# one sits under a stem, one is a fork. These are the core's own Bool,
+# Option, List and Pair, and their eliminators are the triage they are
+# written as.
+_adt_show "Bool = False | True"
+# = False = △
+#   True = △ △
+#   Bool_match False True = △ (△ False (△ △ True)) △
+_adt_show "Option = None | Some x"
+# = None = △
+#   Some x = △ x
+#   Option_match None Some = △ (△ None Some) △
+_adt_show "List = Nil | Cons h t"
+# = Nil = △
+#   Cons h t = △ h t
+#   List_match Nil Cons = △ (△ Nil △) Cons
+_adt_show "Pair = Pair a b"
+# = Pair a b = △ a b
+#   Pair_match Pair = △ (△ △ △) Pair
+# With two variants left for the stem and the fork, the one with more fields
+# takes the fork; three fields nest in its right child.
+_adt_show "Tree = Leaf v | Node l v r"
+# = Leaf v = △ v
+#   Node l v r = △ l (△ v r)
+#   Tree_match Leaf Node = △ (△ △ Leaf) (△ (△ (△ △ (△ (△ △ △)))) Node)
+# Beyond three, the rest are coded in the fork as [△ code payload], the codes a
+# trie of shapes read one triage step per level — the leaf, [△ △], [△ △ △],
+# then [△ code'] and [△ △ code'] going on. A one-field variant's constructor is
+# the stem [△ code], built at no cost.
+_adt_show "Token = Special c | Ident n | Adt n | Str v e | Nat v"
+# = Special c = △ c
+#   Ident n = △ △ n
+#   Adt n = △ (△ △) n
+#   Str v e = △ (△ (△ △)) (△ v e)
+#   Nat v = △ (△ △ △) v
+#   Token_match Special Ident Adt Str Nat = △ (△ △ Special) (△ (△ Ident (△ (△ Adt (△ △ (△ (△ △ △) Str))) △)) (△ △ (△ △ Nat)))
+# With no field anywhere, the codes sit bare under the stem.
+_adt_show "Color = Red | Green | Blue | Cyan | Magenta | Yellow"
+# = Red = △
+#   Green = △ △
+#   Blue = △ (△ △)
+#   Cyan = △ (△ (△ △))
+#   Magenta = △ (△ △ △)
+#   Yellow = △ (△ △ (△ △))
+#   Color_match Red Green Blue Cyan Magenta Yellow = △ (△ Red (△ (△ Green (△ (△ Blue (△ △ Cyan)) △)) (△ △ (△ (△ Magenta (△ △ Yellow)) △)))) △
+# A nullary variant beyond the first goes into the codes with an empty payload.
+_adt_show "Json = Null | True | False | Num n | Str s | Arr l | Obj o"
+# = Null = △
+#   True = △ △
+#   False = △ △ △
+#   Num n = △ (△ △) n
+#   Str s = △ (△ (△ △)) s
+#   Arr l = △ (△ △ △) l
+#   Obj o = △ (△ △ (△ △)) o
+#   Json_match Null True False Num Str Arr Obj = △ (△ Null (△ △ True)) (△ (△ (△ △ False) (△ (△ Num (△ △ Str)) △)) (△ △ (△ (△ Arr (△ △ Obj)) △)))
 # [\=] declares the same type with the lambda-shaped encoding — a value is a
 # function of one continuation per variant — and gets the same T_match over it.
 _to_string = Nat.to_source
