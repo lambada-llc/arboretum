@@ -69,7 +69,7 @@ Bench.run [is_alpha_char; 'x']
 fail = "fail"
 
 # special chars
-Special_char \= Schar_paren_open
+Special_char = Schar_paren_open
              | Schar_paren_close
              | Schar_backslash
              | Schar_equals
@@ -83,14 +83,11 @@ Special_char \= Schar_paren_open
              | Schar_curly_close
              | Schar_scott_equals   # \= : a declaration asking for the lambda-shaped (Scott) encoding
 
-schar_eq =
-  let (\s s 0 1 2 3 4 5 6 7 8 9 10 11 12) $ \id
-  \a \b equal (id a) (id b)
 
 # tokens. Comments are not among them: a comment is gap text, skipped where
 # whitespace is (see the gap dispatch below), so it never becomes data that
 # every later phase then pays to dispatch on and filter out.
-Token \= Token_special_char schar     # schar
+Token = Token_special_char schar     # schar
       | Token_identifier name        # string
       | Token_identifier_adt name    # string
       | Token_const_str value escapes # string nat
@@ -133,7 +130,7 @@ _parse_identifier_token = List.match Parser.fail_result $ \c \rest
 _to_string = id
 Bench.run [_parse_identifier_token; "compiler_tokenize"]
 # = oh |  0a  0b   1   2  3a  3b  3c | alc  red
-#   85 | 409 517 864 879 251 134 282 | 926 2410
+#   85 | 409 512 859 874 251 134 282 | 921 2400
 
 parse_char_map = \map List.match Parser.fail_result $ \head \tail Option.match Parser.fail_result (\v Parser.return v tail) $ Map.to_func map head
 
@@ -254,10 +251,10 @@ compiler_tokenize = self_apply $ \self \input List.match
     input self
 
 # Position tracking for tokens
-_token_text_len = \tok tok
+_token_text_len = Token_match
     (\schar Schar_scott_equals_Dispatch 2 1 schar)
-    (\name List.length name)
-    (\name List.length name)
+    List.length
+    List.length
     (\value \escapes Nat.add escapes $ Nat.add 2 $ List.length value)
     (\value List.length $ Nat.to_string value)
 
@@ -285,7 +282,7 @@ _annotate_positions = fix $ \self \pos \str \tokens List.match [] (\tok \rest
 compiler_tokenize_positioned = \s Option.map (_annotate_positions 0 s) $ compiler_tokenize s
 
 
-Syntax_tree \= Syntax_identifier name                        # string
+Syntax_tree = Syntax_identifier name                        # string
             | Syntax_const_null
             | Syntax_const_nat value                        # nat
             | Syntax_const_str value                        # string
@@ -314,9 +311,9 @@ parse_abs_tail = \e
             )
             Parser.fail)
 
-# Each caller knows the expected special char statically, so match the parsed schar
-# with that constructor's *_Dispatch — a single elimination — instead of mapping
-# both schars to indices and comparing them via [schar_eq].
+# Each caller knows the expected special char statically, so match the parsed
+# schar with that constructor's *_Dispatch — a walk down its tag's bits that
+# ends on one of the two continuations — rather than comparing two schars.
 parse_schar = \schar_dispatch
     _one_then
         (Token_special_char_Dispatch
@@ -390,7 +387,7 @@ _adt_arm = \scott \literal Parser.map (\list Syntax_adt literal list scott) _adt
 _adt_no = \_literal Parser.fail
 parse_adt_tail = \literal \_e _one_then
     (\tok \rest Token_special_char_Dispatch
-        (\schar schar _adt_no _adt_no _adt_no (_adt_arm false) _adt_no _adt_no _adt_no _adt_no _adt_no _adt_no _adt_no _adt_no (_adt_arm true))
+        (\schar Special_char_match _adt_no _adt_no _adt_no (_adt_arm false) _adt_no _adt_no _adt_no _adt_no _adt_no _adt_no _adt_no _adt_no (_adt_arm true) schar)
         _adt_no tok literal rest)
 
 # The recursive parser [e] is applied *after* the token dispatch, so each
@@ -399,8 +396,8 @@ parse_adt_tail = \literal \_e _one_then
 # branch, so only the dispatched branch's body is built per call.
 parse__expr = \e
     _one_then
-        (\token token
-            (\schar \e schar
+        (\token Token_match
+            (\schar \e Special_char_match
                 (\e Parser.seq_fst e parse_paren_close)
                 (\_ Parser.fail)
                 parse_abs_tail
@@ -414,7 +411,7 @@ parse__expr = \e
                 parse_map_tail
                 (\_ Parser.fail)
                 (\_ Parser.fail)
-                e
+                schar e
             )
             (\literal \e
                 Parser.either
@@ -428,7 +425,7 @@ parse__expr = \e
             )
             (\value \escapes \e Parser.return $ Syntax_const_str value)
             (\value \e Parser.return $ Syntax_const_nat value)
-            e
+            token e
         )
 
 # After the last atom of an expression: a [$ e] tail grafts one further
@@ -482,17 +479,17 @@ _ptok_end = \ptok Pair.snd (Pair.fst ptok)
 # Consume one positioned token, return raw token value
 _pone = List.match Parser.fail_result (\h \t Parser.return (Pair.snd h) t)
 
-_pschar = \schar_expected Parser.compose_dep _pone
-    (Token_special_char_Dispatch (\schar Bool.match Parser.fail (Parser.return id) (schar_eq schar_expected schar)) Parser.fail)
-_pparen_close = _pschar Schar_paren_close
-_psqbracket_close = _pschar Schar_sqbracket_close
-_pcurly_close = _pschar Schar_curly_close
-_pseparator = _pschar Schar_separator
-_pcolon = _pschar Schar_colon
-_pequals = _pschar Schar_equals
-_ppipe = _pschar Schar_pipe
-_pdollar = _pschar Schar_dollar
-_pscott_equals = _pschar Schar_scott_equals
+_pschar = \schar_dispatch Parser.compose_dep _pone
+    (Token_special_char_Dispatch (\schar schar_dispatch (Parser.return id) Parser.fail schar) Parser.fail)
+_pparen_close = _pschar Schar_paren_close_Dispatch
+_psqbracket_close = _pschar Schar_sqbracket_close_Dispatch
+_pcurly_close = _pschar Schar_curly_close_Dispatch
+_pseparator = _pschar Schar_separator_Dispatch
+_pcolon = _pschar Schar_colon_Dispatch
+_pequals = _pschar Schar_equals_Dispatch
+_ppipe = _pschar Schar_pipe_Dispatch
+_pdollar = _pschar Schar_dollar_Dispatch
+_pscott_equals = _pschar Schar_scott_equals_Dispatch
 _pidentifier = Parser.compose_dep _pone (Token_identifier_Dispatch Parser.return Parser.fail)
 _pidentifier_adt = Parser.compose_dep _pone (Token_identifier_adt_Dispatch Parser.return Parser.fail)
 
@@ -514,7 +511,10 @@ _padt_tail = \literal \e Parser.either
     (Parser.map (\list [Syntax_adt literal list false]) (Parser.seq_snd _pequals _padt_variants))
     (Parser.map (\list [Syntax_adt literal list true]) (Parser.seq_snd _pscott_equals _padt_variants))
 
-# Spanned atom parser: wraps each atom result with its source span
+# Spanned atom parser: wraps each atom result with its source span. As in
+# [parse__expr], the handlers take the recursive parser [e] last, so the
+# eliminations over them are closed and reduce to their trees once.
+_pfail = \_e Parser.fail
 _p__expr = \e \ptoks
   let (List.match 0 (\h \_ _ptok_start h) ptoks) $ \start
   Parser.match_result Parser.fail_result (\items \remaining
@@ -523,15 +523,16 @@ _p__expr = \e \ptoks
     let (Nat.sub orig_len rem_len) $ \consumed_n
     let (_ptok_end $ _last $ List.take consumed_n ptoks) $ \end
     Parser.return (List.map (Syntax_spanned start end) items) remaining
-  ) (Parser.compose_dep _pone (\token token
-      (\schar schar
-          (Parser.seq_fst (Parser.map (\x [x]) e) _pparen_close)
-          Parser.fail (_pabs_tail e) Parser.fail Parser.fail Parser.fail Parser.fail Parser.fail
-          (_plist_tail e) Parser.fail (_pmap_tail e) Parser.fail Parser.fail)
-      (\literal Parser.either (_passign_tail literal e) (Parser.return [Syntax_identifier literal]))
-      (\literal Parser.either (_padt_tail literal e) (Parser.return [Syntax_identifier literal]))
-      (\value \escapes Parser.return $ [Syntax_const_str value])
-      (\value Parser.return $ [Syntax_const_nat value])
+  ) (Parser.compose_dep _pone (\token Token_match
+      (\schar \e Special_char_match
+          (\e Parser.seq_fst (Parser.map (\x [x]) e) _pparen_close)
+          _pfail _pabs_tail _pfail _pfail _pfail _pfail _pfail
+          _plist_tail _pfail _pmap_tail _pfail _pfail schar e)
+      (\literal \e Parser.either (_passign_tail literal e) (Parser.return [Syntax_identifier literal]))
+      (\literal \e Parser.either (_padt_tail literal e) (Parser.return [Syntax_identifier literal]))
+      (\value \escapes \_e Parser.return $ [Syntax_const_str value])
+      (\value \_e Parser.return $ [Syntax_const_nat value])
+      token e
   ) ptoks)
 
 _p_expr = fix $ \e \ptoks
@@ -563,7 +564,7 @@ newline = △ 10
 # subterms, so by the time a definition is lowered its text is one
 # application away and no expression tree ever exists (the usual
 # deforestation of a compiler's lower-to-emit intermediate).
-Native_stmt \= Native_assignment literal o  # str * emitter
+Native_stmt = Native_assignment literal o  # str * emitter
             | Native_expr o                # emitter
 
 _dT = Dlist.cons ':' (Dlist.single 't')
@@ -846,7 +847,7 @@ _klow_abs = \literal \body \this \env _kabs (this this body (△ (_krec literal)
 _klow_app = \o1 \o2 \this \env _kapp (this this o1 env) (this this o2 env)
 _klow_span = \start \end \inner \this \env Pair.let (this this inner env) $ \g \d △ g (_espan start end d)
 _klower_open = \this \syntax
-    syntax
+    Syntax_tree_match
         (\name \this \env _klookup name env)
         (\this \env _knilT)
         (\value \this \env △ [] (quote_nat value))
@@ -858,7 +859,7 @@ _klower_open = \this \syntax
         (\literal \o \this \env △ [] (△ fail (△ false fail)))
         (\_type_name \_pairs \_scott \this \env △ [] (△ fail (△ false fail)))
         _klow_span
-        this
+        syntax this
 _klower = self_apply _klower_open
 _syntax_to_native = \syntax Pair.fst $ Pair.snd $ _klower syntax []
 
@@ -1144,15 +1145,15 @@ _native_adt = \type_name \pairs \scott Bool.match _syntax_emit_tree_adt _syntax_
 # The lowered statement under a stack of spans, if it is one. The spanned
 # parser wraps whatever it parses, a definition included — and a definition is
 # not an expression: lowered as one it is nothing.
-_statement_under = fix $ \self \syntax syntax
-    (\_ Option.none) Option.none (\_ Option.none) (\_ Option.none) (\_ Option.none)
-    (\_ Option.none) (\_ \_ Option.none) (\_ \_ Option.none)
-    (\name \o Option.some $ _native_def name o)
-    (\type_name \pairs \scott Option.some $ _native_adt type_name pairs scott)
-    (\_ \_ \inner self inner)
+_statement_under = fix $ \self \syntax Syntax_tree_match
+    (\_ \_self Option.none) (\_self Option.none) (\_ \_self Option.none) (\_ \_self Option.none) (\_ \_self Option.none)
+    (\_ \_self Option.none) (\_ \_ \_self Option.none) (\_ \_ \_self Option.none)
+    (\name \o \_self Option.some $ _native_def name o)
+    (\type_name \pairs \scott \_self Option.some $ _native_adt type_name pairs scott)
+    (\_ \_ \inner \self self inner)
+    syntax self
 
-syntax_to_native = \syntax
-    syntax
+syntax_to_native = Syntax_tree_match
         (\name       [Native_expr (_emk_leaf name)])
         (            _native_null)
         (\value      [Native_expr (_equote_nat value)])
@@ -1196,7 +1197,7 @@ _compiler_lower = \synts some $ List.concat_map syntax_to_native synts
 # How a bare expression's value is written is the caller's: a statement ends
 # on its name, alone on a line; a file names it after its line first (see
 # compile_file).
-_native_to_ddag = \value_line \n n
+_native_to_ddag = \value_line Native_stmt_match
    (\literal \em
      em 0 $ \res \l
       \tl res $ Dlist.from_list literal $ space $ l $ newline $ tl
@@ -1380,46 +1381,46 @@ compile_to_dag_bench = \s
 
 _to_string = id
 compile_to_dag_bench "x"
-# = Tokenize: 230
-#   Parse:    323
-#   Lower:    230
-#   Emit:     90
+# = Tokenize: 220
+#   Parse:    245
+#   Lower:    169
+#   Emit:     80
 
 compile_to_dag_bench "42"
-# = Tokenize: 393
-#   Parse:    180
-#   Lower:    194
-#   Emit:     676
+# = Tokenize: 383
+#   Parse:    142
+#   Lower:    138
+#   Emit:     666
 
 compile_to_dag_bench "1337"
-# = Tokenize: 872
-#   Parse:    180
-#   Lower:    194
-#   Emit:     937
+# = Tokenize: 862
+#   Parse:    142
+#   Lower:    138
+#   Emit:     927
 
 compile_to_dag_bench "[42]"
-# = Tokenize: 824
-#   Parse:    912
-#   Lower:    610
-#   Emit:     1322
+# = Tokenize: 794
+#   Parse:    517
+#   Lower:    508
+#   Emit:     1312
 
 compile_to_dag_bench "\\x x"
-# = Tokenize: 746
-#   Parse:    646
-#   Lower:    643
-#   Emit:     92
+# = Tokenize: 726
+#   Parse:    351
+#   Lower:    540
+#   Emit:     82
 
 compile_to_dag_bench "x = 42"
-# = Tokenize: 969
-#   Parse:    520
-#   Lower:    313
-#   Emit:     756
+# = Tokenize: 939
+#   Parse:    305
+#   Lower:    203
+#   Emit:     742
 
 compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) △)))) (△ △ (△ △))"
-# = Tokenize: 14966
-#   Parse:    22637
-#   Lower:    9047
-#   Emit:     10588
+# = Tokenize: 14366
+#   Parse:    11691
+#   Lower:    6340
+#   Emit:     10578
 
 # An ADT declaration: two variants, each emitting a constructor and a
 # *_Dispatch, generated at the annotation level of the Kiselyov pass (the
@@ -1434,17 +1435,17 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 # the same application-lean encodings as lowered user code — under
 # self-hosting the tax is gone.
 compile_to_dag_bench "Foo \\= Foo x x4 x1 | Bar x0 x1 x2 x4"
-# = Tokenize: 5418
-#   Parse:    1349
-#   Lower:    13730
-#   Emit:     20637
+# = Tokenize: 5308
+#   Parse:    866
+#   Lower:    13596
+#   Emit:     20567
 # The tree-shaped declaration spells its definitions as syntax and lowers them
 # through the pass, so it pays the general machinery the closed forms avoid.
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
-# = Tokenize: 5378
-#   Parse:    1363
-#   Lower:    114390
-#   Emit:     36622
+# = Tokenize: 5258
+#   Parse:    863
+#   Lower:    102391
+#   Emit:     36552
 
 # Abstraction over an application spine, which used to be exponential in how
 # many applications the bound variable reaches: each further [a] under \a
@@ -1455,10 +1456,10 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # binders at a time: the same five cost 13134, 17222, 21310, 25398, 29486, a
 # flat 4088 apiece.
 compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
-# = Tokenize: 5135
-#   Parse:    6216
-#   Lower:    16738
-#   Emit:     17673
+# = Tokenize: 4995
+#   Parse:    3321
+#   Lower:    15879
+#   Emit:     17663
 
 # Literal size. A string literal is linear in both directions: a fixed ~75
 # reductions per character to tokenize and, in a run of one repeated character,
@@ -1467,10 +1468,10 @@ compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 # character pays its own run of per-bit DAG lines, so mixed text sits between
 # this and the old one-nat-per-character cost (~1205 per character).
 compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
-# = Tokenize: 7501
-#   Parse:    187
-#   Lower:    186
-#   Emit:     18701
+# = Tokenize: 7473
+#   Parse:    146
+#   Lower:    133
+#   Emit:     18691
 
 # A nat literal is quadratic to tokenize, and stays that way: Horner's rule has
 # to walk an accumulator that grows by ~3.3 bits per digit, so 5, 10, 20 and 40
@@ -1481,10 +1482,10 @@ compile_to_dag_bench $ List.concat_list [ ['"']; List.repeat 100 '1'; ['"'] ]
 # worth ~4x here on top of the table-driven pass that replaced two traversals
 # and a multiply per digit.
 compile_to_dag_bench $ List.repeat 100 '1'
-# = Tokenize: 104701
-#   Parse:    180
-#   Lower:    194
-#   Emit:     17341
+# = Tokenize: 104691
+#   Parse:    142
+#   Lower:    138
+#   Emit:     17331
 
 # What a compiled chunk can refer to that the chunk does not define. The
 # combinator labels are not here: the prelude defines them, and `compile` puts it
