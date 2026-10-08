@@ -10,6 +10,10 @@ cd "$(dirname "$0")"
 # Use the pinned submodule rather than a published runtime.
 export LAMBADA_TREE_CALCULUS="$PWD/submodules/tree-calculus"
 export TREE_CALCULUS_RUNNER=eager
+# A request that would grow its runner past this fails, naming the test, rather
+# than take the machine with it: two thirds of the 3 GB a test thread is granted
+# below.
+export RUNNER_RSS_LIMIT_MB=${RUNNER_RSS_LIMIT_MB:-2048}
 # Where the runtime keeps what reduction it has already done: compiled sources,
 # evaluated modules, and per-term results the expect tests below are answered
 # from.
