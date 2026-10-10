@@ -336,15 +336,13 @@ equal (_s id △) _selfstem
 # = true
 Certify.Size.computes_size_eagerly size__90
 # = true
-Certify.Size.computes_size size__90
-# = true
 # The record's certificate, drawn. The stem case generalizes the count the
 # hypothesis proves; the fork case is one REL-FOLD — the state is no
 # instance of the top hypothesis, but its instance at the right part
 # co-reduces to it |t0| apart — whose co-reduction collapses the
 # accumulator seat twice with USE, the inner collapse closed by the
 # anchor's own induction. The lazy and the eager judgment draw the same
-# tree; the one below is the lazy prover's.
+# tree; the one below is the lazy prover's, drawn in place of its true.
 _to_string = Option.match "no proof" Certify.Size.render
 Certify.Size.certify_size size__90
 # = SPLIT t
@@ -578,15 +576,13 @@ Certify.Size.computes_size size
 # = true
 Certify.Size.computes_size size__fastest
 # = true
-Certify.Size.computes_size size__125
-# = true
 
 # A true stands on a proof, and the proof is an induction tree that can be
 # looked at: Certify.Size.certify_size returns it, Certify.Size.render draws it. For
-# the 125, whose plain subtree recursion makes it the smallest proof here —
-# SPLIT with a case per shape of the split variable, PEEL per emitted
-# successor, GEN naming a subterm's count, FOLD closing an instance of an
-# induction hypothesis.
+# the 125, whose plain subtree recursion makes it the smallest proof here,
+# it is drawn in place of the true — SPLIT with a case per shape of the split
+# variable, PEEL per emitted successor, GEN naming a subterm's count, FOLD
+# closing an instance of an induction hypothesis.
 _to_string = Option.match "no proof" Certify.Size.render
 Certify.Size.certify_size size__125
 # = SPLIT t
@@ -661,9 +657,9 @@ Certify.Size.computes_size_eagerly size__wn_113
 # could name — the obligation quantifies the seat away instead, and every
 # level's grown bank is one of its instances. A true is a proof that the
 # program returns its argument's node count on every tree — which is more
-# than any run of it below can say.
-Certify.Size.computes_size size__wn_78
-# = true
+# than any run of it below can say — and for the 78, the 95 and the 100 the
+# proof is drawn below in place of the true.
+
 # The weak record's certificate: three cases, and the machine's whole
 # continuation discipline inside the two REL strokes — the stem case IS a
 # co-reduction (the goal trails the hypothesis instance by exactly the one
@@ -686,10 +682,6 @@ Certify.Size.certify_size size__wn_78
 #             FOLD
 #         SAME
 _to_string = Bool.to_source
-Certify.Size.computes_size size__wn_95
-# = true
-Certify.Size.computes_size size__wn_100
-# = true
 Certify.Size.computes_size size__wn_103
 # = false
 Certify.Size.computes_size size__wn_104
