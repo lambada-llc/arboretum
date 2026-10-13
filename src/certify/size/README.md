@@ -29,11 +29,13 @@ tactic script.
 `SizeProof125.lean` (the superseded `size__125`), `SizeProof118.lean`,
 and `SizeProof103.lean` — the last of these is the smallest size program
 this exporter covers. (The smallest with any machine-checked count is now
-Nathan Farlow's weakly normalizing 78 — the record itself: the certifier's
-REL rules judge its accumulator-reading loop against the loop value it
-feeds itself, and close it under the normal-order judgment. The eager
-record, his 90, carries certifier certificates under **both** judgments
-the same way.) The 90 still gets `none` from this exporter: its loop keeps
+Nathan Farlow's weakly normalizing 78 — tied for the record: the
+certifier's REL rules judge its accumulator-reading loop against the loop
+value it feeds itself, and close it under the normal-order judgment. His
+90, the eager record until lambada-llc/arboretum#87, carries certifier
+certificates under **both** judgments the same way. The eager record now,
+his strongly normalizing 78, carries none yet: both judgments answer
+false, and the exporter `none` — see `src/snat/size.lamb`.) The 90 still gets `none` from this exporter: its loop keeps
 the modules' stem-stacking invariant only for its own continuations, so
 the theorem these modules state is false of its loop value, not merely
 unproven — `lean_test.lamb` records the counterexample — and the

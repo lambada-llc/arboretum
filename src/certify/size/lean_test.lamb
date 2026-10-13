@@ -42,3 +42,10 @@ Certify.Size.lean_size_proof "SizeProof100.lean" Snat.size__wn_100
 # certificates is future work alongside the phase structure.
 Certify.Size.lean_size_proof "SizeProof90.lean" Snat.size__90
 # = none
+
+# The record since #87, Snat.size__78, strongly normalizes too and gets none
+# for the same kind of reason: its loop answers a chain and takes no next
+# argument to stack onto — canon t k is the chain ⌈|t| - 1⌉ applied to k, a
+# fork, not |t| stems over k — so the stated invariant is not one it keeps.
+Certify.Size.lean_size_proof "SizeProof78.lean" Snat.size__78
+# = none

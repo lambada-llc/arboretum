@@ -82,7 +82,7 @@ size__118 = \x (△ (△ _k) (△ _code)) x △
 # chain induction read under normal order. Of the
 # weakly normalizing records further down, the 78, the 95 and the 100
 # undercut the certified programs of this family — and only the 78 still
-# undercuts the 90 that holds the eager record itself.
+# undercuts the 90, and ties the 78 that holds the eager record itself.
 # _chain_step self t n ⟶ △ (case t of  △ ⟶ n;  △ u ⟶ self u n;
 #                                       △ u v ⟶ self (self u v) n)
 _chain_step = \self \x compose Snat.succ $ triage id self (\u \v self (self u v)) x
@@ -92,13 +92,15 @@ size__103 = \x (△ (△ _k) (△ _chain_code)) x △
 
 # The smallest eager program with a Lean-exported certificate — but since
 # #55 no longer the record: size__90 further down, the weakly normalizing
-# 78 grown strongly normalizing again, undercuts it by thirteen nodes, is
-# what __smallest names now, and since the REL rules carries certifier
-# certificates of its own under both judgments. (size__smallest__wn further
-# down is the weakly normalizing record, at 78 nodes, certified too.)
-# Neither record is cheap: the chain this one recurses on is rebuilt rather
-# than taken apart, and it pays five to six times `size`'s reductions for
-# it; the 90 does better and still pays thrice — see src/snat/bench.lamb.
+# 78 grown strongly normalizing again, undercut it by thirteen nodes, and
+# since the REL rules carries certifier certificates of its own under both
+# judgments; and since #87 size__78, further down still, is what
+# __smallest names, tying the weakly normalizing record
+# (size__smallest__wn, certified too) and carrying no certificate yet.
+# None of these records is cheap: the chain this one recurses on is rebuilt
+# rather than taken apart, and it pays five to six times `size`'s
+# reductions for it; the 90 does better and still pays thrice, and the 78
+# pays nearly a hundredfold — see src/snat/bench.lamb.
 
 _to_string = Snat.to_string
 size__118 (△ (△ △) (△ △))
@@ -260,10 +262,10 @@ Certify.Size.computes_size_eagerly size__111
 Certify.Size.computes_size size__111
 # = true
 
-# The eager record, twelve nodes grown onto the 78: Nathan Farlow found this
-# program — and fifteen more 90-node strongly normalizing siblings — by
-# brute force, adding nodes to the weak record until the result passed fuzz
-# testing under the eager evaluator (#55). The growth is three seats' worth,
+# The eager record until #87, twelve nodes grown onto the 78: Nathan Farlow
+# found this program — and fifteen more 90-node strongly normalizing
+# siblings — by brute force, adding nodes to the weak record until the
+# result passed fuzz testing under the eager evaluator (#55). The growth is three seats' worth,
 # and each seat's cheaper spelling measurably fails below.
 #
 # _refork:  △ ⟶ △;  △ u ⟶ △ △ u;  △ u v ⟶ △ u v
@@ -310,9 +312,9 @@ _step_90 = \self \t \k _flat_90 k $ triage id self (_s self (const self)) t k
 _dispatch_90 = triage △ △ _selfstem
 size__90 = \t _dispatch_90 (△ (_s (const _step_90) _repack) t) (const △ t)
 
-# The record, and strongly normalizing — the tests below apply it directly,
-# under this build's eager runner, where the __wn family needs
-# Reflect.lazy_eval. Both certifiers prove it computes `size`: this step
+# The record until size__78 below, and strongly normalizing — the tests
+# below apply it directly, under this build's eager runner, where the __wn
+# family needs Reflect.lazy_eval. Both certifiers prove it computes `size`: this step
 # reads its own continuation's shape, which no opaque residual survives —
 # what closes it is the REL pair (src/certify/size), which judges each
 # state against the loop value it feeds itself, the difference paid by
@@ -320,7 +322,6 @@ size__90 = \t _dispatch_90 (△ (_s (const _step_90) _repack) t) (const △ t)
 # The readback pinning it to the tree the search reported (#55) stands
 # besides. Cheaper than the 103 it replaces, too (src/snat/bench.lamb),
 # though still over thrice `size`'s reductions.
-size__smallest = size__90
 
 _to_string = Snat.to_string
 size__90 (△ (△ △) (△ △))
@@ -362,6 +363,99 @@ Certify.Size.certify_size size__90
 #             FOLD
 #         SAME
 _to_string = Bool.to_source
+
+# The record since #87, tied with the weak one at 78 nodes and strongly
+# normalizing. Nathan Farlow found it with a genetic algorithm, seeded at
+# random but for `fix`'s 37-node knot, which evolved a 90-node program from
+# scratch; the replacement searches behind #23 and #55 then cut it to 78,
+# checked by fuzz testing. Nothing of the record pair's machine survives in
+# it — no _dup, no pruning, no accumulator, no continuation at all — and of
+# `fix` only the quine core, triage △ △ _selfstem, with a successor fused in.
+#
+# It counts by canonicalizing. Write ⌈n⌉ for the chain △ⁿ △, the snat n,
+# n + 1 nodes. The loop maps every tree to the chain with as many nodes:
+#   canon t ⟶ ⌈|t| - 1⌉,   so   size__78 t ⟶ △ (canon t) ⟶ ⌈|t|⌉
+#   canon △       ⟶ △
+#   canon (△ c)   ⟶ △ (canon c)
+#   canon (△ u v) ⟶ △ (canon (canon u v))
+# The fork case adds |u| to |v| with no arithmetic at all. canon u is a
+# chain of |u| nodes, and a chain applied to v reduces nothing: ⌈0⌉ v is
+# the stem △ v, ⌈n+1⌉ v the fork △ ⌈n⌉ v — the application IS a node — so
+# canon u v is a tree of exactly |u| + |v| nodes, one fewer than the fork,
+# and the loop canonicalizes that. Recursion on a rebuilt tree, then, as in
+# size__103's chain step; but where the 103 loops to stack |u| stems onto v,
+# here bare application does it in one move. The price is time: the chain
+# handed back as a left child is peeled one node per round, and each round
+# re-canonicalizes what is left of it, so a left child costs the square of
+# its size and a left spine the cube — see src/snat/bench.lamb.
+#
+# _rewind (△ q z) ⟶ △ (q (△ q) z)
+_rewind = triage △ △ (_s (compose (compose △)) △)
+# The re-entry: a recursive call is a packed fork, and unpacking it rebuilds
+# the caller from the copy it carries — fix's own move — and emits the one
+# node that call owes. Sixteen nodes, and every successor the program
+# outputs is emitted here.
+# _canon_body a ⟶ compose (triage △ w (compose w)) (triage △ △ w),
+#   where w := compose _rewind a
+_canon_body = compose (_s (compose △ (compose △ (compose (_s (compose const) △) (compose △ const)))) (triage △ △)) (compose _rewind)
+# Read point-free because no lambda spelling compiles this small; the
+# equality below holds the two readings together. Tied as
+# canon := _canon_body (△ _canon_body), w is the successor of a recursive
+# call — w x ⟶ _rewind (△ _canon_body x) ⟶ △ (canon x) — and canon b runs:
+#   b = △     ⟶ △
+#   b = △ c   ⟶ w c                      = △ (canon c)
+#   b = △ u v ⟶ triage's w u v, and w u = △ (canon u) is a stem, so that is
+#               the fork △ (canon u) v — the successor w emits for u becomes
+#               the very node that hands canon u to v — whose halves the
+#               outer triage puts back together: w (canon u v).
+# One w, built once and used three times; no other machinery. The outer
+# triage is itself a self-application, _selfstem (△ (const w)), which is
+# how the search seats w in it once.
+# _canon_door (△ q t) ⟶ q (const (△ q t)) (△ (△ q t))
+_canon_door = \x triage △ △ const x (const x) (△ x)
+size__78 = compose _canon_door (△ _canon_body)
+# The door. size__78 t ⟶ _canon_door (△ _canon_body t) — the body packed
+# with the input, carried once — and with p for that fork the door runs the
+# body on const p and △ p: w is now constant, _rewind p ⟶ △ (canon t), and
+# △ p is a stem, so the stem case answers it. The knot is tied and the +1
+# emitted by the body's own machinery, in 13 nodes; tying it head-on as
+# compose _rewind (△ _canon_body) needs _rewind's 16, and 81 nodes in all.
+#
+# Strongly normalizing: canon is a value — the body waits for b — and
+# re-entry happens only inside _rewind, on a fork that packs the argument
+# about to be taken apart, which is strictly smaller each time
+# (|canon u v| < |△ u v|). Every intermediate term is a value; nothing
+# waits. The tests below run it under this build's eager runner directly.
+size__smallest = size__78
+
+_to_string = Snat.to_string
+size__78 (△ (△ △) (△ △))
+# = 5
+size__78 size__78
+# = 78
+# canon itself: the 78-node tree goes to the 78-node chain, the snat 77.
+_canon_body (△ _canon_body) size__78
+# = 77
+_to_string = String.to_source
+Serialize.ternary_encode size__78
+# = "212021212200101001212021212002120021202111201002120010120011202200211120112000"
+_to_string = Bool.to_source
+equal (_canon_body (△ _canon_body)) ((\a (\w compose (triage △ w (compose w)) (triage △ △ w)) (compose _rewind a)) (△ _canon_body))
+# = true
+equal (_canon_body (△ _canon_body)) (compose (_selfstem (△ (const (compose _rewind (△ _canon_body))))) (triage △ △ (compose _rewind (△ _canon_body))))
+# = true
+# Neither certifier closes it, and both answers are the conservative false.
+# What a proof needs, as far as reading the states goes: the loop owes
+# |t| - 1, which no spec here can state — the abstract Snat adds and never
+# subtracts; GEN-TREE's synthesized stem is the nearest thing — and its
+# recursive argument canon u v is a chain applied to a tree, a tree of
+# known size but no stack over a residual, which is all GEN-TREE mints.
+# The fact a rule would carry is the one above: canon preserves node count,
+# and applying a chain is a constructor.
+Certify.Size.computes_size_eagerly size__78
+# = false
+Certify.Size.computes_size size__78
+# = false
 
 # The six the pair supersedes, three architectures tied with _fork_self.
 # _loop step z ⟶ step (_fork_self z);  writing c := _loop step:
@@ -844,6 +938,8 @@ Reflect.lazy_eval size__wn_113 id
 # = 5
 
 # Node counts.
+size size__78
+# = 78
 size size__90
 # = 90
 size size__103
