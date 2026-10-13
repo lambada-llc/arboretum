@@ -1,4 +1,5 @@
-# pow n f x = f^n x. Shared recursion; the variants differ only in the nat decoder.
-_pow = \match fix $ \self \n \f \x match x (\pred self pred f (f x)) n
-pow_snat = _pow Snat.match
-pow = _pow Nat.match
+# pow n f x = f^n x.
+pow_snat = fix $ \self \n \f \x Snat.match x (\pred self pred f (f x)) n
+# f^n is built by squaring under composition: one compose per bit of n, where
+# counting n down would take a Nat.match per unit.
+pow = \n Fn.pow_fast n compose id
