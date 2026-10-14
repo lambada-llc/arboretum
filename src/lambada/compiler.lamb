@@ -1268,7 +1268,7 @@ compile_to_dag_bench "△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) △))
 compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 # = Tokenize: 5378
 #   Parse:    1363
-#   Lower:    12683
+#   Lower:    9711
 #   Emit:     19344
 
 # Abstraction over an application spine, which used to be exponential in how

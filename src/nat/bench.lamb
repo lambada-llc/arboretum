@@ -209,13 +209,13 @@ size Nat.from_string
 size Nat.from_string__fastest
 # = 1839519
 size Nat.to_hex
-# = 4719
+# = 4197
 size Nat.from_hex
-# = 6221
+# = 5235
 size Nat.byte_to_hex
-# = 8152
+# = 7630
 size Nat.to_bin
-# = 1529
+# = 912
 size Nat.from_bin
 # = 177
 
@@ -248,23 +248,23 @@ Bench.run [Nat.from_string__fastest;  "65535"]
 # = oh |  0a  0b   1   2 3a 3b 3c | alc red
 #   21 | 123 197 330 323 79 49 82 | 320 863
 Bench.run [Nat.to_hex;       255]
-# = oh |  0a  0b    1    2 3a 3b 3c |  alc  red
-#   53 | 490 692 1127 1128 31 26 83 | 1182 2395
-Bench.run [Nat.to_hex;       65535]
-# =  oh |  0a   0b    1    2 3a 3b  3c |  alc  red
-#   105 | 964 1364 2219 2220 59 52 165 | 2328 4715
-Bench.run [Nat.from_hex;     "FF"]
-# =  oh |  0a   0b    1    2 3a 3b  3c |  alc  red
-#   123 | 905 1453 2098 2153 57 32 206 | 2358 4546
-Bench.run [Nat.from_hex;     "FFFF"]
-# =  oh |   0a   0b    1    2  3a 3b  3c |  alc   red
-#   269 | 2021 3325 4710 4849 123 68 480 | 5346 10230
-Bench.run [Nat.byte_to_hex;  171]
 # = oh |  0a  0b   1   2 3a 3b 3c | alc  red
-#   27 | 286 423 687 683 24 19 53 | 709 1466
-Bench.run [Nat.to_bin;       255]
+#   32 | 219 327 539 525 16 18 50 | 546 1148
+Bench.run [Nat.to_hex;       65535]
 # = oh |  0a  0b    1    2 3a 3b 3c |  alc  red
-#   49 | 520 652 1091 1108 27  8 73 | 1172 2307
+#   62 | 421 633 1041 1013 30 36 98 | 1054 2218
+Bench.run [Nat.from_hex;     "FF"]
+# = oh |  0a  0b    1    2 3a 3b  3c |  alc  red
+#   85 | 497 905 1218 1253 41 20 154 | 1402 2686
+Bench.run [Nat.from_hex;     "FFFF"]
+# =  oh |   0a   0b    1    2 3a 3b  3c |  alc  red
+#   193 | 1205 2229 2950 3049 91 44 376 | 3434 6510
+Bench.run [Nat.byte_to_hex;  171]
+# = oh |  0a  0b   1   2 3a 3b 3c | alc red
+#   16 | 150 240 392 381 17 15 36 | 390 841
+Bench.run [Nat.to_bin;       255]
+# = oh |  0a  0b   1   2 3a 3b 3c | alc red
+#   34 | 209 269 429 437 10  0 42 | 478 918
 Bench.run [Nat.from_bin;     "11111111"]
 # = oh | 0a  0b   1   2 3a 3b 3c | alc red
 #    8 | 64 120 160 160  1  8 24 | 184 353
