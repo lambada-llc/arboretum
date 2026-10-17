@@ -68,15 +68,20 @@ which knows about [DAGs](https://github.com/lambada-llc/tree-calculus/tree/main/
 2. **Link** — `dag link` orders those modules so dependencies come first and
    concatenates them, rejecting duplicate exports and dependency cycles;
    `dag canonicalize` then hash-conses the whole thing into globally unique
-   numeric ids.
+   numeric ids. The linked modules are kept as well, for step 4.
 3. **Test** — `lambada expect-test` evaluates each `:test.*` symbol and writes
    the result back into the source file it came from. A test symbol is named
    after that source line (`:test.Bool.Bool.12`), so no separate bookkeeping is
    needed to find it again.
-4. **Export the compiler** — `dag extract` takes `Lambada.compile` and
-   `Lambada.compile_to_dag` back out of the bundle as DAGs that stand on their
-   own, and writes them to `submodules/lambada/compiler/`, which is where the
-   [compiler source](./src/lambada/compiler.lamb) is published as a tree.
+4. **Export the compiler** — `dag extract` takes the compilers
+   (`Lambada.compile_file`, `Lambada.compile_to_dag` and
+   `Lambada.compile_to_dag_with_spans`) and `Lambada.prelude` back out of the
+   linked modules as DAGs that stand on their own, and writes them to
+   `submodules/lambada/compiler/`, which is where the
+   [compiler source](./src/lambada/compiler.lamb) is published as a tree; the
+   scopes lambada's codemirror demo offers go to its `codemirror/demo/env-dags/`
+   the same way. Each is numbered by a walk from the symbols it is cut for, so
+   an edit to a module it does not use leaves its bytes alone.
 
 Steps 1 and 3 are the ones that reduce trees, and both hand that to the C++
 runner — see [Setup](#setup).
