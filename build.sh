@@ -28,10 +28,11 @@ dag="node submodules/tree-calculus/bin/dag.js"
 $lambada compile --root src
 
 # Order the modules so dependencies come first, concatenate them, and hash-cons
-# the result into globally unique ids
+# the result into globally unique ids. The linked modules are kept too: what
+# goes out to lambada below is cut from them rather than from the bundle.
 >&2 echo "Linking"
-$dag link $(find src -name '.*.dag' | sort) \
-  | $dag canonicalize > src/.dag-bundle-canonical
+$dag link $(find src -name '.*.dag' | sort) > src/.dag-bundle-linked
+$dag canonicalize src/.dag-bundle-linked > src/.dag-bundle-canonical
 
 # Evaluate the top-level expressions, recording results in the sources. Each
 # thread drives a runner of its own, which peaks at about 1.1 GB under the
@@ -45,7 +46,7 @@ jobs=$(node -p '
   Math.max(1, Math.min(os.availableParallelism(), Math.floor(memory / 3 / 2 ** 30)))')
 $lambada expect-test src/.dag-bundle-canonical --root src --jobs "$jobs"
 
-# Take the compilers back out of the bundle they are part of, so that the
+# Take the compilers back out of the library they are part of, so that the
 # lambada submodule ships what this repository just built from its source: the
 # compiler of a whole file, which is what builds run; the compiler of one
 # statement, and the one that also reports each expression's span, which is
@@ -54,19 +55,23 @@ $lambada expect-test src/.dag-bundle-canonical --root src --jobs "$jobs"
 # prelude at the top of one, once. Everything above
 # runs on that same compiler and prelude, so a broken one would brick the next
 # build: extract, probe, and only then install.
+#
+# Cut from the linked modules, an export is numbered by a walk from its root
+# and so depends only on what it is built from: an edit to a module it does
+# not use leaves its bytes alone. Cut from the bundle, it would carry the
+# spelling of whichever module happened to build a shared node first.
 >&2 echo "Exporting compiler"
 compiler=submodules/lambada/compiler
 main="node submodules/tree-calculus/bin/main.js"
 compilers="compile_file compile_to_dag compile_to_dag_with_spans"
 for symbol in $compilers; do
-  $dag extract --symbol "Lambada.$symbol" src/.dag-bundle-canonical \
-    | $dag canonicalize > "$compiler/$symbol.dag.new"
+  $dag extract --symbol "Lambada.$symbol" src/.dag-bundle-linked > "$compiler/$symbol.dag.new"
 done
 
 # The prelude goes out as the DAG lines it is, not as a tree that encodes them,
 # so putting it in front of a chunk is concatenating a file.
-$dag extract --symbol Lambada.prelude src/.dag-bundle-canonical \
-  | $dag canonicalize | $main -dag -file /dev/stdin -string > "$compiler/prelude.dag.new"
+$dag extract --symbol Lambada.prelude src/.dag-bundle-linked \
+  | $main -dag -file /dev/stdin -string > "$compiler/prelude.dag.new"
 
 # Probed together, the way a caller uses them: each compiler compiles `x = △`,
 # and `x` is read back out of the module the prelude and that chunk make.
@@ -85,16 +90,19 @@ for symbol in $compilers prelude; do
   mv "$compiler/$symbol.dag.new" "$compiler/$symbol.dag"
 done
 
-# The scopes lambada's codemirror demo offers, cut from the same bundle. A root
-# brings along what it is built from, so each file is self-contained.
+# The scopes lambada's codemirror demo offers, cut the same way. A root brings
+# along what it is built from, so each file is self-contained.
 >&2 echo "Exporting demo environments"
 env_dags=submodules/lambada/codemirror/demo/env-dags
 mkdir -p "$env_dags"
 
-# Unqualified names are the root module.
-$dag extract --matching '^([a-z]|(Bool|Pair|List|Fn|Nat|Snat|Option|String|Serialize|Map|Set)\.)' \
-  src/.dag-bundle-canonical > "$env_dags/basics.dag"
+# Unqualified names are the root module. Internal names are left out, and
+# private ones with them, since qualifying gives each a `:n` of its own: a
+# public name brings along those it is built from, and on their own they are
+# not even one thing each — files of one namespace number theirs alike.
+$dag extract --matching '^([a-z]|(Bool|Pair|List|Fn|Nat|Snat|Option|String|Serialize|Map|Set)\.)[^:]*$' \
+  src/.dag-bundle-linked > "$env_dags/basics.dag"
 
 # What the demo's sample calls, and nothing else of Qr.
 $dag extract --symbol Qr.create --symbol Qr.to_svg \
-  src/.dag-bundle-canonical > "$env_dags/qr.dag"
+  src/.dag-bundle-linked > "$env_dags/qr.dag"
