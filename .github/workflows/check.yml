@@ -55,3 +55,17 @@ jobs:
             exit 1
           fi
           echo "OK: test outputs unchanged"
+
+      # The same contract for what build.sh writes into lambada: the compilers
+      # and the codemirror demo's scopes. Each is numbered from what it is built
+      # from, so a change here means this source now builds something else, and
+      # lambada would go on shipping the old one: commit the regenerated files
+      # in lambada and pin submodules/lambada to that commit.
+      - name: Check lambada holds what this source builds
+        run: |
+          if [ -n "$(git -C submodules/lambada status --porcelain)" ]; then
+            echo "FAIL: build.sh changed what lambada ships:"
+            git -C submodules/lambada --no-pager status --short
+            exit 1
+          fi
+          echo "OK: lambada's exports unchanged"

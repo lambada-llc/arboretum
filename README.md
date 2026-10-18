@@ -28,7 +28,8 @@ Drop that line and the same build runs on Node alone, to the same results.
 ```
 
 Then look at `git status`: a clean tree means every test still produces what is
-committed. CI runs the same build and fails on a dirty tree.
+committed, and that lambada holds the compiler this source builds. CI runs the
+same build and fails on a dirty tree.
 
 ## Layout
 
