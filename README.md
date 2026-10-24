@@ -38,8 +38,6 @@ src/                     LambAda sources; symbols are namespaced by directory
   core.lamb                → id, compose, fix, …          (root, unqualified)
   bool/bool.lamb           → Bool.not, Bool.and, …        (Bool.* namespace)
   expect_test.lamb         → example tests
-.cache/tree-calculus/    reduction cache: compiled sources, evaluated modules
-                         and per-term results, content-addressed (gitignored)
 ```
 
 There is no "import" statement or similar: Dependencies between modules are resolved automatically by the build system, cycles forbidden.
@@ -51,7 +49,8 @@ is a handful of invocations of tools that live in the submodules — the
 [LambAda build tool](https://github.com/lambada-llc/lambada/tree/main/bin), which
 knows about `.lamb` sources and expect tests, and the
 [tree calculus runtime](https://github.com/lambada-llc/tree-calculus/tree/main/bin),
-which knows about [DAGs](https://github.com/lambada-llc/tree-calculus/tree/main/conventions#dag-modules):
+which knows about [DAGs](https://github.com/lambada-llc/tree-calculus/tree/main/conventions#dag-modules).
+Steps 1–3 are one `lambada build`:
 
 1. **Compile** — `lambada compile` splits each `.lamb` into top-level chunks,
    applies the LambAda compiler to each (caching by content hash), and namespaces
@@ -59,18 +58,20 @@ which knows about [DAGs](https://github.com/lambada-llc/tree-calculus/tree/main/
    exported as `Bool.not`. Bare top-level expressions become `:test.*` symbols.
    The result is one `.dag` module next to each source.
 
-   `TREE_CALCULUS_CACHE` points the runtime at `.cache/tree-calculus`, where it
-   keeps what reduction it has already done: evaluated modules, and one result
-   per test *term*. A term's cache address is a fingerprint of its structure, so
-   results survive the global renumbering canonicalization does on any change —
-   a rebuild re-evaluates only the tests whose dependencies actually changed.
+   The runtime keeps what reduction it has already done in its cache, beside it
+   in `submodules/tree-calculus/bin/.cache` (gitignored there): evaluated
+   modules, and one result per test *term*. A term's cache address is a
+   fingerprint of its structure, so results survive the global renumbering
+   canonicalization does on any change — a rebuild re-evaluates only the tests
+   whose dependencies actually changed.
    All of it is optional: wipe the cache and the same build produces the same
    bytes, just slower.
-2. **Link** — `dag link` orders those modules so dependencies come first and
-   concatenates them, rejecting duplicate exports and dependency cycles;
-   `dag canonicalize` then hash-conses the whole thing into globally unique
-   numeric ids. The linked modules are kept as well, for step 4.
-3. **Test** — `lambada expect-test` evaluates each `:test.*` symbol and writes
+2. **Link** — those modules are ordered so dependencies come first and
+   concatenated, rejecting duplicate exports and dependency cycles, into
+   `src/.dag-bundle-linked`; canonicalizing then hash-conses the whole thing
+   into globally unique numeric ids, into `src/.dag-bundle-canonical`. The
+   linked modules are kept for step 4.
+3. **Test** — the build evaluates each `:test.*` symbol and writes
    the result back into the source file it came from. A test symbol is named
    after that source line (`:test.Bool.Bool.12`), so no separate bookkeeping is
    needed to find it again.
