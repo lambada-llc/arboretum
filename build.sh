@@ -44,7 +44,7 @@ $dag canonicalize src/.dag-bundle-linked > src/.dag-bundle-canonical
 jobs=$(node -p '
   const os = require("os"), memory = Math.min(os.totalmem(), process.constrainedMemory() || Infinity);
   Math.max(1, Math.min(os.availableParallelism(), Math.floor(memory / 3 / 2 ** 30)))')
-$lambada expect-test src/.dag-bundle-canonical --root src --jobs "$jobs"
+$lambada expect-test src/.dag-bundle-canonical --root src --out expect-test-out --jobs "$jobs"
 
 # Take the compilers back out of the library they are part of, so that the
 # lambada submodule ships what this repository just built from its source: the
