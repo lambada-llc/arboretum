@@ -7,44 +7,19 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Use the pinned submodule rather than a published runtime.
+# Use the pinned submodule rather than a published runtime. Its cache, beside
+# it, keeps what reduction is already done: compiled sources, evaluated modules,
+# and per-term results the expect tests are answered from.
 export LAMBADA_TREE_CALCULUS="$PWD/submodules/tree-calculus"
 export TREE_CALCULUS_RUNNER=eager
-# Where the runtime keeps what reduction it has already done: compiled sources,
-# evaluated modules, and per-term results the expect tests below are answered
-# from.
-# Content-addressed, so a stale entry cannot exist — only a missing one.
-export TREE_CALCULUS_CACHE="$PWD/.cache/tree-calculus"
-# Using an entry stamps it, so what no build has needed lately can go: an
-# evaluated module after three days (one per version of the library, and each
-# large), anything else after thirty.
-find "$TREE_CALCULUS_CACHE/module-v1" -type f -mtime +3 -delete 2>/dev/null || true
-find "$TREE_CALCULUS_CACHE" -type f -mtime +30 -delete 2>/dev/null || true
 lambada="node submodules/lambada/bin/lambada.js"
 dag="node submodules/tree-calculus/bin/dag.js"
 
-# Compile each .lamb into a sibling .dag module, namespaced by its path
->&2 echo "Compiling"
-$lambada compile --root src
-
-# Order the modules so dependencies come first, concatenate them, and hash-cons
-# the result into globally unique ids. The linked modules are kept too: what
-# goes out to lambada below is cut from them rather than from the bundle.
->&2 echo "Linking"
-$dag link $(find src -name '.*.dag' | sort) > src/.dag-bundle-linked
-$dag canonicalize src/.dag-bundle-linked > src/.dag-bundle-canonical
-
-# Evaluate the top-level expressions, recording results in the sources. Each
-# thread drives a runner of its own, which peaks at about 1.1 GB under the
-# default RUNNER_RSS_THRESHOLD_MB, so each is granted 3 GB of the machine's
-# memory: a thread per core on a 16 GB machine, fewer on a smaller one.
-# Memory is the container's limit where one is set: inside a container,
-# os.totalmem() reports the host's.
->&2 echo "Running tests"
-jobs=$(node -p '
-  const os = require("os"), memory = Math.min(os.totalmem(), process.constrainedMemory() || Infinity);
-  Math.max(1, Math.min(os.availableParallelism(), Math.floor(memory / 3 / 2 ** 30)))')
-$lambada expect-test src/.dag-bundle-canonical --root src --jobs "$jobs"
+# Compile each .lamb into a sibling .dag module, namespaced by its path; link
+# them into src/.dag-bundle-linked, which what goes out to lambada below is cut
+# from; canonicalize that into src/.dag-bundle-canonical; and evaluate the
+# top-level expressions, recording results in the sources.
+$lambada build --root src --out expect-test-out
 
 # Take the compilers back out of the library they are part of, so that the
 # lambada submodule ships what this repository just built from its source: the
