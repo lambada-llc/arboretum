@@ -27,6 +27,13 @@ _unfolded = \src Option.match △
 _agree = \src \inputs List.all (\x equal (_compiled src x) (_unfolded src x)) inputs
 _run = \src List.map (_unfolded src)
 
+# The format, pinned by example: [k] is used twice and stays a term of its
+# own; [id] is used once, a lambda, and is written where it is used. The seed
+# is [Nat.add], which is a global like any other, reached by its path.
+_to_string = Option.to_source (Pair.to_source (List.to_source String.to_source) Serialize.to_source)
+Lambada.to_terms "id = \\x x\nk = \\x \\y x\nk (k id) Nat.add"
+# = (some (△ ["Nat.add"] (△ (△ (△ △ (△ △)) △) (△ (△ (△ △) (△ (△ (△ (△ △)) (△ △)))) (△ (△ (△ △ (△ △ △)) (△ (△ (△ (△ △ (△ △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △) △)))) (△ (△ △ (△ △ (△ △)))))) △)))))
+
 # Numbers, a local helper, and a library name.
 _double = "double = \\x Nat.add x x\n\\n double (double n)"
 _to_string = Bool.to_source
@@ -90,7 +97,7 @@ _to_string = List.to_source Nat.to_source
 _run _shadow [0; 5]
 # = [2; 7]
 
-# The seed: names the source does not define, most used first.
+# The seed: names the source does not define, in the order it first uses them.
 _names = \src Option.match [] Pair.fst (Lambada.to_terms src)
 _to_string = List.to_source String.to_source
 _names _fact
@@ -133,7 +140,7 @@ _agree "\\x x" [△; 5]
 # library code. The code of [unfold] itself is a fixed cost on top:
 _to_string = Nat.to_string
 size Lambada.unfold
-# = 1415
+# = 2493
 _to_string = id
 _sizes = \src List.concat_list
     [ "compiled: "; Nat.to_string (size (_compiled src))
@@ -142,14 +149,14 @@ _sizes = \src List.concat_list
 _core = "triage = \\a \\b \\c △ (△ a b) c\nconst = \\x \\_ x\ncompose = \\f \\g \\x f (g x)\nlet = \\x \\f f x\nfix = let (const (triage △ △ (\\q q (△ q)))) $ \\knot \\f △ (△ knot) (△ (compose f (△ (△ knot))))\n"
 _twice = "compose = \\f \\g \\x f (g x)\ntwice = \\f compose f f\ntwice twice (\\y △ y)"
 _sizes _twice
-# = compiled: 16, as terms: 28
+# = compiled: 16, as terms: 39
 _to_string = Bool.to_source
 _agree _twice [△; △ △]
 # = true
 _listlib = List.concat _core "foldr = \\f \\z fix $ \\self triage z △ (\\h \\t f h (self t))\nmap = \\f foldr (\\h \\acc △ (f h) acc) △\nappend = \\a \\b foldr △ b a\nreverse = foldr (\\h \\acc append acc [h]) △\nconcat = foldr append △\nflip = \\l reverse (map (\\x triage x △ (\\a \\b △ b a) x) l)\n\\l concat [flip l, l, [△ △ △, △ (△ △)]]"
 _to_string = id
 _sizes _listlib
-# = compiled: 554, as terms: 298
+# = compiled: 554, as terms: 366
 _to_string = Bool.to_source
 _agree _listlib [[]; [△; △ △ △; △ (△ △) △]]
 # = true
