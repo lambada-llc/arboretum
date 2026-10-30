@@ -4,34 +4,38 @@
 # [to_terms] reads LambAda source the way [compile_file] does — the same
 # statements, tokenizer, parser and desugaring — and, instead of abstracting
 # each definition into combinators, keeps the λ-terms: simplified, single-use
-# definitions written where they are used, the rest ordered so that the most
-# used come first, and each encoded as a tree in de Bruijn form. [unfold] takes
-# such a list and compiles it to the program on the spot. A program stored that
-# way is several times smaller than the one [compile_file] produces from the
-# same source, and costs one [unfold] when it is built.
+# definitions written where they are used, and each encoded as a tree in de
+# Bruijn form. [unfold] takes such a list and compiles it to the program on the
+# spot. A program stored that way is several times smaller, as a tree, than the
+# one [compile_file] produces from the same source, and costs one [unfold] when
+# it is built.
 #
-# The format. A program is a list of terms; term j refers to its globals, which
-# are the values of the seed (a list given to [unfold]) followed by those of
-# terms 0 … j-1, oldest first. The program is the value of the last term.
+# The format. A program is △ seed_paths entries. Its globals are the values of
+# the seed (a list given to [unfold], one path each in [seed_paths]) and of the
+# terms before the one that refers to them, kept in a binary tree: each entry
+# is △ path term, and the term's value goes where its path leads. A path is △
+# for here, △ p for left and then p, and △ △ p for right and then p; the paths
+# are a Huffman code of how often each global is referred to, so the most used
+# are the cheapest to reach. The program is the value of the last term.
 #
 #   △                the constant △
 #   △ f a            term f applied to term a
 #   △ △              local variable 0, the innermost; △ (△ v) the local after v
-#   △ (△ △ n)        global n, n unary (△, △ △, △ (△ △), …)
-#   △ (△ b n)        b under n + 1 lambdas, b not △
-#   △ (△ v (△ △ △))  the value v, quoted
+#   △ (△ △ p)        the global at path p
+#   △ (△ b n)        b under n + 1 lambdas, b not △, n unary (△, △ △, △ (△ △), …)
+#   △ (△ v (△ △ △))  the value v, quoted; v is never △, which is built instead
 #
 # λx.△ is written as the value △ △ △ with one lambda fewer, because a group
 # whose body is △ would read as a global. A closed tree is stored either quoted
 # or as the applications of △ that build it, whichever is smaller.
 #
-# What is guaranteed: [unfold seed terms], applied to arguments, gives the same
-# results as the program [compile_file] makes of the source, for programs that
-# terminate under both — and the results compared as data, not as functions.
-# The two differ in when they work, and so in what a function looks like:
-# LambAda's output evaluates a closed subterm under a lambda once, when the
-# program is built, while [unfold]'s evaluates a lambda's body each time it is
-# applied and nothing before; the simplification below may drop an argument
+# What is guaranteed: [unfold seed program], applied to arguments, gives the
+# same results as the program [compile_file] makes of the source, for programs
+# that terminate under both — and the results compared as data, not as
+# functions. The two differ in when they work, and so in what a function looks
+# like: LambAda's output evaluates a closed subterm under a lambda once, when
+# the program is built, while [unfold]'s evaluates a lambda's body each time it
+# is applied and nothing before; the simplification below may drop an argument
 # that is never used, which the compiled program would have evaluated; and a
 # function is a closure here and combinators there, so a program that looks
 # inside a function (equal, size, Serialize on one) can tell them apart.
@@ -234,19 +238,27 @@ _inline = \defs \ids \root
             (Bool.and (Bool.not (equal id root)) (Bool.and (equal 1 (_count_of counts id)) (_cheap is_fix term)))))
       (△ Map.empty Map.empty) ids
 
-# Repeatedly take, among the items whose dependencies are all out, the one
-# referred to most often; ties go to the earliest.
-_greedy = \deps \count fix $ \self \remaining \emitted \out List.match
-    (\_emitted \out List.reverse out)
-    (\_ \_ \emitted \out
-      let (List.foldl (\best \j Bool.match
-              (\_ best)
-              (\_ Option.match (Option.some j) (\b Bool.match (Option.some b) (Option.some j) (Nat.is_lt (count b) (count j))) best)
-              (List.all (\d _is_some (Map.get d emitted)) (deps j)) △)
-            Option.none remaining) $ \best
-      let (Option.get_or △ best) $ \pick
-      self (List.filter (\j Bool.not (equal j pick)) remaining) (Map.set pick true emitted) (△ pick out))
-    remaining emitted out
+# Paths to the globals, a Huffman code of how often each is referred to: the
+# two least used are joined, again and again, and at each join the more used
+# side goes left, the cheaper step. [items] are △ count key; the result maps
+# each key to its path.
+_hinsert = fix $ \self \l \x List.match
+    (\x [x])
+    (\h \t \x Bool.match (\h \t \x △ h (self t x)) (\h \t \x △ x (△ h t)) (Nat.is_lte (Pair.fst x) (Pair.fst h)) h t x)
+    l x
+_hjoin = fix $ \self \l List.match
+    △
+    (\a \rest List.match
+      (\a Pair.snd a)
+      (\b \rest \a self (_hinsert rest (△ (Nat.add (Pair.fst a) (Pair.fst b)) (△ (Pair.snd b) (Pair.snd a)))))
+      rest a)
+    l
+_hpaths = fix $ \self \node \k \m triage
+    (\k \m m)
+    (\key \k \m Map.set key (k △) m)
+    (\l \r \k \m self r (\p k (△ △ p)) (self l (\p k (△ p)) m))
+    node k m
+_huffman = \items _hpaths (_hjoin (List.foldl (\l \x _hinsert l (△ (Pair.fst x) (△ (Pair.snd x)))) [] items)) id Map.empty
 
 # Encoding. [_enc t] is △ info code, where [info], for a term that is a closed
 # tree, is some (△ (△ v |v|) (△ b |b|)): the tree, and the applications of △
@@ -270,10 +282,10 @@ _lam_code = \k \body triage
     (\_ \k △ (△ body (_unary (Nat.pred k))))
     (\_ \_ \k △ (△ body (_unary (Nat.pred k))))
     body k
-_enc = \def_index \name_index fix $ \self \t t
+_enc = \path fix $ \self \t t
     (\i △ Option.none (_unary (Nat.succ i)))
-    (\id △ Option.none (△ (△ △ (_unary (def_index id)))))
-    (\n △ Option.none (△ (△ △ (_unary (name_index n)))))
+    (\id △ Option.none (△ (△ △ (path (△ 0 id)))))
+    (\n △ Option.none (△ (△ △ (path (△ 1 n)))))
     (△ (Option.some (△ (△ △ 1) (△ △ 1))) △)
     (\v let (_val_info v) $ \info △ (Option.some info) (_pick info))
     (\f \a Pair.let (self f) $ \fi \fc Pair.let (self a) $ \ai \ac
@@ -281,12 +293,13 @@ _enc = \def_index \name_index fix $ \self \t t
         △ info (Option.match (△ fc ac) _pick info))
     (\b Pair.let (_strip 1 b) $ \k \body △ Option.none (_lam_code k (Pair.snd (self body))))
 
-# Source text to △ names terms: [names] the seed the terms expect, as the
-# names the source uses for them, and [terms] the program; none if a statement
-# does not parse or the source has no bare expression, whose last is the
-# program. A name is what the latest definition before it made it, as in a
-# compiled file; one the source does not define is a seed entry, ordered, like
-# the terms, most used first.
+# Source text to △ names program: [names] the seed the program expects, as the
+# names the source uses for them, and [program] the format above; none if a
+# statement does not parse or the source has no bare expression, whose last is
+# the program. A name is what the latest definition before it made it, as in a
+# compiled file; one the source does not define is a seed entry, in the order
+# the source first refers to them. The terms come in the order the source
+# defines them, which is one their references allow.
 to_terms = \s
     Option.bind (\parsed
       let (List.foldl (List.foldl (\st \syntax _st_stmt syntax st)) _st0 parsed) $ \st
@@ -303,32 +316,39 @@ to_terms = \s
         let (_counts _free_refs defs ids) $ \free_counts
         let (List.foldl (\names \id List.foldl (\names \n Bool.match (List.concat names [n]) names (List.any (equal n) names))
                 names (_free_refs (_term_of defs id))) [] ids) $ \names
-        let (_greedy (\_ []) (_count_of free_counts) names Map.empty []) $ \names
-        let (List.foldl (\m \id Map.set id (_def_refs (_term_of defs id)) m) Map.empty ids) $ \deps
-        let (_greedy (\id Option.get_or [] (Map.get id deps)) (_count_of def_counts) ids Map.empty []) $ \order
-        let (List.length names) $ \nseed
-        let (List.foldl (\m \p Pair.let p $ \n \i Map.set n i m) Map.empty (List.mapi △ names)) $ \name_index
-        let (List.foldl (\m \p Pair.let p $ \id \i Map.set id (Nat.add nseed i) m) Map.empty (List.mapi △ order)) $ \def_index
-        let (_enc (\id Option.get_or 0 (Map.get id def_index)) (\n Option.get_or 0 (Map.get n name_index))) $ \enc
-        △ names (List.map (\id Pair.snd (enc (_term_of defs id))) order))
+        let (_huffman (List.concat
+              (List.map (\n △ (_count_of free_counts n) (△ 1 n)) names)
+              (List.map (\id △ (_count_of def_counts id) (△ 0 id)) ids))) $ \paths
+        let (\key Option.get_or △ (Map.get key paths)) $ \path
+        △ names (△ (List.map (\n path (△ 1 n)) names)
+          (List.map (\id △ (path (△ 0 id)) (Pair.snd (_enc path (_term_of defs id)))) ids)))
       root)
     (Option.sequence (List.map (Pair.match $ \_n \text Option.bind Lambada.compiler_parse (Lambada.compiler_tokenize text)) (Lambada.statements s)))
 
-# The program [terms] denote, given the values of the names they expect. Each
-# term is compiled to a function of an environment — the values of the locals,
-# innermost first — and applied to the empty one: an application passes the
-# environment to both sides, a local is the steps down to it, a lambda a
-# closure that puts its argument in front, a global the value it already has,
-# and a quoted tree itself. Building the program does the terms' top-level
+# The program [program] denotes, given the values of the names it expects.
+# Each term is compiled to a function of an environment — the values of the
+# locals, innermost first — and applied to the empty one: an application passes
+# the environment to both sides, a local is the steps down to it, a lambda a
+# closure that puts its argument in front, a global the value its path leads
+# to, and a quoted tree itself. Building the program does the terms' top-level
 # work and no more: a lambda's body runs when the lambda is applied.
 _lam = \c \env \x c (△ x env)
+_left = triage △ △ (\l \_ l)
+_right = triage △ △ (\_ \r r)
 _compile = fix $ \c triage (\g △ △ △)
   (triage (\g △ (△ △ △) (△ △))
       (\y \g △ (△ △ △) (△ △ (c (△ y) g)))
-      (\b \n triage (\n \g triage (\g △ △ (triage △ △ (\h \_ h) g)) (\m \g c (△ (△ △ m)) (triage △ △ (\_ \r r) g)) (\_ \_ \g △ △ △) n g)
+      (\b \n triage (\n \g triage (\g △ △ g) (\m \g c (△ (△ △ m)) (_left g)) (\_ \m \g c (△ (△ △ m)) (_right g)) n g)
                 (\x \n \g triage (\x \g _lam (c (△ x) g)) (\m \x \g _lam (c (△ (△ (△ x) m)) g)) (\_ \_ \x \g △ △ (△ x)) n x g)
                 (\x \y \n \g triage (\b \g _lam (c b g)) (\m \b \g _lam (c (△ (△ b m)) g)) (\_ \_ \b \g △ △ b) n (△ x y) g) b n))
   (\f \a \g △ (△ (c f g)) (c a g))
-_snoc = fix $ \r \l \v triage (△ v △) △ (\h \t △ h (r t v)) l
-unfold = \seed \terms fix (\tb \g Pair.match (\d \rest let (_compile d g △) $ \v triage v △ (\h \t tb (_snoc g v) (△ h t)) rest)) seed terms
-
+# [v] put where path [p] leads in [t]
+_put = fix $ \self \p \v \t triage
+    (\v \_t v)
+    (\p \v \t △ (self p v (_left t)) (_right t))
+    (\_ \p \v \t △ (_left t) (self p v (_right t)))
+    p v t
+_seed_tree = fix $ \self \paths \vs triage (\_vs △) △ (\p \ps \vs triage △ △ (\v \vs _put p v (self ps vs)) vs) paths vs
+unfold = \seed Pair.match $ \paths \entries
+    fix (\tb \g Pair.match (\e \rest Pair.let e $ \p \d let (_compile d g △) $ \v triage v △ (\h \t tb (_put p v g) (△ h t)) rest))
+      (_seed_tree paths seed) entries
