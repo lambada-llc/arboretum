@@ -1,0 +1,155 @@
+# Lambada.to_terms and Lambada.unfold against the compiler: for each program,
+# [unfold] of what [to_terms] makes of it gives what [compile_file]'s program
+# gives, on a few inputs. A program here is definitions and one bare expression
+# at the end, whose value it is.
+#
+# Both sides get the names the source does not define from the same table: the
+# compiled program through the DAG it is read from, the unfolded one as its seed.
+_env =
+  Map.pmap_set "△" △ $
+  Map.pmap_set "Map.set" Map.set $
+  Map.pmap_set "Map.get" Map.get $
+  Map.pmap_set "fix" fix $
+  Map.pmap_set "Bool.match" Bool.match $
+  Map.pmap_set "Nat.add" Nat.add $
+  Map.pmap_set "Nat.mul" Nat.mul $
+  Map.pmap_set "Nat.match" Nat.match $
+  Map.pmap_set "Nat.is_lte" Nat.is_lte $
+  Map.pmap_set "List.map" List.map $
+  Map.pmap_set "List.concat" List.concat $
+  Map.pmap_set "List.foldr" List.foldr $
+  Map.pmap_set "List.range" List.range $
+  Map.empty
+_compiled = \src Serialize.from_dag_with_env _env (Dlist.from_list Lambada.prelude (Lambada.compile_file src))
+_unfolded = \src Option.match △
+    (Pair.match $ \names \terms Lambada.unfold (List.map (\n Map.pmap_get n _env) names) terms)
+    (Lambada.to_terms src)
+_agree = \src \inputs List.all (\x equal (_compiled src x) (_unfolded src x)) inputs
+_run = \src List.map (_unfolded src)
+
+# Numbers, a local helper, and a library name.
+_double = "double = \\x Nat.add x x\n\\n double (double n)"
+_to_string = Bool.to_source
+_agree _double [0; 3; 10]
+# = true
+_to_string = List.to_source Nat.to_source
+_run _double [0; 3; 10]
+# = [0; 12; 40]
+
+# Strings.
+_greet = "greeting = \"hello, \"\ngreet = \\name List.concat greeting name\ngreet"
+_to_string = Bool.to_source
+_agree _greet ["world"; ""]
+# = true
+_to_string = List.to_source String.to_source
+_run _greet ["world"; ""]
+# = ["hello, world"; "hello, "]
+
+# Lists, literal and computed, and a lambda passed to a library function.
+_lists = "\\l List.concat (List.map (\\x Nat.add x 1) l) [10, 20, 30]"
+_to_string = Bool.to_source
+_agree _lists [[]; [1; 2]]
+# = true
+_to_string = List.to_source (List.to_source Nat.to_source)
+_run _lists [[]; [1; 2]]
+# = [[10; 20; 30]; [2; 3; 10; 20; 30]]
+
+# A record: a map literal, desugared to Map.set over the empty map.
+_record = "point = {\"x\": 3, \"y\": 4}\n\\k Map.get k point"
+_to_string = Bool.to_source
+_agree _record ["x"; "y"; "z"]
+# = true
+_to_string = List.to_source (Option.to_source Nat.to_source)
+_run _record ["x"; "y"; "z"]
+# = [(some 3); (some 4); none]
+
+# A data type: constructors and a dispatcher.
+_shape = "Shape = Circle r | Rect w h\narea = \\s s (\\r Nat.mul 3 (Nat.mul r r)) (\\w \\h Nat.mul w h)\nside = Rect_Dispatch (\\w \\h w) 0\n\\n Nat.add (area (Circle n)) (Nat.add (area (Rect n 2)) (Nat.add (side (Rect n 1)) (side (Circle n))))"
+_to_string = Bool.to_source
+_agree _shape [0; 1; 5]
+# = true
+_to_string = List.to_source Nat.to_source
+_run _shape [0; 1; 5]
+# = [0; 6; 90]
+
+# Recursion through fix, which the program takes from the library.
+_fact = "fact = fix $ \\self \\n Nat.match 1 (\\p Nat.mul n (self p)) n\nfact"
+_to_string = Bool.to_source
+_agree _fact [0; 1; 5]
+# = true
+_to_string = List.to_source Nat.to_source
+_run _fact [0; 1; 5]
+# = [1; 1; 120]
+
+# A later definition of a name sees the one before it, as in a compiled file.
+_shadow = "x = 1\nx = Nat.add x 1\nf = \\y Nat.add x y\nx = 100\nf"
+_to_string = Bool.to_source
+_agree _shadow [0; 5]
+# = true
+_to_string = List.to_source Nat.to_source
+_run _shadow [0; 5]
+# = [2; 7]
+
+# The seed: names the source does not define, most used first.
+_names = \src Option.match [] Pair.fst (Lambada.to_terms src)
+_to_string = List.to_source String.to_source
+_names _fact
+# = ["fix"; "Nat.match"; "Nat.mul"]
+_names _lists
+# = ["List.concat"; "List.map"; "Nat.add"]
+
+# Where the two orders part. A closed subterm under a lambda: the compiled
+# program evaluates it once, when it is built, and is then a constant; the
+# unfolded one evaluates it each time the lambda is applied. Same result,
+# different cost per call.
+_constant = "\\_ List.foldr Nat.add 0 (List.range 20)"
+_to_string = Bool.to_source
+_agree _constant [△; 7]
+# = true
+_to_string = \p Pair.let p $ \a \b List.concat_list ["compiled: "; Nat.to_string a; ", unfolded: "; Nat.to_string b]
+△ (Reflect.count_eval_steps (_compiled _constant) 7) (Reflect.count_eval_steps (_unfolded _constant) 7)
+# = compiled: 1, unfolded: 13039
+# An argument nothing uses is dropped by the simplification, so it is never
+# evaluated, and the name it used is not even asked for; the compiled program
+# evaluates it once, when it is built. A program that diverges there is one
+# that terminates here.
+_dropped = "(\\_ \\x x) (List.range 50)"
+_to_string = Bool.to_source
+_agree _dropped [3]
+# = true
+_to_string = List.to_source String.to_source
+_names _dropped
+# = []
+# A function is a closure here and combinators there: equal as functions,
+# different as trees.
+_to_string = Bool.to_source
+equal (_compiled "\\x x") (_unfolded "\\x x")
+# = false
+_agree "\\x x" [△; 5]
+# = true
+
+# Sizes, as leaf counts: the compiled program, and the terms that stand for
+# it. Programs that define everything they use, so that neither count holds
+# library code. The code of [unfold] itself is a fixed cost on top:
+_to_string = Nat.to_string
+size Lambada.unfold
+# = 1415
+_to_string = id
+_sizes = \src List.concat_list
+    [ "compiled: "; Nat.to_string (size (_compiled src))
+    ; ", as terms: "; Nat.to_string (size (Option.match △ Pair.snd (Lambada.to_terms src)))
+    ]
+_core = "triage = \\a \\b \\c △ (△ a b) c\nconst = \\x \\_ x\ncompose = \\f \\g \\x f (g x)\nlet = \\x \\f f x\nfix = let (const (triage △ △ (\\q q (△ q)))) $ \\knot \\f △ (△ knot) (△ (compose f (△ (△ knot))))\n"
+_twice = "compose = \\f \\g \\x f (g x)\ntwice = \\f compose f f\ntwice twice (\\y △ y)"
+_sizes _twice
+# = compiled: 16, as terms: 28
+_to_string = Bool.to_source
+_agree _twice [△; △ △]
+# = true
+_listlib = List.concat _core "foldr = \\f \\z fix $ \\self triage z △ (\\h \\t f h (self t))\nmap = \\f foldr (\\h \\acc △ (f h) acc) △\nappend = \\a \\b foldr △ b a\nreverse = foldr (\\h \\acc append acc [h]) △\nconcat = foldr append △\nflip = \\l reverse (map (\\x triage x △ (\\a \\b △ b a) x) l)\n\\l concat [flip l, l, [△ △ △, △ (△ △)]]"
+_to_string = id
+_sizes _listlib
+# = compiled: 554, as terms: 298
+_to_string = Bool.to_source
+_agree _listlib [[]; [△; △ △ △; △ (△ △) △]]
+# = true
