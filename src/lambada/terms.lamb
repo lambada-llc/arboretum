@@ -236,17 +236,17 @@ _inline = \defs \ids \root
 
 # Repeatedly take, among the items whose dependencies are all out, the one
 # referred to most often; ties go to the earliest.
-_greedy = \deps \count fix $ \self \remaining \out List.match
-    (\out List.reverse out)
-    (\_ \_ \out
+_greedy = \deps \count fix $ \self \remaining \emitted \out List.match
+    (\_emitted \out List.reverse out)
+    (\_ \_ \emitted \out
       let (List.foldl (\best \j Bool.match
               (\_ best)
               (\_ Option.match (Option.some j) (\b Bool.match (Option.some b) (Option.some j) (Nat.is_lt (count b) (count j))) best)
-              (List.all (\d List.any (equal d) out) (deps j)) △)
+              (List.all (\d _is_some (Map.get d emitted)) (deps j)) △)
             Option.none remaining) $ \best
       let (Option.get_or △ best) $ \pick
-      self (List.filter (\j Bool.not (equal j pick)) remaining) (△ pick out))
-    remaining out
+      self (List.filter (\j Bool.not (equal j pick)) remaining) (Map.set pick true emitted) (△ pick out))
+    remaining emitted out
 
 # Encoding. [_enc t] is △ info code, where [info], for a term that is a closed
 # tree, is some (△ (△ v |v|) (△ b |b|)): the tree, and the applications of △
@@ -303,8 +303,9 @@ to_terms = \s
         let (_counts _free_refs defs ids) $ \free_counts
         let (List.foldl (\names \id List.foldl (\names \n Bool.match (List.concat names [n]) names (List.any (equal n) names))
                 names (_free_refs (_term_of defs id))) [] ids) $ \names
-        let (_greedy (\_ []) (_count_of free_counts) names []) $ \names
-        let (_greedy (\id _def_refs (_term_of defs id)) (_count_of def_counts) ids []) $ \order
+        let (_greedy (\_ []) (_count_of free_counts) names Map.empty []) $ \names
+        let (List.foldl (\m \id Map.set id (_def_refs (_term_of defs id)) m) Map.empty ids) $ \deps
+        let (_greedy (\id Option.get_or [] (Map.get id deps)) (_count_of def_counts) ids Map.empty []) $ \order
         let (List.length names) $ \nseed
         let (List.foldl (\m \p Pair.let p $ \n \i Map.set n i m) Map.empty (List.mapi △ names)) $ \name_index
         let (List.foldl (\m \p Pair.let p $ \id \i Map.set id (Nat.add nseed i) m) Map.empty (List.mapi △ order)) $ \def_index
