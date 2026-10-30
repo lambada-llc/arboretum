@@ -1,0 +1,333 @@
+# A program as a list of λ-terms, and the code that turns such a list back into
+# the program.
+#
+# [to_terms] reads LambAda source the way [compile_file] does — the same
+# statements, tokenizer, parser and desugaring — and, instead of abstracting
+# each definition into combinators, keeps the λ-terms: simplified, single-use
+# definitions written where they are used, the rest ordered so that the most
+# used come first, and each encoded as a tree in de Bruijn form. [unfold] takes
+# such a list and compiles it to the program on the spot. A program stored that
+# way is several times smaller than the one [compile_file] produces from the
+# same source, and costs one [unfold] when it is built.
+#
+# The format. A program is a list of terms; term j refers to its globals, which
+# are the values of the seed (a list given to [unfold]) followed by those of
+# terms 0 … j-1, oldest first. The program is the value of the last term.
+#
+#   △                the constant △
+#   △ f a            term f applied to term a
+#   △ △              local variable 0, the innermost; △ (△ v) the local after v
+#   △ (△ △ n)        global n, n unary (△, △ △, △ (△ △), …)
+#   △ (△ b n)        b under n + 1 lambdas, b not △
+#   △ (△ v (△ △ △))  the value v, quoted
+#
+# λx.△ is written as the value △ △ △ with one lambda fewer, because a group
+# whose body is △ would read as a global. A closed tree is stored either quoted
+# or as the applications of △ that build it, whichever is smaller.
+#
+# What is guaranteed: [unfold seed terms], applied to arguments, gives the same
+# results as the program [compile_file] makes of the source, for programs that
+# terminate under both — and the results compared as data, not as functions.
+# The two differ in when they work, and so in what a function looks like:
+# LambAda's output evaluates a closed subterm under a lambda once, when the
+# program is built, while [unfold]'s evaluates a lambda's body each time it is
+# applied and nothing before; the simplification below may drop an argument
+# that is never used, which the compiled program would have evaluated; and a
+# function is a closure here and combinators there, so a program that looks
+# inside a function (equal, size, Serialize on one) can tell them apart.
+
+Term \= Term_var index      # local variable, de Bruijn index
+      | Term_def id         # the definition the source numbered [id]
+      | Term_free name      # a name the source does not define: a seed entry
+      | Term_leaf
+      | Term_val value      # a closed tree, as itself
+      | Term_app f a
+      | Term_lam body
+
+_mkapp = \f \a Term_app f a
+
+# Occurrences of local [i] in [t].
+_occ = fix $ \self \i \t t
+    (\j \i Bool.match 0 1 (equal i j))
+    (\_ \_ 0) (\_ \_ 0) (\_ 0) (\_ \_ 0)
+    (\f \a \i Nat.add (self i f) (self i a))
+    (\b \i self (Nat.succ i) b)
+    i
+# Whether local [i] occurs under a lambda in [t].
+_under = fix $ \self \i \t t
+    (\_ \_ false) (\_ \_ false) (\_ \_ false) (\_ false) (\_ \_ false)
+    (\f \a \i Bool.or (self i f) (self i a))
+    (\b \i Bool.not (Nat.is_zero (_occ (Nat.succ i) b)))
+    i
+_tsize = fix $ \self \t t
+    (\_ 1) (\_ 1) (\_ 1) 1 (\_ 1)
+    (\f \a Nat.succ (Nat.add (self f) (self a)))
+    (\b Nat.succ (self b))
+_is_lam = \t t (\_ false) (\_ false) (\_ false) false (\_ false) (\_ \_ false) (\_ true)
+_is_atom = \t t (\_ true) (\_ false) (\_ false) true (\_ false) (\_ \_ false) (\_ false)
+_is_var0 = \t t Nat.is_zero (\_ false) (\_ false) false (\_ false) (\_ \_ false) (\_ false)
+
+# Locals at or above [c] moved up by [d].
+_shift = fix $ \self \d \c \t t
+    (\j \d \c Term_var (Bool.match j (Nat.add j d) (Nat.is_lte c j)))
+    (\id \_ \_ Term_def id) (\n \_ \_ Term_free n) (\_ \_ Term_leaf) (\v \_ \_ Term_val v)
+    (\f \a \d \c Term_app (self d c f) (self d c a))
+    (\b \d \c Term_lam (self d (Nat.succ c) b))
+    d c
+# [t] with local [k] replaced by [a] (a term of the scope outside the [k]
+# binders) and the locals above [k] moved down by one: what β-reduction does
+# to a body at k = 0.
+_subst = fix $ \self \k \a \t t
+    (\j \k \a Bool.match
+        (\j \k \_a Term_var (Bool.match (Nat.pred j) j (Nat.is_lt j k)))
+        (\_j \k \a _shift k 0 a)
+        (equal j k) j k a)
+    (\id \_ \_ Term_def id) (\n \_ \_ Term_free n) (\_ \_ Term_leaf) (\v \_ \_ Term_val v)
+    (\f \x \k \a Term_app (self k a f) (self k a x))
+    (\b \k \a Term_lam (self (Nat.succ k) a b))
+    k a
+
+# Simplification. β-reduce (\x b) a when a is a variable or △, when x does not
+# occur in b, when x occurs once and not under a lambda (or once, a being a
+# lambda), or when a is a lambda of fewer than 12 nodes and x occurs at most
+# twice; η-reduce \x f x to f when x is not free in f. Repeated until nothing
+# changes.
+_beta_lam = \go \b \a \f
+    let (_occ 0 b) $ \n
+    Bool.match
+      (\_go \_b \a \f Term_app f a)
+      (\go \b \a \_f go (_subst 0 a b))
+      (Bool.or (_is_atom a) $ Bool.or (Nat.is_zero n) $ Bool.or
+        (Bool.and (equal n 1) (Bool.or (_is_lam a) (Bool.not (_under 0 b))))
+        (Bool.and (_is_lam a) (Bool.and (Nat.is_lt (_tsize a) 12) (Nat.is_lte n 2))))
+      go b a f
+_beta = \go \f \a f (\_ _mkapp) (\_ _mkapp) (\_ _mkapp) _mkapp (\_ _mkapp) (\_ \_ _mkapp) (\b \f \a _beta_lam go b a f) f a
+_eta_app = \f \x \b Bool.match
+    (\_f \b Term_lam b)
+    (\f \_b _subst 0 Term_leaf f)
+    (Bool.and (_is_var0 x) (Nat.is_zero (_occ 0 f)))
+    f b
+_eta = \b b (\_ Term_lam) (\_ Term_lam) (\_ Term_lam) Term_lam (\_ Term_lam) _eta_app (\_ Term_lam) b
+_simp_step = fix $ \go \t t
+    Term_var Term_def Term_free Term_leaf Term_val
+    (\f \a _beta go (go f) (go a))
+    (\b _eta (go b))
+_simp = fix $ \self \t let (_simp_step t) $ \t2 Bool.match (\t2 self t2) (\t2 t2) (equal t t2) t2
+
+# Lowering: syntax to terms. [scope] maps each name defined so far to its
+# definition's id; a name it does not hold is the leaf if it is △, and a seed
+# entry otherwise.
+_global = \scope \name Option.match
+    (Bool.match (Term_free name) Term_leaf (equal name "△"))
+    Term_def
+    (Map.get name scope)
+_env_index = fix $ \self \name \env List.match
+    (\_ Option.none)
+    (\h \t \name Bool.match (\t \name Option.map Nat.succ (self name t)) (\_t \_name Option.some 0) (equal name h) t name)
+    env name
+_resolve = \scope \env \name Option.match (_global scope name) Term_var (_env_index name env)
+_lower = \scope fix $ \self \env \syntax syntax
+    (\name \env _resolve scope env name)
+    (\_env Term_leaf)
+    (\v \_env Term_val v)
+    (\v \_env Term_val v)
+    (\items \env List.foldr (\item \acc Term_app (Term_app Term_leaf (self env item)) acc) Term_leaf items)
+    (\kvs \env List.foldr (\kv \acc Pair.let kv $ \k \v
+        Term_app (Term_app (Term_app (_global scope "Map.set") (self env k)) (self env v)) acc) Term_leaf kvs)
+    (\name \body \env Term_lam (self (△ name env) body))
+    (\f \a \env Term_app (self env f) (self env a))
+    # a definition inside an expression is not one; the compiler emits nothing
+    # meaningful for it either
+    (\_ \_ \_env Term_leaf)
+    (\_ \_ \_ \_env Term_leaf)
+    (\_ \_ \inner \env self env inner)
+    env
+
+# A data type's constructors and dispatchers, as the λ-terms the compiler's
+# closed forms stand for. Constructor i of n with k arguments is
+# \a1..ak \c0..c_{n-1} c_i a1..ak; dispatcher i is \f \alt \x x b_0..b_{n-1}
+# with b_i = f and b_j = \y1..y_mj alt.
+_ctor_term = \i \n \k Fn.pow (Nat.add n k) Term_lam $
+    List.foldl (\acc \idx Term_app acc (Term_var idx))
+      (Term_var (Nat.sub (Nat.pred n) i))
+      (List.map (Nat.add n) (List.reverse (List.range k)))
+_dispatch_term = \i \variants Fn.pow 3 Term_lam $
+    List.foldl (\acc \v Pair.let v $ \j \m Term_app acc
+        (Bool.match (Fn.pow m Term_lam (Term_var (Nat.succ m))) (Term_var 2) (equal i j)))
+      (Term_var 0)
+      variants
+
+# The state of reading the statements: △ (△ count scope) (△ defs root), where
+# [defs] maps each id to △ name term (a bare expression's name is "") and
+# [root] is the id of the last bare expression, if any.
+_st0 = △ (△ 0 Map.empty) (△ Map.empty Option.none)
+_st_scope = \st Pair.snd (Pair.fst st)
+_st_add = \name \term \is_root \st Pair.let st $ \cs \dr Pair.let cs $ \count \scope Pair.let dr $ \defs \root
+    △ (△ (Nat.succ count) (Bool.match (Map.set name count scope) scope is_root))
+      (△ (Map.set count (△ name term) defs) (Bool.match root (Option.some count) is_root))
+_st_bare = \syntax \st _st_add "" (_lower (_st_scope st) [] syntax) true st
+_st_adt = \variants \st
+    let (List.length variants) $ \n
+    let (List.mapi (\v \j △ j (List.length (Pair.snd v))) variants) $ \arities
+    List.foldl (\st \v Pair.let v $ \cv \i Pair.let cv $ \name \args
+        _st_add (List.concat name "_Dispatch") (_dispatch_term i arities) false $
+        _st_add name (_ctor_term i n (List.length args)) false st)
+      st (List.mapi △ variants)
+_st_stmt = fix $ \self \syntax \st syntax
+    (\_ _st_bare) _st_bare (\_ _st_bare) (\_ _st_bare) (\_ _st_bare) (\_ _st_bare) (\_ \_ _st_bare) (\_ \_ _st_bare)
+    (\name \o \_syntax \st _st_add name (_lower (_st_scope st) [] o) false st)
+    (\_type \variants \_scott \_syntax \st _st_adt variants st)
+    (\_ \_ \inner \_syntax \st self inner st)
+    syntax st
+
+# References a term makes: [od] folded over each definition id, [of] over each
+# seed name, left to right.
+_tfold = \od \of fix $ \self \t t
+    (\_ \acc acc)
+    od
+    of
+    (\acc acc)
+    (\_ \acc acc)
+    (\f \a \acc self a (self f acc))
+    (\b \acc self b acc)
+_def_refs = \t List.reverse (_tfold △ (\_ \acc acc) t [])
+_free_refs = \t List.reverse (_tfold (\_ \acc acc) △ t [])
+
+_term_of = \defs \id Pair.snd (Option.get_or (△ "" Term_leaf) (Map.get id defs))
+_is_some = Option.match false (\_ true)
+_bump = \k \m Map.set k (Nat.succ (Option.get_or 0 (Map.get k m))) m
+_count_of = \m \k Option.get_or 0 (Map.get k m)
+
+# The ids reachable from [root], in increasing order.
+_reach = \defs \count \root
+    let (fix (\self \id \seen Option.match
+          (\id \seen List.foldl (\seen \j self j seen) (Map.set id true seen) (_def_refs (_term_of defs id)))
+          (\_ \_id \seen seen)
+          (Map.get id seen) id seen) root Map.empty) $ \seen
+    List.filter (\id _is_some (Map.get id seen)) (List.range count)
+_counts = \refs \defs \ids List.foldl (\m \id List.foldl (\m \k _bump k m) m (refs (_term_of defs id))) Map.empty ids
+
+# Single-use definitions are written where they are used when building them
+# there costs nothing extra: a lambda, △, △ applied to such things, or [fix]
+# applied to such things. A computed constant never is.
+_cheap = \is_fix fix $ \self \t t
+    (\_ false) (\_ false) (\_ false) true (\_ true)
+    (\f \a Bool.and (self a) $ f
+        (\_ false) is_fix (equal "fix") true (\_ false)
+        (\g \x Bool.and (g (\_ false) (\_ false) (\_ false) true (\_ false) (\_ \_ false) (\_ false)) (self x))
+        (\_ false))
+    (\_ true)
+_inline_refs = \defs \inl fix $ \self \t t
+    Term_var
+    (\id Bool.match (Term_def id) (_term_of defs id) (_is_some (Map.get id inl)))
+    Term_free Term_leaf Term_val
+    (\f \a Term_app (self f) (self a))
+    (\b Term_lam (self b))
+_inline = \defs \ids \root
+    let (_counts _def_refs defs ids) $ \counts
+    let (\id equal "fix" (Pair.fst (Option.get_or (△ "" Term_leaf) (Map.get id defs)))) $ \is_fix
+    Pair.fst $ List.foldl (\acc \id Pair.let acc $ \out \inl
+        Pair.let (Option.get_or (△ "" Term_leaf) (Map.get id defs)) $ \name \term
+        let (_inline_refs out inl term) $ \term
+        △ (Map.set id (△ name term) out)
+          (Bool.match inl (Map.set id true inl)
+            (Bool.and (Bool.not (equal id root)) (Bool.and (equal 1 (_count_of counts id)) (_cheap is_fix term)))))
+      (△ Map.empty Map.empty) ids
+
+# Repeatedly take, among the items whose dependencies are all out, the one
+# referred to most often; ties go to the earliest.
+_greedy = \deps \count fix $ \self \remaining \out List.match
+    (\out List.reverse out)
+    (\_ \_ \out
+      let (List.foldl (\best \j Bool.match
+              (\_ best)
+              (\_ Option.match (Option.some j) (\b Bool.match (Option.some b) (Option.some j) (Nat.is_lt (count b) (count j))) best)
+              (List.all (\d List.any (equal d) out) (deps j)) △)
+            Option.none remaining) $ \best
+      let (Option.get_or △ best) $ \pick
+      self (List.filter (\j Bool.not (equal j pick)) remaining) (△ pick out))
+    remaining out
+
+# Encoding. [_enc t] is △ info code, where [info], for a term that is a closed
+# tree, is some (△ (△ v |v|) (△ b |b|)): the tree, and the applications of △
+# that build it, each with its size — so a tree's two forms are decided once,
+# bottom up, and not recomputed for every application above it.
+_unary = fix $ \self \n Nat.match △ (\p △ (self p)) n
+_built = fix $ \self triage △ (\u △ △ (self u)) (\u \w △ (△ △ (self u)) (self w))
+_val_info = \v let (_built v) $ \b △ (△ v (size v)) (△ b (size b))
+_pick = \info Pair.let info $ \vs \bs Pair.let vs $ \v \sv Pair.let bs $ \b \sb
+    Bool.match b (△ (△ v (△ △ △))) (Nat.is_lt (Nat.add sv 5) sb)
+_combine = \fi \ai Pair.let fi $ \fvs \fbs Pair.let fvs $ \fv \fsv Pair.let fbs $ \fb \fsb
+    Pair.let ai $ \avs \abs Pair.let avs $ \av \asv Pair.let abs $ \ab \asb
+    Option.map (\v △ (△ v (Nat.add fsv asv)) (△ (△ fb ab) (Nat.succ (Nat.add fsb asb))))
+      (triage (Option.some (△ av)) (\u Option.some (△ u av)) (\_ \_ Option.none) fv)
+_strip = fix $ \self \k \t t
+    (\_ \k \t △ k t) (\_ \k \t △ k t) (\_ \k \t △ k t) (\k \t △ k t) (\_ \k \t △ k t) (\_ \_ \k \t △ k t)
+    (\b \k \_t self (Nat.succ k) b)
+    k t
+_lam_code = \k \body triage
+    (\k Nat.match (△ (△ △ △) △) (\kp △ (△ (△ (△ △ △) △) (_unary kp))) (Nat.pred k))
+    (\_ \k △ (△ body (_unary (Nat.pred k))))
+    (\_ \_ \k △ (△ body (_unary (Nat.pred k))))
+    body k
+_enc = \def_index \name_index fix $ \self \t t
+    (\i △ Option.none (_unary (Nat.succ i)))
+    (\id △ Option.none (△ (△ △ (_unary (def_index id)))))
+    (\n △ Option.none (△ (△ △ (_unary (name_index n)))))
+    (△ (Option.some (△ (△ △ 1) (△ △ 1))) △)
+    (\v let (_val_info v) $ \info △ (Option.some info) (_pick info))
+    (\f \a Pair.let (self f) $ \fi \fc Pair.let (self a) $ \ai \ac
+        let (Option.bind (\fi Option.bind (_combine fi) ai) fi) $ \info
+        △ info (Option.match (△ fc ac) _pick info))
+    (\b Pair.let (_strip 1 b) $ \k \body △ Option.none (_lam_code k (Pair.snd (self body))))
+
+# Source text to △ names terms: [names] the seed the terms expect, as the
+# names the source uses for them, and [terms] the program; none if a statement
+# does not parse or the source has no bare expression, whose last is the
+# program. A name is what the latest definition before it made it, as in a
+# compiled file; one the source does not define is a seed entry, ordered, like
+# the terms, most used first.
+to_terms = \s
+    Option.bind (\parsed
+      let (List.foldl (List.foldl (\st \syntax _st_stmt syntax st)) _st0 parsed) $ \st
+      Pair.let st $ \cs \dr Pair.let cs $ \count \_scope Pair.let dr $ \defs \root
+      Option.map (\root
+        let (List.foldl (\m \id Map.set id (Pair.map_snd _simp (Option.get_or (△ "" Term_leaf) (Map.get id defs))) m)
+              Map.empty (_reach defs count root)) $ \defs
+        let (_reach defs count root) $ \ids
+        let (_inline defs ids root) $ \defs
+        let (List.foldl (\m \id Map.set id (Pair.map_snd _simp (Option.get_or (△ "" Term_leaf) (Map.get id defs))) m)
+              Map.empty ids) $ \defs
+        let (_reach defs count root) $ \ids
+        let (_counts _def_refs defs ids) $ \def_counts
+        let (_counts _free_refs defs ids) $ \free_counts
+        let (List.foldl (\names \id List.foldl (\names \n Bool.match (List.concat names [n]) names (List.any (equal n) names))
+                names (_free_refs (_term_of defs id))) [] ids) $ \names
+        let (_greedy (\_ []) (_count_of free_counts) names []) $ \names
+        let (_greedy (\id _def_refs (_term_of defs id)) (_count_of def_counts) ids []) $ \order
+        let (List.length names) $ \nseed
+        let (List.foldl (\m \p Pair.let p $ \n \i Map.set n i m) Map.empty (List.mapi △ names)) $ \name_index
+        let (List.foldl (\m \p Pair.let p $ \id \i Map.set id (Nat.add nseed i) m) Map.empty (List.mapi △ order)) $ \def_index
+        let (_enc (\id Option.get_or 0 (Map.get id def_index)) (\n Option.get_or 0 (Map.get n name_index))) $ \enc
+        △ names (List.map (\id Pair.snd (enc (_term_of defs id))) order))
+      root)
+    (Option.sequence (List.map (Pair.match $ \_n \text Option.bind Lambada.compiler_parse (Lambada.compiler_tokenize text)) (Lambada.statements s)))
+
+# The program [terms] denote, given the values of the names they expect. Each
+# term is compiled to a function of an environment — the values of the locals,
+# innermost first — and applied to the empty one: an application passes the
+# environment to both sides, a local is the steps down to it, a lambda a
+# closure that puts its argument in front, a global the value it already has,
+# and a quoted tree itself. Building the program does the terms' top-level
+# work and no more: a lambda's body runs when the lambda is applied.
+_lam = \c \env \x c (△ x env)
+_compile = fix $ \c triage (\g △ △ △)
+  (triage (\g △ (△ △ △) (△ △))
+      (\y \g △ (△ △ △) (△ △ (c (△ y) g)))
+      (\b \n triage (\n \g triage (\g △ △ (triage △ △ (\h \_ h) g)) (\m \g c (△ (△ △ m)) (triage △ △ (\_ \r r) g)) (\_ \_ \g △ △ △) n g)
+                (\x \n \g triage (\x \g _lam (c (△ x) g)) (\m \x \g _lam (c (△ (△ (△ x) m)) g)) (\_ \_ \x \g △ △ (△ x)) n x g)
+                (\x \y \n \g triage (\b \g _lam (c b g)) (\m \b \g _lam (c (△ (△ b m)) g)) (\_ \_ \b \g △ △ b) n (△ x y) g) b n))
+  (\f \a \g △ (△ (c f g)) (c a g))
+_snoc = fix $ \r \l \v triage (△ v △) △ (\h \t △ h (r t v)) l
+unfold = \seed \terms fix (\tb \g Pair.match (\d \rest let (_compile d g △) $ \v triage v △ (\h \t tb (_snoc g v) (△ h t)) rest)) seed terms
+
