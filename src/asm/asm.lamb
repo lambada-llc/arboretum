@@ -1,0 +1,86 @@
+# Machine code from trees: a label-resolving assembler, independent of any
+# instruction set, and the layout of a tree as nodes in a machine's memory.
+
+# ── Items ────────────────────────────────────────────────────────────────────
+# A program is a list of items whose sizes are fixed by the address they sit at,
+# so one pass can collect the address of every label and a second can emit bytes
+# that point at them — forward references and all.
+#
+#   Bytes bs     literal bytes
+#   Space n      address space that is not in the file (a bss)
+#   Align n      zeros up to the next multiple of n
+#   Label l      names the address reached so far
+#   Ref n enc l  the n bytes [enc addr target], given the item's own address and
+#                l's — every instruction set encodes a reference its own way
+Item \= Bytes bs | Space n | Align n | Label l | Ref n enc l
+
+byte = List.take 8
+u16 = \n [byte n; byte (Nat.shr 8 n)]
+u32 = \n List.concat (u16 n) (u16 (Nat.shr 16 n))
+
+size = \addr \item item List.length id (\n Nat.mod (Nat.sub n (Nat.mod addr n)) n) (\_ 0) (\n \_ \_ n)
+
+# Bytes from [base] up to the end, Space included.
+span = \base \items Nat.sub (List.foldl (\addr \item Nat.add addr (size addr item)) base items) base
+
+labels = fix $ \self \addr \items List.match [] (\item \rest
+  let (self (Nat.add addr (size addr item)) rest) $ \table
+  item (\_ table) (\_ table) (\_ table) (\l △ (△ l addr) table) (\_ \_ \_ table)) items
+find = \table \l List.lookup_or 0 l table
+
+emit = \table fix $ \self \addr \items List.match [] (\item \rest
+  List.concat
+    (item id (\_ []) (\_ List.repeat (size addr item) 0) (\_ [])
+      (\_ \enc \l enc addr (find table l)))
+    (self (Nat.add addr (size addr item)) rest)) items
+
+assemble = \base \items emit (labels base items) base items
+
+_to_string = id
+List.concat_map Nat.byte_to_hex $ assemble 4096 [Ref 2 (\a \t u16 (Nat.sub t a)) "on"; Bytes [144]; Align 4; Label "on"]
+# = 04009000
+Nat.to_string $ span 4096 [Bytes [1]; Align 4; Space 16; Bytes [2]]
+# = 21
+
+# ── Trees in memory ──────────────────────────────────────────────────────────
+# A node is two 32-bit words [u][v], the shape implicit in which children are
+# null: u == 0 is a leaf, v == 0 a stem, otherwise a fork. Addresses are never 0,
+# so nothing needs a tag. (The representation is the one the size-golfed
+# evaluators in submodules/tree-calculus/implementation/asm settled on.)
+#
+# [image leaf base node] lays out every distinct subtree of [node] but the leaf
+# once, from address [base] on, children before parents so a cell can name the
+# addresses of its own, and points every leaf at [leaf]. It is △ bytes root.
+# Neither address may be 0, which is what an absent child is.
+# A node is known by its children's addresses, so a subtree seen before is not
+# laid out again: a program's tree repeats itself — the same library code
+# reached along many paths — far more than its DAG does.
+#
+# Chunks accumulate in reverse and are turned around at the end. The state
+# travels behind the triage rather than in front of it: reduction is eager, so
+# [self state] would go active the moment a state is bound, long before there is
+# a node to stop at. For the same reason a new cell is made in a branch that
+# takes the key as its argument, not before the lookup decides.
+_cell = \state \u \v Pair.match (\chunks \rest Pair.match (\addr \seen
+  let (△ u v) $ \key
+  let (Map.pmap_get key seen) $ \found
+  triage
+    (\key △ (△ (△ (List.concat (u32 u) (u32 v)) chunks) (△ (Nat.add addr 8) (Map.pmap_set key addr seen))) addr)
+    (\_ \_ △ state found)
+    (\_ \_ \_ △ state found)
+    found key) rest) state
+_layout = \leaf fix $ \self \state \node
+  triage
+    (\state △ state leaf)
+    (\x \state Pair.match (\s \a _cell s a 0) (self state x))
+    (\x \y \state Pair.match (\s \a Pair.match (\s2 \b _cell s2 a b) (self s y)) (self state x))
+    node state
+image = \leaf \base \node Pair.match
+  (\state \root Pair.match (\chunks \_ △ (List.concat_list (List.reverse chunks)) root) state)
+  (_layout leaf (△ [] (△ base Map.empty)) node)
+
+_to_string = id
+Pair.match (\bytes \root List.concat_list [List.concat_map Nat.byte_to_hex bytes; " "; Nat.to_hex root]) $ image 8 16 (△ △ (△ △))
+# = 08000000000000000800000010000000 18
+Pair.match (\bytes \root List.concat_list [List.concat_map Nat.byte_to_hex bytes; " "; Nat.to_hex root]) $ image 8 16 (△ (△ △) (△ △))
+# = 08000000000000001000000010000000 18
