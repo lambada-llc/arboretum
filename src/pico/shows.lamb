@@ -1,0 +1,188 @@
+# Shows for pico.lamb's LED matrix, each [program t y x] as the board's tree
+# calculus machine runs it, t in tenths of a second. The machine pays hundreds
+# of reductions for an addition on binary nats and a few dozen for each bit a
+# table lookup walks, so these are written as tables: what depends on neither
+# frame nor pixel is made here, what depends on the frame alone once a frame, on
+# the row once a row — and the pixel only looks up.
+#
+# The board shows a frame per t, as fast as it can work one out and send it, so
+# [paced_show show fps program] reads t as frames instead, fps being how many
+# tenths of a frame a second the board manages for it. Each show's tests write
+# its image, ready to flash, and a preview of the pictures its program draws.
+
+# ── Tables, numbers and waves ─────────────────────────────────────────────────
+_tab = Pico.table
+_at = Pico.lookup
+_black = [0; 0; 0]
+_paced = \fps \program \t program (Nat.div (Nat.mul 100 t) fps)
+paced_show = \show \fps \program show fps (_paced fps program)
+
+# The table of a list's first 2^k elements: the even ones make the half for a
+# low bit 0, the odd ones the other.
+_deal = List.foldr (\x \p Pair.match (\evens \odds △ (△ x odds) evens) p) (△ [] [])
+from_list = \k Fn.pow k (\inner \l Pair.match (\evens \odds △ (inner evens) (inner odds)) (_deal l)) (List.head_or 0)
+
+# Pseudo-random numbers for the tables the build makes, cheaply, as those are
+# made with every build: 256 bytes from a linear congruential generator, and a
+# hash that looks bytes up by bytes (Pearson's). [_hash a b] is 16 bits, from
+# the low bytes of a and b; [rand n a b] is one of 0..n-1.
+_bytes = from_list 8 $ List.map (Nat.shr 8)
+  (List.foldl (\l \_ △ (Nat.canonicalize (List.take 16 (Nat.add (Nat.mul 25173 (List.head_or 1 l)) 13849))) l) [] (List.range 256))
+_byte = _at 8 _bytes
+_hash = \a \b let (_byte (Nat.add (_byte a) b)) $ \h Nat.add (Nat.mul 256 h) (_byte (Nat.add (_byte (Nat.add h 89)) a))
+rand = \n \a \b Nat.shr 16 (Nat.mul n (_hash a b))
+
+# ⌊√n⌋ for n below 2^18, a bit at a time from the top.
+isqrt = \n List.foldl (\r \b let (Nat.add r b) $ \c Bool.match r c (Nat.is_lte (Nat.mul c c) n)) 0
+  (List.map Nat.pow2 (List.reverse (List.range 9)))
+monus = \a \b Bool.match 0 (Nat.sub a b) (Nat.is_lte b a)     # a − b, or 0
+rdiv = \a \b Nat.div (Nat.add a (Nat.div b 2)) b
+# x^0, x^1, …, x^(n−1) for x in 2^-bths
+powers = \b \n \x let (Nat.pow2 b) $ \one
+  List.reverse (List.foldl (\l \_ △ (Nat.shr b (Nat.mul (List.head_or one l) x)) l) [one] (List.range (Nat.pred n)))
+
+# sin(2πk/n)·2^10 for k up to n/4, by its Taylor series to the 7th power: 10
+# bits are plenty for a 25-pixel matrix, and fewer bits are what keeps the
+# build's tables cheap.
+sin_q = \n \k
+  let (Nat.div (Nat.mul k 6434) n) $ \x       # 2π·2^10 = 6434
+  let (\a \b Nat.shr 10 (Nat.mul a b)) $ \fx
+  let (fx x x) $ \x2
+  let (fx x2 x) $ \x3
+  let (fx x3 x2) $ \x5
+  Nat.sub x (Nat.sub (Nat.div x3 6) (Nat.sub (Nat.div x5 120) (Nat.div (fx x5 x2) 5040)))
+# [waves b amp] holds amp·(1 + sin(2πk/n)), rounded, for every k below n = 2^b:
+# the series worked out for a quarter turn, the rest by symmetry. A quadrant is
+# k's top two bits, so the deepest two levels of the table: for
+# k = r + n/4·quadrant, sin r, cos r, −sin r, −cos r, where cos r = sin(n/4 − r).
+waves = \b \amp
+  let (Nat.sub b 2) $ \qb
+  let (Nat.pow2 qb) $ \q
+  let (_tab qb (\r Nat.shr 10 (Nat.add 512 (Nat.mul amp (sin_q (Nat.pow2 b) r))))) $ \quarter
+  _tab qb (\r
+    let (_at qb quarter r) $ \sin
+    let (Bool.match (_at qb quarter (Nat.sub q r)) amp (Nat.is_zero r)) $ \cos
+    △ (△ (Nat.add amp sin) (Nat.sub amp sin)) (△ (Nat.add amp cos) (Nat.sub amp cos)))
+
+# |x − c|, by c then x
+_offsets = _tab 5 (\c _tab 5 (Nat.diff c))
+
+List.join " " $ List.map (compose Nat.to_string (_at 6 (waves 6 100))) [0; 8; 16; 24; 32; 48; 63]
+# = 100 171 200 171 100 0 90
+
+# ── Matrix rain ──────────────────────────────────────────────────────────────
+# Every column hashes its speed (in 16ths of a row per tenth of a second), trail
+# length and phase; its head is at row (t·speed + phase) mod 64, and a pixel
+# only asks how far behind the head it is — a table by row and head, made here.
+# A few trail pixels glow brighter for a while: a hashed table entered at a row
+# that moves every 4 tenths. The heads fall 2 to 5 rows a second, a third as
+# fast as they could: a white head takes the board some 24 frames to fade into
+# its green trail, and the slower it falls, the fewer rows that leaves white.
+_rain_cols = _tab 5 (\x △ (△ (Nat.add 3 (rand 6 x 1)) (rand 1024 x 4)) (Nat.add 6 (rand 9 x 2)))
+_rain_behind = _tab 5 (\y _tab 6 (\head Bool.match 15 (Nat.min 15 (Nat.sub head y)) (Nat.is_lte y head)))
+_rain_shade = _tab 4 (\len _tab 4 (\behind _tab 1 (\glyph
+  let (Nat.div (Nat.mul 255 (Nat.sub len behind)) (Nat.max 1 len)) $ \k
+  let (Nat.div (Nat.mul k (isqrt k)) 16) $ \k
+  let (Bool.match k (Nat.min 255 (Nat.div (Nat.mul k 7) 5)) (equal glyph 1)) $ \k
+  Bool.match
+    (Bool.match [Nat.div k 10; Nat.div (Nat.mul k 95) 100; Nat.div k 4] _black (Nat.is_lt len behind))
+    [217; 255; 217]
+    (Nat.is_zero behind))))
+_rain_glyphs = _tab 5 (\y _tab 5 (\x Bool.match 0 1 (Nat.is_lt (rand 100 x (Nat.add y 32)) 8)))
+rain = \t
+  let (_tab 5 (\x Pair.match (Pair.match \speed \phase \len
+      △ (List.drop 4 (Nat.add (Nat.mul t speed) phase)) (_at 4 _rain_shade len))
+      (_at 5 _rain_cols x))) $ \heads
+  let (Nat.div t 4) $ \slot
+  \y let (_at 5 _rain_behind y) $ \behind
+  let (_at 5 _rain_glyphs (Nat.add y slot)) $ \glyphs
+  \x Pair.match (\head \shade _at 1 (_at 4 shade (_at 6 behind head)) (_at 5 glyphs x)) (_at 5 heads x)
+
+tc_rain = paced_show Pico.show 119 rain
+file "tc_rain.uf2" "application/octet-stream" $ Pico.uf2 $ Pico.tc_firmware [tc_rain]
+# = tc_rain.uf2 sha256:d621b458833f1dc46842c550143c78f10564f2892034658aea98db83a88368cf
+file "rain.svg" "image/svg+xml" $ Pico.preview tc_rain 52
+# = rain.svg sha256:ff91dfe5b9db252d4d90a2f7bae5bca09a55df2db49a80cc0e7be1af5ea10990
+
+# ── Ripples ──────────────────────────────────────────────────────────────────
+# Drop k falls at frame 11k, a frame being a tenth of a second, at a hashed
+# place; a pixel sums the wave packets of the two most recent, each read off a
+# table by the drop's age and the pixel's distance from it — by the time a
+# third would count, its packet has all but died away. A packet is in eighths,
+# 0..16 for −1..1, and so is their sum, clamped. Only crests light up, deep
+# blue at the foot through cyan to white at the top; the pond is dark.
+_rp_drops = _tab 5 (\k △ (Nat.add 2 (rand 21 k 1)) (Nat.add 2 (rand 21 k 2)))
+_rp_distance = _tab 5 (\dy _tab 5 (\dx Nat.min 31 (rdiv (isqrt (Nat.mul 256 (Nat.add (Nat.mul dx dx) (Nat.mul dy dy)))) 16)))
+# 8·(1 + sin((r − front)·1.6)·e^(−(r − front)²/6)·e^(−0.7·age)·2.6/(1 + 0.12·r)), the
+# front 0.7·age out: in tenths of a pixel, sevenths for the exponent, 2^-16 for
+# the rest.
+_rp_sine = waves 6 65536
+_rp_decay = from_list 6 (powers 16 64 56812)   # e^(−k/7): e^(−1/7) = 56812/2^16
+_rp_packets = _tab 6 (\age _tab 5 (\r
+  let (Nat.mul 10 r) $ \r10
+  let (Nat.mul 7 age) $ \front10
+  let (Nat.diff r10 front10) $ \off10
+  let (Nat.add (Nat.mul 7 (Nat.mul off10 off10)) (Nat.mul 294 age)) $ \y4200      # y7·600
+  Bool.match (\_ 8) (\y4200
+      let (rdiv y4200 600) $ \y7
+      let (_at 6 _rp_sine (rdiv (Nat.mul off10 163) 100)) $ \s   # 1 + sin(off·1.6): 1.6 rad = 16.3 64ths
+      let (Bool.match (Nat.sub 131072 s) s (Nat.is_lte front10 r10)) $ \s
+      let (Nat.div (Nat.mul 260 (_at 6 _rp_decay y7)) (Nat.add 100 (Nat.div (Nat.mul 12 r10) 10))) $ \amp
+      let (Nat.shr 29 (Nat.mul amp (Nat.diff s 65536))) $ \m      # ·8/2^32
+      Nat.min 16 (Bool.match (monus 8 m) (Nat.add 8 m) (Nat.is_lte 65536 s)))
+    (Nat.is_lt y4200 37800) y4200))
+# by how far the two packets' sum stands above flat, in eighths
+_rp_shades = [_black; [0; 70; 210]; [0; 170; 255]; [60; 230; 255]; [170; 255; 255]]
+_rp_colors = _tab 5 (\a _tab 5 (\b List.nth_or _black (Nat.min 4 (monus (Nat.min 16 (monus (Nat.add a b) 8)) 8)) _rp_shades))
+# drop j back from the newest: |x − its x| by x, its row, its packets by distance
+_rp_drop = \newest \age \j Pair.match (\x \y △ (_at 5 _offsets x) (△ y (_at 6 _rp_packets (Nat.add age (Nat.mul 11 j)))))
+  (_at 5 _rp_drops (Nat.sub (Nat.add newest 32) j))
+ripples = \t
+  let (_rp_drop (Nat.div t 11) (Nat.mod t 11)) $ \drop
+  Pair.match (\xs0 Pair.match \y0 \packets0 Pair.match (\xs1 Pair.match \y1 \packets1
+    \y let (_at 5 _rp_distance (Nat.diff y y0)) $ \d0
+    let (_at 5 _rp_distance (Nat.diff y y1)) $ \d1
+    \x _at 5 (_at 5 _rp_colors (_at 5 packets0 (_at 5 d0 (_at 5 xs0 x)))) (_at 5 packets1 (_at 5 d1 (_at 5 xs1 x))))
+    (drop 1)) (drop 0)
+
+tc_ripples = paced_show (Pico.show_slewing 64) 106 ripples
+file "tc_ripples.uf2" "application/octet-stream" $ Pico.uf2 $ Pico.tc_firmware [tc_ripples]
+# = tc_ripples.uf2 sha256:851fc986be680dd8c3a403dcea73f60d3339f5120bd0fa6020e583a9272b3114
+file "ripples.svg" "image/svg+xml" $ Pico.preview tc_ripples 48
+# = ripples.svg sha256:d47a297d20900598c3e0b9614594e37d9611fc6e1a4485f3aa034ff063997273
+
+# ── Fire ─────────────────────────────────────────────────────────────────────
+# Two octaves of value noise scroll upward, and subtracting height makes the
+# heat fade toward the top; a black → red → yellow → warm white palette turns
+# heat into fire — white without its blue, which next to the red tips reads as
+# cold. Both octaves scroll at the same speed in pixels, so they are one
+# texture, made here, 32 pixels wide and 64 high: a frame only says how far it
+# has scrolled, and a row which palette — the heat its height leaves — it uses.
+# noise of a lattice with cells 2^b wide, 0..255, by y then x: hashed corners, smoothstep between
+_fire_lattice = \b \seed
+  let (Nat.pow2 b) $ \cell
+  let (_tab (Nat.sub 6 b) (\cy _tab (Nat.sub 5 b) (\cx _byte (_hash (Nat.add cy seed) cx)))) $ \corners
+  let (\f let (Nat.div (Nat.mul 256 f) cell) $ \f Nat.div (Nat.mul (Nat.mul f f) (Nat.sub 768 (Nat.double f))) 65536) $ \smooth
+  let (\a \c \u Nat.div (Nat.add (Nat.mul a (Nat.sub 256 u)) (Nat.mul c u)) 256) $ \mix
+  _tab 6 (\y let (Nat.shr b y) $ \cy let (smooth (Nat.mod y cell)) $ \v
+    let (_at (Nat.sub 6 b) corners cy) $ \above let (_at (Nat.sub 6 b) corners (Nat.succ cy)) $ \below
+    _tab 5 (\x let (Nat.shr b x) $ \cx let (\row \cx _at (Nat.sub 5 b) row cx) $ \at
+      mix (mix (at above cx) (at above (Nat.succ cx)) (smooth (Nat.mod x cell))) (mix (at below cx) (at below (Nat.succ cx)) (smooth (Nat.mod x cell))) v))
+_fire_noise = let (_fire_lattice 2 1) $ \coarse let (_fire_lattice 1 2) $ \fine
+  _tab 6 (\y _tab 5 (\x Nat.div (Nat.add (Nat.double (_at 5 (_at 6 coarse y) x)) (_at 5 (_at 6 fine y) x)) 24))   # 0..31
+_fire_palette = _tab 5 (\y _tab 5 (\n
+  # heat·255 = n/31·1.35·255 − (24 − y)/25·1.25·255 + 0.2·255
+  let (monus (Nat.add 51 (Nat.div (Nat.mul n 1111) 100)) (Nat.div (Nat.mul (monus 24 y) 1275) 100)) $ \heat
+  let (\k \off Nat.min 255 (monus (Nat.div (Nat.mul heat k) 10) off)) $ \channel
+  [channel 26 38; Nat.min 190 (channel 24 242); Nat.div (channel 30 587) 12]))   # at the hottest 255 190 21
+fire = \t
+  let (Nat.div (Nat.mul 29 t) 20) $ \scroll       # 14.5 pixels a second, a frame being a tenth
+  \y let (_at 6 _fire_noise (Nat.add y scroll)) $ \noise
+  let (_at 5 _fire_palette y) $ \palette
+  \x _at 5 palette (_at 5 noise x)
+
+tc_fire = paced_show Pico.show 211 fire
+file "tc_fire.uf2" "application/octet-stream" $ Pico.uf2 $ Pico.tc_firmware [tc_fire]
+# = tc_fire.uf2 sha256:6f81a0a191f21b7688029723b290eea5d140d8b975349dbad8a3afa79c6f0390
+file "fire.svg" "image/svg+xml" $ Pico.preview tc_fire 90
+# = fire.svg sha256:2c64cb573552704ed8df0a507f9484b8e3099fd34eba5add09c15626749bb5be

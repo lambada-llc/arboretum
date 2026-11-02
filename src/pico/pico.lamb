@@ -1122,6 +1122,38 @@ _frame_text = \frame List.concat_map (\row
 _frames_text = \settle \step \f \n List.concat_map _frame_text (△ _black (_frames settle step f _black (Nat.pred n) 0))
 frames = \show \n Pair.match (\how \paced Pair.match (\settle \step _frames_text settle step (Pair.snd paced 0) n) how) show
 
+# [preview show n]: the show's first n frames as an animated SVG, each the image
+# of its program for that t, played at the show's pace — the pictures the
+# program means, before the board slews toward them or corrects them for its
+# LEDs. An LED is a circle whose fill steps through the colours it changes to,
+# at the frames it changes at.
+_pv_hex = \c List.concat_list ["#"; List.concat_map Nat.byte_to_hex c]
+_pv_key = \n \k let (Nat.to_string (Nat.div (Nat.mul k 10000) n)) $ \d       # k/n, to 4 places
+  Bool.match (List.concat_list ["0."; List.concat_list (List.repeat (Nat.sub 4 (List.length d)) "0"); d]) "0" (Nat.is_zero k)
+_pv_changes = \cs List.reverse $ List.foldl (\l \kc
+    triage [kc] _ (\last \_ Bool.match (△ kc l) l (equal (Pair.snd last) (Pair.snd kc))) l)
+  [] (List.zip_with △ (List.range (List.length cs)) cs)
+_pv_led = \n \dur \yx \cs
+  let (_pv_changes cs) $ \changes
+  let (\v Nat.to_string (Nat.add 5 (Nat.mul 10 v))) $ \at
+  Pair.match (\y \x Xml.element "circle" [△ "cx" (at x); △ "cy" (at y); △ "r" "4"; △ "fill" (Pair.snd (List.head_or △ changes))]
+    (triage (\_ []) _ (\_ \_ \changes [Xml.element "animate"
+        [△ "attributeName" "fill"; △ "calcMode" "discrete"; △ "dur" dur; △ "repeatCount" "indefinite";
+         △ "keyTimes" (List.join ";" (List.map (compose (_pv_key n) Pair.fst) changes));
+         △ "values" (List.join ";" (List.map Pair.snd changes))] []])
+      (List.drop 1 changes) changes)) yx
+preview = \show \n
+  let (Pair.snd show) $ \paced
+  let (Pair.snd paced 0) $ \program
+  let (List.map (\t List.concat_map (List.map _pv_hex) (_image program t)) (List.range n)) $ \frames
+  let (List.concat_list [Nat.to_string (Nat.div (Nat.mul n 10000) (Pair.fst paced)); "ms"]) $ \dur
+  Svg.root (Nat.mul 10 _side) (Nat.mul 10 _side) 1 []
+    (△ (Svg.background "#000") (List.zip_with (\yx \cs List.concat_list ["\n"; _pv_led n dur yx cs])
+      (List.concat_map (\y List.map (△ y) _coords) _coords)
+      (List.foldr (List.zip_with △) (List.repeat (Nat.mul _side _side) []) frames)))
+List.join " " $ List.map (_pv_key 7) [0; 1; 6]
+# = 0 0.1428 0.8571
+
 # ── In a browser ─────────────────────────────────────────────────────────────
 # [viewer shows], what tc_firmware makes of [shows], as a web page that
 # evaluates them itself: the first shows, and a BOOTSEL button moves on to the
