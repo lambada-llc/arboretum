@@ -1,0 +1,1383 @@
+# The Raspberry Pi Pico 2 (RP2350, a Cortex-M33) as a target: Thumb machine
+# code, UF2 packaging, a WS2801 LED-matrix demo, and — written in that machine
+# code — a tree calculus machine that colours every LED of the matrix with a
+# program's answer for its coordinates and the frame number.
+#
+# It is one file because LambAda has no imports: the instruction vocabulary is
+# only readable unqualified within its own file.
+
+# ── Thumb instructions ───────────────────────────────────────────────────────
+# Thumb encodings (16-bit ones, BL and UDIV), each a list of Asm items so that code is
+# built by concatenation. Field layouts follow the ARM ARM's encoding diagrams.
+Reg \= R0 | R1 | R2 | R3 | R4 | R5 | R6 | R7 | R8 | R9 | R10 | R11 | R12 | SP | LR | PC
+reg_idx = \r r 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+_r = reg_idx
+
+_t16 = \h [Asm.Bytes (Asm.u16 h)]
+_op = \hex \fields _t16 $ Nat.sum (△ (Nat.from_hex hex) fields)
+_at = Nat.shl
+
+word = \n [Asm.Bytes (Asm.u32 n)]
+label = \l [Asm.Label l]
+_span = Asm.span 0
+
+arm_nop = _op "BF00" []
+arm_movs = \rd \imm8 _op "2000" [_at 8 (_r rd); imm8]
+arm_cmp_imm = \rn \imm8 _op "2800" [_at 8 (_r rn); imm8]
+arm_adds = \rdn \imm8 _op "3000" [_at 8 (_r rdn); imm8]
+arm_subs = \rdn \imm8 _op "3800" [_at 8 (_r rdn); imm8]
+arm_subs3 = \rd \rn \imm3 _op "1E00" [_at 6 imm3; _at 3 (_r rn); _r rd]   # SUBS Rd, Rn, #imm3
+arm_lsls = \rd \rm \imm5 _op "0000" [_at 6 imm5; _at 3 (_r rm); _r rd]
+arm_lsrs = \rd \rm \imm5 _op "0800" [_at 6 imm5; _at 3 (_r rm); _r rd]
+arm_adds_reg = \rd \rn \rm _op "1800" [_at 6 (_r rm); _at 3 (_r rn); _r rd]
+arm_subs_reg = \rd \rn \rm _op "1A00" [_at 6 (_r rm); _at 3 (_r rn); _r rd]
+
+# Data processing on low registers: Rdn = Rdn op Rm.
+_dp = \hex \rdn \rm _op hex [_at 3 (_r rm); _r rdn]
+arm_ands = _dp "4000"
+arm_eors = _dp "4040"
+arm_tst = _dp "4200"
+arm_cmp = _dp "4280"
+arm_orrs = _dp "4300"
+arm_muls = _dp "4340"
+arm_bics = _dp "4380"
+arm_negs = _dp "4240"   # Rd = 0 - Rm
+arm_lsrs_reg = _dp "40C0"
+arm_uxtb = _dp "B2C0"
+arm_udiv = \rd \rn \rm List.concat (_op "FBB0" [_r rn]) (_op "F0F0" [_at 8 (_r rd); _r rm])   # 0 if Rm is
+
+# Any registers, high ones included; neither touches the flags.
+_hi = \hex \rd \rm _op hex [_at 7 (Nat.div (_r rd) 8); _at 3 (_r rm); Nat.mod (_r rd) 8]
+arm_adds_reg_short = _hi "4400"   # ADD Rdn, Rm
+arm_mov = _hi "4600"
+arm_cmp_hi = _hi "4500"
+arm_bx = \rm _op "4700" [_at 3 (_r rm)]
+
+# Loads and stores at Rn + offset: words at multiples of 4 up to 124, bytes up to 31.
+_mem = \hex \scale \rt \rn \offset _op hex [_at 6 (Nat.div offset scale); _at 3 (_r rn); _r rt]
+arm_str_offset = _mem "6000" 4
+arm_ldr_offset = _mem "6800" 4
+arm_strb_offset = _mem "7000" 1
+arm_ldrb_offset = _mem "7800" 1
+arm_str_sp = \rt \offset _op "9000" [_at 8 (_r rt); Nat.div offset 4]   # STR Rt, [SP, #offset]
+arm_ldr_sp = \rt \offset _op "9800" [_at 8 (_r rt); Nat.div offset 4]
+arm_sub_sp = \n _op "B080" [Nat.div n 4]
+arm_str = \rt \rn arm_str_offset rt rn 0
+arm_ldr_indirect = \rt \rn arm_ldr_offset rt rn 0
+arm_str_reg = \rt \rn \rm _op "5000" [_at 6 (_r rm); _at 3 (_r rn); _r rt]   # STR Rt, [Rn, Rm]
+arm_ldr_reg = \rt \rn \rm _op "5800" [_at 6 (_r rm); _at 3 (_r rn); _r rt]   # LDR Rt, [Rn, Rm]
+arm_ldrb_reg = \rt \rn \rm _op "5C00" [_at 6 (_r rm); _at 3 (_r rn); _r rt]  # LDRB Rt, [Rn, Rm]
+arm_strb_reg = \rt \rn \rm _op "5400" [_at 6 (_r rm); _at 3 (_r rn); _r rt]  # STRB Rt, [Rn, Rm]
+
+# Register lists: R0..R7, and bit 8 for LR (PUSH) or PC (POP).
+_reglist = List.foldl (\acc \r Nat.add acc (Bool.match (_at (_r r) 1) 256 (Nat.is_lte 8 (_r r)))) 0
+arm_push = \regs _op "B400" [_reglist regs]
+arm_pop = \regs _op "BC00" [_reglist regs]
+arm_stmia = \rn \regs _op "C000" [_at 8 (_r rn); _reglist regs]   # STM Rn!, regs
+arm_ldmia = \rn \regs _op "C800" [_at 8 (_r rn); _reglist regs]
+
+# Branches by a byte distance, for code that knows how far it jumps: _up lands
+# [offset] bytes before the branch, _down skips the [offset] bytes after it.
+arm_bcond = \cc \imm8 _op "D000" [_at 8 cc; imm8]
+_up8 = \offset Nat.div2 (Nat.sub (Nat.sub 512 4) offset)
+_down = \offset Nat.div2 (Nat.sub offset 2)
+arm_bne = arm_bcond 1
+arm_bne_up = compose arm_bne _up8
+arm_bne_down = compose arm_bne _down
+arm_bcs = arm_bcond 2
+arm_bcs_up = compose arm_bcs _up8
+arm_bcs_down = compose arm_bcs _down
+arm_bcc = arm_bcond 3
+arm_bcc_up = compose arm_bcc _up8
+arm_bcc_down = compose arm_bcc _down
+arm_bhi_down = compose (arm_bcond 8) _down
+arm_bls_down = compose (arm_bcond 9) _down
+arm_b = \offset _op "E000" [Nat.mod (Nat.div2 offset) 2048]
+arm_b_up = \offset arm_b (Nat.sub (Nat.sub 4096 4) offset)
+arm_b_down = \offset arm_b (Nat.sub offset 2)
+# CBZ only branches forward, by up to 126 bytes.
+_cbz = \rn \d Nat.sum [Nat.from_hex "B100"; _at 9 (Nat.shr 6 d); _at 3 (Nat.mod (Nat.div2 d) 32); _r rn]
+arm_cbz_down = \rn \offset _t16 (_cbz rn (Nat.sub offset 2))
+
+# Branches and loads by label. Thumb counts a distance from the instruction's
+# address + 4; a branch encodes it wrapped to its field's width. One that cannot
+# reach assembles to UDF instead, so the board faults at that address rather
+# than jumping somewhere else.
+_udf = \n List.concat_list (List.repeat (Nat.div n 2) (Asm.u16 (Nat.from_hex "DE00")))
+_ref = \n \ok \enc \l [Asm.Ref n (\a \t Bool.match (_udf n) (enc a t) (ok a t)) l]
+_fits = \bits \a \t
+  let (Nat.add a 4) $ \pc
+  let (Nat.pow2 (Nat.pred bits)) $ \half
+  Bool.match (Nat.is_lte (Nat.sub pc t) half) (Nat.is_lte (Nat.succ (Nat.sub t pc)) half) (Nat.is_lte pc t)
+_halfwords = \bits \a \t Nat.div2 (Nat.mod (Nat.sub (Nat.add t (Nat.pow2 32)) (Nat.add a 4)) (Nat.pow2 bits))
+_branch = \n \bits \enc _ref n (_fits bits) (\a \t enc (_halfwords bits a t))
+arm_b_to = _branch 2 12 $ \imm Asm.u16 (Nat.add (Nat.from_hex "E000") imm)
+arm_bcond_to = \cc _branch 2 9 $ \imm Asm.u16 (Nat.sum [Nat.from_hex "D000"; _at 8 cc; imm])
+arm_beq_to = arm_bcond_to 0
+arm_bne_to = arm_bcond_to 1
+arm_bcs_to = arm_bcond_to 2
+arm_bcc_to = arm_bcond_to 3
+arm_bls_to = arm_bcond_to 9
+arm_bl = _branch 4 25 $ \imm
+  let (Nat.shr 23 imm) $ \s
+  let (\bit Nat.mod (Nat.sum [1; s; Nat.mod (Nat.shr bit imm) 2]) 2) $ \j
+  List.concat
+    (Asm.u16 (Nat.sum [Nat.from_hex "F000"; _at 10 s; Nat.mod (Nat.shr 11 imm) 1024]))
+    (Asm.u16 (Nat.sum [Nat.from_hex "D000"; _at 13 (j 22); _at 11 (j 21); Nat.mod imm 2048]))
+_forward = \max \a \t Bool.and (Nat.is_lte (Nat.add a 4) t) (Nat.is_lte t (Nat.add a (Nat.add 4 max)))
+arm_cbz_to = \rn _ref 2 (_forward 126) (\a \t Asm.u16 (_cbz rn (Nat.sub t (Nat.add a 4))))
+# LDR Rt, [PC, #imm] and ADR Rd: the word at label l, and its address, at most
+# 1020 bytes ahead of the instruction's address + 4 rounded down to a word —
+# which the machine's code all is of its pool.
+_pool_base = \a let (Nat.add a 4) $ \pc Nat.sub pc (Nat.mod pc 4)
+_pc_rel = \hex \rd _ref 2
+  (\a \t let (_pool_base a) $ \base Bool.and (Nat.is_zero (Nat.mod t 4)) (Bool.and (Nat.is_lte base t) (Nat.is_lte (Nat.sub t base) 1020)))
+  (\a \t Asm.u16 (Nat.sum [Nat.from_hex hex; _at 8 (_r rd); Nat.div (Nat.sub t (_pool_base a)) 4]))
+arm_ldr_to = _pc_rel "4800"
+arm_adr = _pc_rel "A000"
+# A word holding the address of l, and one holding it as a Thumb code address.
+word_of = \l [Asm.Ref 4 (\_ \t Asm.u32 t) l]
+_code_word_of = \l [Asm.Ref 4 (\_ \t Asm.u32 (Nat.succ t)) l]
+
+_to_string = id
+List.concat_map Nat.byte_to_hex $ Asm.assemble 0 $ List.concat_list [arm_b_to "x"; label "x"; arm_bne_to "x"; arm_bl "x"]
+# = FFE7FED1FFF7FDFF
+List.concat_map Nat.byte_to_hex $ Asm.assemble 0 $ List.concat_list [arm_ldr_to R3 "w"; [Asm.Align 4]; label "w"; word 7]
+# = 004B000007000000
+List.concat_map Nat.byte_to_hex $ Asm.assemble 0 $ List.concat_list [arm_b_to "far"; [Asm.Space 4096]; label "far"]
+# = 00DE
+
+# ── Images ───────────────────────────────────────────────────────────────────
+firmware_base_address = Nat.from_hex "10000000"
+
+# UF2, what the board's USB drive takes: 256-byte payloads in 512-byte blocks.
+uf2_block = \blocks_total \block_index \target_address \payload_256 List.concat_list
+  [ Asm.u32 $ Nat.from_hex "0A324655" # First magic number
+  ; Asm.u32 $ Nat.from_hex "9E5D5157" # Second magic number
+  ; Asm.u32 $ Nat.from_hex "00002000" # Flags (here: family ID present)
+  ; Asm.u32 target_address
+  ; Asm.u32 256 # Payload size
+  ; Asm.u32 block_index
+  ; Asm.u32 blocks_total
+  ; Asm.u32 $ Nat.from_hex "E48BFF59" # family ID (here: rp2350_arm_ns)
+  ; payload_256
+  ; List.repeat 220 0 # Padding (ignored)
+  ; Asm.u32 $ Nat.from_hex "0AB16F30" # Final magic number
+  ]
+uf2 = \firmware
+  let (List.map (\c List.concat c (List.repeat (Nat.sub 256 (List.length c)) 0)) (List.chunk 256 firmware)) $ \payload_chunks
+  let (List.length payload_chunks) $ \blocks_total
+  let (List.mapi (\payload_chunk \block_index uf2_block blocks_total block_index (Nat.add firmware_base_address (Nat.mul 256 block_index)) payload_chunk) payload_chunks) $ \blocks
+  List.concat_list blocks
+
+# The Cortex-M vector table as far as the boot ROM reads it — the initial SP and
+# the reset handler — and, within the first 4 KB where the boot ROM looks for
+# one, the smallest IMAGE_DEF block it accepts: start marker, an image type item
+# (an ARM executable), the last-item marker, a link back to itself, end marker.
+# Its words are where NMI's and HardFault's vectors would be: neither has
+# anything to do but stop, and a fault into a vector that is no Thumb address
+# stops the core in lockup.
+_boot = \sp \reset List.concat_list
+  [ word sp
+  ; _code_word_of reset
+  ; List.concat_map (compose word Nat.from_hex) ["FFFFDED3"; "10210142"; "000001FF"; "00000000"; "AB123579"]
+  ]
+
+# ── Structured code ──────────────────────────────────────────────────────────
+# Control flow that knows its own extent, so it needs no labels. A body must not
+# contain Align: its size would depend on where it lands.
+set_single_bit = \rdest \bit List.concat_list
+  [ arm_movs rdest 1
+  ; arm_lsls rdest rdest bit
+  ]
+
+set_create = \initial initial
+set_take = \item \set
+  let (List.partition (equal item) set) $ Pair.match $ \result \set
+  List.match △ (\result \_ △ result set) result
+set_take_any = \set set
+
+reg_allocator = set_create [R7; R6; R5; R4; R3; R2; R1; R0]
+reg_alloc = \reg_allocator \f
+  let (set_take_any reg_allocator) $
+  triage (△ △) _ f
+reg_alloc = fix $ \self \reg_allocator \f
+  reg_alloc
+    reg_allocator
+    (\reg \reg_allocator f reg $ self reg_allocator)
+reg_alloc = reg_alloc reg_allocator
+
+arm_loop = \init \body \step \branch_instr List.concat_list
+  [ init
+  ; body
+  ; step
+  ; branch_instr $ Nat.add (_span body) (_span step)
+  ]
+arm_for_pow2_decr = \reg_alloc \init_exp \body
+  reg_alloc $ \reg_ctr \reg_alloc
+  arm_loop
+    (set_single_bit reg_ctr init_exp)
+    (body reg_ctr reg_alloc)
+    (arm_subs reg_ctr 1)
+    arm_bne_up
+arm_sleep_pow2 = \reg_alloc \sleep_exp arm_for_pow2_decr reg_alloc sleep_exp (\reg_ctr \reg_alloc [])
+arm_for_decr = \reg_alloc \init \body
+  reg_alloc $ \reg_ctr \reg_alloc
+  arm_loop
+    (arm_movs reg_ctr init)
+    (body reg_ctr reg_alloc)
+    (arm_subs reg_ctr 1)
+    arm_bne_up
+arm_sleep = \reg_alloc \sleep_steps arm_for_decr reg_alloc sleep_steps (\reg_ctr \reg_alloc [])
+arm_forever = \body arm_loop [] body [] arm_b_up
+
+arm_if_carry_set = \body
+  List.concat_list
+    [ arm_bcc_down $ _span body
+    ; body
+    ]
+
+arm_if_then_carry_set = \body_then \body_else
+  List.concat_list
+    [ arm_bcc_down $ Nat.add 2 $ _span body_then
+    ; body_then
+    ; arm_b_down $ _span body_else
+    ; body_else
+    ]
+
+arm_if_nonzero = \rn \body List.concat (arm_cbz_down rn (_span body)) body
+
+# ── Demo: a scrolling gradient ───────────────────────────────────────────────
+# A 25×25 WS2801 matrix, clock on GPIO18 and data on GPIO19, wired as a
+# serpentine; the onboard LED (GPIO25) toggles once per frame.
+demo_program = stage List.concat_list
+  [ reg_alloc $ \r_const_pool \reg_alloc
+    let (\rdest \index arm_ldr_offset rdest r_const_pool (Nat.mul 4 index)) $ \arm_load_const
+    List.concat_list
+    [ arm_mov r_const_pool PC # PC is this instruction +4 at time of execution, so this points at the constants below
+    ; arm_b_down $ Nat.mul 4 7 # skip constants
+    ; word $ Nat.from_hex "40028094" # GPIO18 control register address (0x40028000 + 18*8 + 4)
+    ; word $ Nat.from_hex "4003804C" # GPIO18 pad register address (0x40038000 + 18*4 + 4)
+    ; word $ Nat.from_hex "4002809C" # GPIO19 control register address (0x40028000 + 19*8 + 4)
+    ; word $ Nat.from_hex "40038050" # GPIO19 pad register address (0x40038000 + 19*4 + 4)
+    ; word $ Nat.from_hex "400280CC" # GPIO25 control register address (0x40028000 + 25*8 + 4)
+    ; word $ Nat.from_hex "40038068" # GPIO25 pad register address (0x40038000 + 25*4 + 4)
+    ; word $ Nat.from_bin "10000011000000000000000000" # bitmask with 18, 19, 25 set (for GPIO_FUNC_SIO)
+    ; # Write 5 (GPIO_FUNC_SIO) to GPIO18,19,25 control register
+      reg_alloc $ \r_temp1 \reg_alloc
+      reg_alloc $ \r_temp2 \reg_alloc
+      List.concat_list
+      [ arm_movs r_temp1 5
+      ; arm_load_const r_temp2 0
+      ; arm_str r_temp1 r_temp2
+      ; arm_load_const r_temp2 2
+      ; arm_str r_temp1 r_temp2
+      ; arm_load_const r_temp2 4
+      ; arm_str r_temp1 r_temp2
+      ]
+    ; # Configure as outputs: clear OD and ISO bits (bits 8:7) -- set IE (bit 6) via [arm_orrs] for inputs!
+      reg_alloc $ \r_mask \reg_alloc
+      reg_alloc $ \r_addr \reg_alloc
+      reg_alloc $ \r_temp \reg_alloc
+      List.concat_list
+      [ arm_movs r_mask (Nat.from_bin "11000000")
+      ; arm_lsls r_mask r_mask 1
+      # - Load GPIO18 pad register address, load register, modify bits, write back
+      ; arm_load_const r_addr 1
+      ; arm_ldr_indirect r_temp r_addr
+      ; arm_bics r_temp r_mask
+      ; arm_str r_temp r_addr
+      # - Load GPIO19 pad register address, load register, modify bits, write back
+      ; arm_load_const r_addr 3
+      ; arm_ldr_indirect r_temp r_addr
+      ; arm_bics r_temp r_mask
+      ; arm_str r_temp r_addr
+      # - Load GPIO25 pad register address, load register, modify bits, write back
+      ; arm_load_const r_addr 5
+      ; arm_ldr_indirect r_temp r_addr
+      ; arm_bics r_temp r_mask
+      ; arm_str r_temp r_addr
+      ]
+    ; # SIO: configure GPIO18,19,25 as output (load SIO base address, load bitmask, write to GPIO_OE_SET)
+      reg_alloc $ \r_siobase \reg_alloc
+      reg_alloc $ \r_bitmask \reg_alloc
+      List.concat_list
+      [ arm_movs r_siobase $ Nat.from_hex "D0"
+      ; arm_lsls r_siobase r_siobase 24 # SIO base address = D0 00 00 00
+      ; arm_load_const r_bitmask 6
+      ; arm_str_offset r_bitmask r_siobase 56
+      ]
+    ]
+  ; # configure RAM
+    reg_alloc $ \r_ramaddr \reg_alloc
+    List.concat_list
+    [ set_single_bit r_ramaddr 29 # RAM base addr
+    ; arm_for_decr reg_alloc 25 $ \r_y \reg_alloc
+      arm_for_decr reg_alloc 25 $ \r_x \reg_alloc
+      reg_alloc $ \r_rgb \reg_alloc
+      reg_alloc $ \r_temp \reg_alloc
+      List.concat_list
+      [ arm_mov r_rgb r_y # R = y/4
+      ; arm_lsrs r_rgb r_rgb 2
+      ; arm_lsls r_rgb r_rgb 8
+      ; arm_mov r_temp r_x # G = x/4
+      ; arm_lsrs r_temp r_temp 2
+      ; arm_orrs r_rgb r_temp
+      ; arm_lsls r_rgb r_rgb 8
+      ; arm_movs r_temp $ Nat.from_hex "01" # B
+      ; arm_orrs r_rgb r_temp
+      ; arm_str r_rgb r_ramaddr
+      ; arm_adds r_ramaddr 4 # next word
+      ]
+    ; arm_for_decr reg_alloc 25 $ \r_y \reg_alloc
+      arm_for_decr reg_alloc 25 $ \r_x \reg_alloc
+      reg_alloc $ \r_rgb \reg_alloc
+      reg_alloc $ \r_temp \reg_alloc
+      List.concat_list
+      [ arm_mov r_rgb r_x # R = x/4
+      ; arm_lsrs r_rgb r_rgb 2
+      ; arm_lsls r_rgb r_rgb 8
+      ; arm_mov r_temp r_y # G = y/4
+      ; arm_lsrs r_temp r_temp 2
+      ; arm_orrs r_rgb r_temp
+      ; arm_lsls r_rgb r_rgb 8
+      ; arm_movs r_temp $ Nat.from_hex "04" # B
+      ; arm_orrs r_rgb r_temp
+      ; arm_str r_rgb r_ramaddr
+      ; arm_adds r_ramaddr 4 # next word
+      ]
+    ]
+  ; let (\func \reg_alloc \pin
+      reg_alloc $ \r_siobase \reg_alloc
+      reg_alloc $ \r_bitmask \reg_alloc
+      List.concat_list
+      [ arm_movs r_siobase $ Nat.from_hex "D0"
+      ; arm_lsls r_siobase r_siobase 24 # SIO base address = D0 00 00 00
+      ; set_single_bit r_bitmask pin
+      ; arm_str_offset r_bitmask r_siobase func
+      ]
+    ) $ \arm_gpio_out_func
+    let (arm_gpio_out_func 24) $ \arm_gpio_out_set
+    let (arm_gpio_out_func 32) $ \arm_gpio_out_clr
+    let (arm_gpio_out_func 40) $ \arm_gpio_out_xor
+    # WS2801 LED strip wisdom:
+    # - Pause clock for >0.5ms to render sent data
+    # - Drive at ~1MHz (strip may support higher speeds, but unsure)
+    reg_alloc $ \r_counter \reg_alloc
+    List.concat_list
+    [ arm_movs r_counter 0
+    ; arm_gpio_out_set reg_alloc 25 # turn on onboard LED (=> indicates setup above completed)
+    ; # give caps time to charge, LED strips should be reliably powered before we send data!
+      arm_sleep_pow2 reg_alloc 23
+    ; arm_forever $ List.concat_list
+      [ arm_gpio_out_xor reg_alloc 25 # toggle onboard LED
+      ; arm_for_decr reg_alloc 25 $ \r_y \reg_alloc
+        arm_for_decr reg_alloc 25 $ \r_x \reg_alloc
+        # set one LED with value at RAM address = RAM base + 4*(25*(y + counter) + x)
+        reg_alloc $ \r_rgb_ramaddr \reg_alloc
+        List.concat_list
+        [ set_single_bit r_rgb_ramaddr 29 # RAM base addr
+        ; reg_alloc $ \r_25 \reg_alloc
+          reg_alloc $ \r_temp \reg_alloc
+          List.concat_list
+          [ arm_movs r_25 25
+          ; arm_subs_reg r_temp r_25 r_y
+          ; arm_adds_reg_short r_temp r_counter
+          ; arm_muls r_temp r_25
+          ; arm_lsls r_temp r_temp 2
+          ; arm_adds_reg_short r_rgb_ramaddr r_temp # +4*(25*(y + counter))
+          ; arm_lsrs r_temp r_y 1
+          ; arm_if_then_carry_set # account for LED strip zig-zag wiring
+              (arm_subs_reg r_temp r_25 r_x)
+              (List.concat (arm_mov r_temp r_x) (arm_subs r_temp 1))
+          ; arm_lsls r_temp r_temp 2
+          ; arm_adds_reg_short r_rgb_ramaddr r_temp # +4*x
+          ]
+        ; let r_rgb_ramaddr $ \r_rgb # NOTE: reusing r_rgb_ramaddr as r_rgb!
+          List.concat_list
+          [ arm_ldr_offset r_rgb r_rgb_ramaddr 0 # <= reusing same register
+          ; arm_lsls r_rgb r_rgb 8
+          ; arm_for_decr reg_alloc 24 $ \r_bitctr \reg_alloc
+            List.concat_list
+            [ arm_gpio_out_clr reg_alloc 19 # data low
+            ; arm_lsls r_rgb r_rgb 1
+            ; arm_if_carry_set $
+              arm_gpio_out_set reg_alloc 19 # data high (if carry set)
+            ; # one clock cycle: __|^^|
+              List.concat_list
+              [ arm_sleep reg_alloc 10
+              ; arm_gpio_out_set reg_alloc 18 # clock pin
+              ; arm_sleep reg_alloc 10
+              ; arm_gpio_out_clr reg_alloc 18 # clock pin
+              ]
+            ]
+          ]
+        ]
+      ; arm_sleep_pow2 reg_alloc 20 # let strip latch data
+      ; arm_adds r_counter 1 # r_counter = (r_counter + 1) % 16
+      ; reg_alloc $ \r_mask \reg_alloc
+        List.concat_list
+        [ arm_movs r_mask 15
+        ; arm_ands r_counter r_mask
+        ]
+      ]
+    ]
+  ]
+demo = \_ Asm.assemble firmware_base_address $ List.concat_list
+  [ _boot (Nat.from_hex "20082000") "start"
+  ; label "start"
+  ; demo_program _
+  ]
+
+file "demo.uf2" "application/octet-stream" $ uf2 $ demo _
+# = demo.uf2 sha256:5e01228c27be595f3654a23d8d5d2e94557b928d5f1caba10965c5442f780879
+
+# ── A tree calculus machine ──────────────────────────────────────────────────
+# Between two frames, every LED of the demo's matrix gets the colour
+# [program t y x] — t the frame number, y the row and x the column, both 0..24
+# from the top left — whose answer is a list of red, green and blue as nats, of
+# which the low 8 bits count. While the bits go out to the strip
+# nothing is evaluated, so the strip never sees a pause it would latch on.
+_side = 25
+_clock = 18
+_data = 19
+_led = 25
+
+# SRAM: the stack takes the bottom 64 KB, so overflowing it leaves SRAM — a
+# fault, rather than a heap quietly overwritten. Then the machine itself with
+# its shows, which a loader in flash copies there: raising clk_sys to 150 MHz
+# raises the flash clock too, by whatever divider the boot ROM left, and code
+# that no longer reads flash does not depend on it. Then the heap, and at the
+# top the pictures shown and to be shown, one word per LED in chain order.
+_sram = Nat.from_hex "20000000"
+_stack_top = Nat.add _sram 65536
+_machine_base = _stack_top
+
+_sio = \rd List.concat (arm_movs rd 208) (arm_lsls rd rd 24)   # 0xD0000000
+
+# Register helpers on a peripheral at rn + offset, through r1 and r2.
+_clear = \rn \offset \mask List.concat_list
+  [arm_ldr_offset R1 rn offset; arm_movs R2 mask; arm_bics R1 R2; arm_str_offset R1 rn offset]
+_until_any = \rn \offset \mask List.concat_list
+  [arm_movs R2 mask; arm_ldr_offset R1 rn offset; arm_tst R1 R2; arm_bcond 0 (_up8 4)]
+_until_bit31 = \rn \offset List.concat_list
+  [arm_ldr_offset R1 rn offset; arm_lsls R1 R1 1; arm_bcc_up 4]
+
+# Take the blocks in r2's mask out of reset, after [before] has had RESETS in r1,
+# and wait until they are done.
+_unreset = \before List.concat_list
+  [ arm_ldr_to R0 "=resets"; arm_ldr_offset R1 R0 0; before
+  ; arm_bics R1 R2; arm_str_offset R1 R0 0
+  ; arm_ldr_offset R1 R0 8; arm_ands R1 R2; arm_cmp R1 R2; arm_bne_up 6   # RESET_DONE
+  ]
+
+# The pins as SIO outputs: FUNCSEL 5, pads at their reset value but no longer
+# isolated (ISO) — 4 mA, pull-down, Schmitt — and output enabled. The control
+# registers are addressed from the clock pin's, the lowest.
+_pins = [_clock; _data; _led]
+_gpio_out = List.concat_list
+  [ arm_ldr_to R0 "=gpio_ctrl"; arm_movs R1 5
+  ; List.concat_map (\p arm_str_offset R1 R0 (Nat.mul 8 (Nat.sub p _clock))) _pins
+  ; arm_ldr_to R0 "=pads_bank0"; arm_movs R1 22
+  ; List.concat_map (\p arm_str_offset R1 R0 (Nat.add 4 (Nat.mul 4 p))) _pins
+  ; _sio R0
+  ; arm_movs R1 (Nat.sum (List.map (\p Nat.pow2 (Nat.sub p _clock)) _pins)); arm_lsls R1 R1 _clock
+  ; arm_str_offset R1 R0 56                 # GPIO_OE_SET
+  ]
+
+# clk_sys at 150 MHz: the 12 MHz crystal through PLL_SYS, 12 MHz × 125 = 1500 MHz
+# for the VCO, divided by 5 and by 2. The steps are the SDK's: crystal on,
+# clk_sys and clk_ref off their aux muxes while the PLL changes, PLL from reset,
+# then clk_ref from the crystal and clk_sys from the PLL. The offsets are those
+# of CLOCKS (CLK_REF_CTRL 0x30, _DIV 0x34, _SELECTED 0x38, CLK_SYS_CTRL 0x3c,
+# _DIV 0x40, _SELECTED 0x44, CLK_SYS_RESUS_CTRL 0x84), XOSC (CTRL, STATUS 0x4,
+# STARTUP 0xc) and PLL (CS, PWR 0x4, FBDIV_INT 0x8, PRIM 0xc).
+# clk_sys from clk_ref, clk_ref from the ring oscillator, as at power-up: CLOCKS in r4.
+_slow_clocks = List.concat_list
+  [ _clear R4 60 1; _until_any R4 68 1
+  ; _clear R4 48 3; _until_any R4 56 1
+  ]
+_clocks = List.concat_list
+  [ arm_ldr_to R4 "=clocks0"                # no resus, which would switch clk_sys over on its own
+  ; arm_movs R1 0; arm_movs R2 132; arm_str_reg R1 R4 R2
+  ; arm_ldr_to R0 "=xosc"
+  ; arm_movs R1 141; arm_lsls R1 R1 1; arm_str_offset R1 R0 12    # STARTUP 282: the SDK's 6 ms
+  ; arm_ldr_to R1 "=xosc_ctrl"; arm_str_offset R1 R0 0            # enabled, FREQ_RANGE 1-15 MHz
+  ; _until_bit31 R0 4                       # STATUS.STABLE
+  ; _slow_clocks
+  ; set_single_bit R2 14; _unreset (List.concat (arm_orrs R1 R2) (arm_str_offset R1 R0 0))   # PLL_SYS, reset first
+  ; arm_ldr_to R0 "=pll_sys"
+  ; arm_movs R1 125; arm_str_offset R1 R0 8 # FBDIV 125, REFDIV being 1 out of reset
+  ; arm_movs R1 12; arm_str_offset R1 R0 4  # power up, PWR 0x2d less PD and VCOPD
+  ; _until_bit31 R0 0                       # CS.LOCK
+  ; arm_movs R1 82; arm_lsls R1 R1 12; arm_str_offset R1 R0 12    # POSTDIV1 5, POSTDIV2 2
+  ; arm_movs R1 4; arm_str_offset R1 R0 4   # and POSTDIVPD
+  ; set_single_bit R1 16; arm_str_offset R1 R4 52; arm_str_offset R1 R4 64   # clk_ref and clk_sys divided by 1
+  ; arm_movs R1 2; arm_str_offset R1 R4 48; _until_any R4 56 4  # clk_ref from the crystal, its aux mux unused
+  ; arm_movs R1 0; arm_str_offset R1 R4 60  # clk_sys's aux mux to PLL_SYS while unused,
+  ; arm_movs R1 1; arm_str_offset R1 R4 60; _until_any R4 68 2  # then clk_sys from it
+  ]
+
+# apply(r0 = a, r1 = b) -> r0, all values. r7 is the allocation pointer, r11
+# where the heap ends less the reserve; r0-r3 and r12 are clobbered,
+# r4-r6 kept. The calls in tail position are branches.
+_apply = List.concat_list
+  [ label "apply"
+  ; arm_ldmia R0 [R2; R3]           # u, v
+  ; arm_cbz_to R2 "apply_leaf"
+  ; arm_cbz_to R3 "apply_stem"
+  ; arm_ldmia R2 [R0; R2]           # a = fork(u, y), y in r3: u's children
+  ; arm_cbz_to R0 "rule_k"
+  ; arm_cbz_to R2 "rule_s"
+  ; arm_mov R12 R2                  # u = fork(w, x): triage on b, w in r0, x in r12
+  ; arm_ldmia R1 [R1; R2]           # b's children p, q
+  ; arm_cbz_to R1 "apply_return"    # b = leaf: w
+  ; arm_cbz_to R2 "triage_stem"
+  ; arm_push [LR]                   # b = fork(p, q): y p q
+  ; arm_mov R0 R3
+  ; arm_b_to "apply_then"
+  ; label "rule_s"                  # u = stem(x): (x b) (y b)
+  ; arm_push [R0; R1; LR]
+  ; arm_mov R0 R3
+  ; arm_bl "apply"                  # y b
+  ; arm_mov R2 R0
+  ; arm_pop [R0; R1]                # x, b
+  ; label "apply_then"              # (r0 r1) r2, returning where the pushed lr says
+  ; arm_push [R2]
+  ; arm_bl "apply"
+  ; arm_pop [R1; R2]
+  ; arm_mov LR R2
+  ; arm_b_to "apply"
+  ; label "triage_stem"             # b = stem(p): x p
+  ; arm_mov R0 R12
+  ; arm_b_to "apply"
+  ; label "rule_k"                  # u = leaf: y
+  ; arm_mov R0 R3
+  ; label "apply_return"
+  ; arm_bx LR
+  ; label "apply_stem"              # stem(u) becomes fork(u, b): [u][b]
+  ; arm_mov R3 R1
+  ; arm_mov R1 R2
+  ; label "apply_leaf"              # a leaf becomes stem(b): [b][0], its v being 0
+  ; arm_cmp_hi R7 R11               # the new cell [r1][r3], collecting first if the space is full
+  ; arm_bcs_to "gc"
+  ; label "apply_room"
+  ; arm_mov R0 R7
+  ; arm_stmia R7 [R1; R3]
+  ; arm_bx LR
+  ]
+
+# A collector that slides what is live down to the heap's base, in place.
+# Branched to by apply when the heap is full, and back to where apply makes its
+# cell. Roots are r1 and r3 (that cell) and every word on the stack, up to r8
+# its top, that points into the heap: the stack holds nothing but trees, return
+# addresses and small numbers, so a word that points there is a tree.
+# No cell changes once made, and cells are made at the heap's top, out of
+# cells made before them: every cell points only further down. Sliding keeps
+# the order, so it stays that way, and it is what lets the collector work
+# without room of its own, in two sweeps (Jonkers's threading). Cells are at
+# multiples of 8 and words at multiples of 4, so no value has bit 0 set, and a
+# word with it set is a link to the word at that address less 1.
+#  - Down from the top: a cell is live once something live points at it. Each
+#    word that points at a cell is threaded onto it: the cell's u becomes a
+#    link to that word, and the word takes what u held, so that following the
+#    links from u ends at a word holding u's value. Of the live cell's own
+#    fields, that last word stands in for u when threading them on. A dead
+#    cell is given the address of the next live one above it. A map, a byte
+#    for each 512 bytes of the heap, in the room above its top, says which hold a
+#    cell something was threaded onto: one that holds none is passed over
+#    whole, its bottom cell alone being given that address.
+#  - Up from the base: each live cell's place is the next one free. Every word
+#    threaded onto it gets that place, the last of them giving back u's value,
+#    and it moves there; what it points at lies lower and has moved already, so
+#    its fields already say where those cells went. A dead cell is jumped over,
+#    along with every dead one above it.
+# A cell pointing at one not lower than itself breaks what this stands on: UDF.
+# Both marks move to where the slide ends: going back there keeps everything
+# that was live. A heap still full afterwards is out of memory: UDF.
+# Most cells die young, and one that has lived through a collection mostly
+# lives on (in a large program's setup, about 1% of either): so a collection slides
+# only the cells made since the last one ended, taking every cell below as
+# live — nothing there points at a newer one — unless fewer than 64 KB were
+# made since, or the last one's end lies above the top (the frame's trees let
+# go). A heap that leaves still full gets a whole collection.
+_card = 9                           # 2^9 bytes a map byte: 1 KB of map for the 512 KB the heap is at most
+_gc_reserve = 1280                  # the 256 bytes nat may take beyond the limit unchecked, then the map's
+# The word at r1 points at the cell at r0: threaded onto it, and marked on the
+# map at r5 (with r1, now a link, so odd). r1, r2 clobbered.
+_thread = List.concat_list
+  [ arm_ldr_offset R2 R0 0; arm_str_offset R2 R1 0
+  ; arm_adds R1 1; arm_str_offset R1 R0 0
+  ; arm_subs_reg R2 R0 R4; arm_lsrs R2 R2 _card; arm_strb_reg R1 R5 R2
+  ]
+# The same for what the cell at r6 points at, unless that is below the heap.
+_thread_down = \skip List.concat_list
+  [ arm_cmp R0 R4; arm_bcc_to skip
+  ; arm_cmp R0 R6; arm_bcc_down 2
+  ; [Asm.Bytes (_udf 2)]            # not lower than the cell pointing at it
+  ; _thread
+  ]
+_gc = List.concat_list
+  [ label "gc"
+  ; arm_mov R12 LR; arm_bl "button"; arm_mov LR R12   # often enough to switch on, even mid-frame
+  ; arm_push [R1; R3; R4; R5; R6]
+  ; arm_adr R3 "state"; arm_ldr_offset R4 R3 0        # the heap, from its base
+  ; arm_ldr_offset R0 R3 28; arm_cmp R4 R0; arm_bcs_to "gc_whole"   # or from where the last one ended
+  ; arm_subs_reg R1 R7 R0; arm_bls_to "gc_whole"
+  ; arm_lsrs R1 R1 16; arm_beq_to "gc_whole"
+  ; arm_mov R4 R0
+  ; label "gc_whole"
+  ; arm_mov R5 R7                                       # to its top
+  ; set_single_bit R1 (Nat.sub 19 _card); arm_movs R0 0   # the map, cleared
+  ; label "gc_clear"; arm_subs R1 4; arm_str_reg R0 R5 R1; arm_bne_to "gc_clear"
+  ; arm_mov R6 SP
+  ; label "gc_root"                 # the stack's words that point into the heap
+  ; arm_cmp_hi R6 R8; arm_beq_to "gc_rooted"
+  ; arm_ldr_offset R0 R6 0; arm_mov R1 R6; arm_adds R6 4
+  ; arm_cmp R0 R4; arm_bcc_to "gc_root"
+  ; arm_cmp R0 R5; arm_bcs_to "gc_root"
+  ; _thread
+  ; arm_b_to "gc_root"
+  ; label "gc_rooted"
+  ; arm_mov R6 R5; arm_mov R3 R5    # r3: the lowest live cell so far
+  ; label "gc_card"                 # the 512 bytes below r6, swept unless the map has nothing there
+  ; arm_cmp R6 R4; arm_beq_to "gc_slide"
+  ; arm_subs_reg R0 R6 R4; arm_subs R0 8; arm_lsrs R0 R0 _card
+  ; arm_ldrb_reg R1 R5 R0
+  ; arm_lsls R0 R0 _card; arm_adds_reg R0 R4 R0; arm_mov R12 R0   # r12: where they start
+  ; arm_cmp_imm R1 0; arm_bne_to "gc_down"
+  ; arm_mov R6 R0
+  ; label "gc_dead"
+  ; arm_str_offset R3 R6 0
+  ; label "gc_down"                 # each cell from the top down
+  ; arm_cmp_hi R6 R12; arm_beq_to "gc_card"
+  ; arm_subs R6 8
+  ; arm_ldr_offset R0 R6 0
+  ; arm_lsrs R1 R0 1; arm_bcc_to "gc_dead"             # no link: dead
+  ; arm_mov R3 R6
+  ; label "gc_last"                 # the last word threaded onto it, holding u's value
+  ; arm_subs3 R1 R0 1; arm_ldr_offset R0 R1 0
+  ; arm_lsrs R2 R0 1; arm_bcs_to "gc_last"
+  ; _thread_down "gc_v"
+  ; label "gc_v"
+  ; arm_ldr_offset R0 R6 4; arm_mov R1 R6; arm_adds R1 4
+  ; _thread_down "gc_down"
+  ; arm_b_to "gc_down"
+  ; label "gc_slide"
+  ; arm_mov R7 R4                   # each live cell from the base up, to the next place free
+  ; label "gc_up"
+  ; arm_cmp R6 R5; arm_beq_to "gc_done"
+  ; arm_ldr_offset R0 R6 0
+  ; arm_lsrs R1 R0 1; arm_bcs_to "gc_unthread"
+  ; arm_mov R6 R0; arm_b_to "gc_up"
+  ; label "gc_unthread"             # every word threaded onto it gets its place, the last one's value is u
+  ; arm_subs3 R0 R0 1; arm_ldr_offset R1 R0 0; arm_str_offset R7 R0 0
+  ; arm_lsrs R2 R1 1; arm_bcc_to "gc_unthreaded"
+  ; arm_mov R0 R1; arm_b_to "gc_unthread"
+  ; label "gc_unthreaded"
+  ; arm_ldr_offset R2 R6 4
+  ; arm_stmia R7 [R1; R2]
+  ; arm_adds R6 8; arm_b_to "gc_up"
+  ; label "gc_done"
+  ; arm_adr R3 "state"; arm_str_offset R7 R3 8; arm_str_offset R7 R3 12   # the marks
+  ; arm_str_offset R7 R3 28
+  ; arm_ldr_to R0 "=heap_end"
+  ; arm_movs R1 (Nat.div _gc_reserve 256); arm_lsls R1 R1 8; arm_subs_reg R0 R0 R1
+  ; arm_mov R11 R0                  # the limit
+  ; arm_cmp_hi R7 R11; arm_bcc_to "gc_room"
+  ; arm_ldr_offset R0 R3 0; arm_cmp R4 R0
+  ; arm_bne_down 2
+  ; [Asm.Bytes (_udf 2)]            # out of memory
+  ; arm_movs R0 0; arm_str_offset R0 R3 28
+  ; arm_pop [R1; R3; R4; R5; R6]
+  ; arm_b_to "gc"
+  ; label "gc_room"
+  ; arm_pop [R1; R3; R4; R5; R6]
+  ; arm_b_to "apply_room"
+  ]
+
+# apply_nat(r0, r1): apply(r0, nat(r1)), nat(n) being a list of n's bits,
+# least significant first, built as cells on the heap without a collection
+# (the reserve): from the top bit down, so that each cell's tail is one made
+# before it. r2, r3 and r12 are clobbered on the way.
+_apply_nat = List.concat_list
+  [ label "apply_nat"
+  ; arm_mov R12 R0
+  ; arm_adr R3 "leaf"               # zero is the empty list,
+  ; arm_cbz_to R1 "nat_done"
+  ; arm_movs R0 1; arm_lsls R0 R0 31
+  ; label "nat_top"                 # anything else from its top bit
+  ; arm_tst R1 R0; arm_bne_to "nat_bit"
+  ; arm_lsrs R0 R0 1; arm_b_to "nat_top"
+  ; label "nat_bit"                 # down: [bit][the list of the bits above]
+  ; arm_adr R2 "leaf"               # false
+  ; arm_tst R1 R0; arm_beq_to "nat_false"
+  ; arm_adds R2 8                   # true, the cell after the leaf
+  ; label "nat_false"
+  ; arm_stmia R7 [R2; R3]
+  ; arm_mov R3 R7; arm_subs R3 8
+  ; arm_lsrs R0 R0 1; arm_bne_to "nat_bit"
+  ; label "nat_done"
+  ; arm_mov R1 R3
+  ; arm_mov R0 R12
+  ; arm_b_to "apply"
+  ]
+
+# The strip's drivers light an LED in proportion to its value, the eye does
+# not: a channel at 154 shows as about 60% where a screen would show 30%, so
+# minor channels come out far too strong and colours drift toward white. Each
+# channel goes out through [_gamma], 255·(v/255)^2.5, the curve commonly used
+# for these strips: ⌊√(v^5·2^16/255^3)⌉ / 256, rounded.
+_gamma = List.map (\v
+    let (Nat.div (Nat.mul (Nat.pow v 5) 65536) 16581375) $ \n
+    let (List.foldl (\r \b let (Nat.add r b) $ \c Bool.match r c (Nat.is_lte (Nat.mul c c) n)) 0
+      (List.map Nat.pow2 (List.reverse (List.range 16)))) $ \r
+    Nat.div (Nat.add r 128) 256)
+  (List.range 256)
+_corrected = List.map (\c List.nth_or 0 c _gamma)
+List.join " " $ List.map (compose (List.join ",") (List.map Nat.to_string)) $ List.map _corrected [[255; 154; 60]; [10; 95; 25]; [64; 32; 0]; [255; 255; 255]; [0; 0; 0]]
+# = 255,72,7 0,22,1 8,1,0 255,255,255 0,0,0
+
+# color(r0) -> r0: 0xRRGGBB from a list of up to three nats, a missing one 0,
+# each read to its eighth bit at most. Clobbers r1-r3.
+_color = List.concat_list
+  [ label "color"
+  ; arm_push [R4; R5; LR]
+  ; arm_movs R1 0
+  ; arm_movs R4 3
+  ; label "color_channel"
+  ; arm_lsls R1 R1 8
+  ; arm_ldr_offset R2 R0 0          # the nat, 0 once the list has ended
+  ; arm_cbz_to R2 "color_next"
+  ; arm_ldr_offset R0 R0 4
+  ; arm_movs R3 1                   # weight of the bit being read
+  ; label "color_bit"
+  ; arm_ldr_offset R5 R2 0          # the bit, 0 once the nat has ended
+  ; arm_cbz_to R5 "color_next"
+  ; arm_ldr_offset R5 R5 0          # false is a leaf, true a stem
+  ; arm_if_nonzero R5 (arm_orrs R1 R3)
+  ; arm_ldr_offset R2 R2 4
+  ; arm_lsls R3 R3 1
+  ; arm_lsrs R5 R3 8
+  ; arm_beq_to "color_bit"
+  ; label "color_next"
+  ; arm_subs R4 1
+  ; arm_bne_to "color_channel"
+  ; arm_mov R0 R1
+  ; arm_pop [R4; R5; PC]
+  ]
+
+# gamma(r0) -> r0: 0xRRGGBB, each channel through _gamma; r1-r3 clobbered.
+_gamma_word = List.concat_list
+  [ label "gamma"
+  ; arm_adr R3 "gamma_table"; arm_movs R1 0
+  ; List.concat_map (\k List.concat_list
+      [arm_lsls R2 R0 (Nat.sub 24 k); arm_lsrs R2 R2 24; arm_ldrb_reg R2 R3 R2; arm_lsls R2 R2 k; arm_orrs R1 R2]) [16; 8; 0]
+  ; arm_mov R0 R1
+  ; arm_bx LR
+  ]
+
+# Every pixel into the target frame, in the chain's order. The stage is
+# applied a coordinate at a time, [stage t] once a frame, that to y once a row,
+# that to x once a pixel, so what one works out is not worked out again; and
+# after each pixel, and each row, the heap goes back to where the application
+# before it left it, or to where a collection since has ended its slide.
+# The chain starts at the bottom right and its rows run alternately left and
+# right: r4 is y, counting down, r5 the place along the row, x running either
+# way, r6 t. The stack holds [stage t], then [stage t y], where the collector
+# sees them, then where the next pixel goes, then the stage.
+_mark = \offset List.concat (arm_adr R0 "state") (arm_str_offset R7 R0 offset)
+_back_to = \offset List.concat_list
+  [arm_adr R0 "state"; arm_ldr_offset R7 R0 offset]
+_render = List.concat_list
+  [ arm_adr R0 "state"; arm_ldr_offset R7 R0 0   # last frame's trees are all garbage
+  ; arm_movs R0 0; arm_str_sp R0 0; arm_str_sp R0 4            # no stale roots
+  ; arm_ldr_sp R0 12; arm_mov R1 R6; arm_bl "apply_nat"; arm_str_sp R0 0
+  ; _mark 8
+  ; arm_ldr_to R0 "=target"; arm_str_sp R0 8
+  ; arm_movs R4 (Nat.pred _side)
+  ; label "row"
+  ; arm_bl "button"
+  ; _back_to 8
+  ; arm_ldr_sp R0 0; arm_mov R1 R4; arm_bl "apply_nat"; arm_str_sp R0 4
+  ; _mark 12
+  ; arm_movs R5 0
+  ; label "pixel"
+  ; _back_to 12
+  ; arm_movs R1 (Nat.pred _side); arm_subs_reg R1 R1 R5; arm_lsrs R2 R4 1
+  ; arm_if_carry_set (arm_mov R1 R5)                                     # x
+  ; arm_ldr_sp R0 4; arm_bl "apply_nat"
+  ; arm_bl "color"
+  ; arm_ldr_sp R1 8; arm_stmia R1 [R0]; arm_str_sp R1 8
+  ; arm_adds R5 1; arm_cmp_imm R5 _side; arm_bne_to "pixel"
+  ; arm_subs R4 1; arm_bcs_to "row"
+  ]
+
+# What is shown out to the strip, gamma corrected, 24 bits per LED, red's most significant first: a
+# bit is taken on the clock's rising edge, and a clock held low for 500 µs
+# latches the chain. Each delay iteration takes at least two cycles, so at
+# 150 MHz a half bit is at least 0.5 µs and the latch at least 870 µs.
+_delay = \rd \n List.concat_list [arm_movs rd n; arm_subs rd 1; arm_bne_up 2]
+_send = List.concat_list
+  [ label "send"
+  ; arm_push [LR]
+  ; arm_ldr_to R4 "=shown"
+  ; arm_movs R5 _side; arm_muls R5 R5
+  ; label "send_led"
+  ; arm_ldmia R4 [R0]; arm_bl "gamma"
+  ; _sio R2
+  ; arm_lsls R0 R0 8
+  ; arm_movs R1 24
+  ; label "send_bit"
+  ; set_single_bit R3 _data
+  ; arm_str_offset R3 R2 32                 # data low (GPIO_OUT_CLR)
+  ; arm_lsls R0 R0 1
+  ; arm_if_carry_set (arm_str_offset R3 R2 24)   # data high (GPIO_OUT_SET)
+  ; _delay R7 40
+  ; set_single_bit R3 _clock
+  ; arm_str_offset R3 R2 24                 # clock high
+  ; _delay R7 40
+  ; arm_str_offset R3 R2 32                 # clock low
+  ; arm_subs R1 1; arm_bne_to "send_bit"
+  ; arm_subs R5 1; arm_bne_to "send_led"
+  ; set_single_bit R7 16; arm_subs R7 1; arm_bne_up 2
+  ; set_single_bit R3 _led; arm_str_offset R3 R2 40   # the onboard LED toggles once per frame
+  ; arm_pop [PC]
+  ]
+
+# Power draw that jumps from one frame to the next can upset a marginal supply,
+# so what is shown moves toward the target by at most [step] a frame sent (8
+# unless a program asks otherwise) — the channel with the farthest to go by
+# step, the other two by as large a part of their way, so that a colour fades
+# along a straight line and keeps its hue: each by ⌊|a|·r/2^16⌋, a its way and
+# r = ⌈step·2^16/d⌉ for d the farthest. Both are colours as the program has
+# them; what is sent is the shown one gamma corrected, by send, which slew runs on into.
+# r10 is left nonzero if any pixel has yet to arrive. The target is the latest t's picture, so how
+# fast things change is the program's to say — a picture that should hold
+# still for a while is one t does not change for a while.
+_byte = \s \a List.concat_list [arm_mov s a; arm_lsrs_reg s R5; arm_uxtb s s]   # s = channel r5 of a
+_slew = List.concat_list
+  [ label "slew"
+  ; arm_push [R6]
+  ; arm_movs R0 0; arm_mov R10 R0
+  ; arm_movs R7 _side; arm_muls R7 R7; arm_lsls R7 R7 2   # past the last pixel's offset
+  ; label "slew_pixel"
+  ; arm_subs R7 4
+  ; arm_ldr_to R4 "=shown"; arm_ldr_reg R0 R4 R7
+  ; arm_ldr_to R4 "=target"; arm_ldr_reg R1 R4 R7
+  ; arm_cmp R0 R1; arm_beq_to "slew_next"
+  ; arm_movs R2 0                   # the farthest way
+  ; arm_movs R5 16
+  ; label "slew_way"
+  ; _byte R3 R0; _byte R4 R1
+  ; arm_subs_reg R3 R4 R3; arm_bcs_down 2; arm_negs R3 R3
+  ; arm_cmp R3 R2; arm_bls_down 2; arm_mov R2 R3
+  ; arm_subs R5 8; arm_bcs_to "slew_way"
+  ; arm_adr R3 "state"; arm_ldr_offset R3 R3 20   # the step
+  ; arm_cmp R2 R3; arm_bhi_down 4
+  ; arm_mov R2 R1; arm_b_to "slew_store"   # there this frame
+  ; arm_mov R10 R2
+  ; arm_lsls R6 R3 16; arm_subs R6 1; arm_adds_reg R6 R6 R2; arm_udiv R6 R6 R2   # r
+  ; arm_movs R2 0
+  ; arm_movs R5 16
+  ; label "slew_channel"
+  ; _byte R3 R0; _byte R4 R1
+  ; arm_lsls R2 R2 8
+  ; arm_subs_reg R4 R4 R3; arm_bcc_down 8
+  ; arm_muls R4 R6; arm_lsrs R4 R4 16; arm_adds_reg R3 R3 R4; arm_b_down 8
+  ; arm_negs R4 R4; arm_muls R4 R6; arm_lsrs R4 R4 16; arm_subs_reg R3 R3 R4
+  ; arm_orrs R2 R3
+  ; arm_subs R5 8; arm_bcs_to "slew_channel"
+  ; label "slew_store"
+  ; arm_ldr_to R4 "=shown"; arm_str_reg R2 R4 R7
+  ; label "slew_next"
+  ; arm_cmp_imm R7 0; arm_bne_to "slew_pixel"
+  ; arm_pop [R6]                    # and on into send
+  ]
+
+# BOOTSEL switches demos. The button pulls the flash's chip select low, so it
+# reads only while the chip select's output is overridden off, which code
+# running from flash could not survive — this runs from SRAM. bootsel: carry
+# clear while the button is down; r0-r3 clobbered. button: returns at once
+# unless the button is down; then waits for it to come up and for its contacts
+# to settle, fades what is shown to black as slew would to any picture — the
+# black frame a machine starts with is then no jump in the strip's draw — keeps
+# the next show's index in a watchdog scratch register, puts clk_sys back on
+# the ring oscillator, where reading flash is safe again, and starts over through
+# the image's reset vector: the loader copies the machine and its shows afresh,
+# and the machine takes that show.
+# It is looked at every row and every collection: a press lasts a tenth of a
+# second or so, and a frame can take far longer.
+# The picture at [buffer] all black; r0-r2 clobbered.
+_darken = \buffer List.concat_list
+  [ arm_ldr_to R0 buffer; arm_movs R1 0; arm_movs R2 _side; arm_muls R2 R2
+  ; arm_stmia R0 [R1]; arm_subs R2 1; arm_bne_up 4
+  ]
+_bootsel = List.concat_list
+  [ label "bootsel"
+  ; arm_ldr_to R0 "=qspi_ss_ctrl"; arm_ldr_offset R1 R0 0
+  ; arm_movs R2 2; arm_lsls R2 R2 14; arm_orrs R1 R2; arm_str_offset R1 R0 0    # OEOVER: disabled
+  ; set_single_bit R3 10; arm_subs R3 1; arm_bne_up 2                           # the pull-up lifts it
+  ; _sio R3; arm_ldr_offset R3 R3 8                                             # GPIO_HI_IN
+  ; arm_bics R1 R2; arm_str_offset R1 R0 0                                      # OEOVER: normal
+  ; arm_lsls R3 R3 5                                                            # QSPI_CSN into carry
+  ; arm_bx LR
+  ]
+_button = \count List.concat_list
+  [ label "button"
+  ; arm_push [R0; R1; R2; R3; LR]
+  ; arm_bl "bootsel"; arm_bcc_to "button_down"
+  ; arm_pop [R0; R1; R2; R3; PC]
+  ; label "button_down"
+  ; arm_bl "bootsel"; arm_bcc_to "button_down"
+  ; set_single_bit R0 22; arm_subs R0 1; arm_bne_up 2                           # ≥ 50 ms
+  ; _darken "=target"
+  ; label "button_fade"
+  ; arm_bl "slew"; arm_mov R0 R10; arm_cmp_imm R0 0; arm_bne_to "button_fade"
+  ; arm_adr R1 "state"; arm_ldr_offset R1 R1 16; arm_adds R1 1                  # the next show
+  ; arm_cmp_imm R1 count; arm_bcc_down 2; arm_movs R1 0
+  ; arm_ldr_to R0 "=watchdog"; arm_str_offset R1 R0 12                           # SCRATCH0
+  ; arm_ldr_to R4 "=clocks"; _slow_clocks
+  ; arm_ldr_to R0 "=flash"; arm_ldr_offset R1 R0 0; arm_mov SP R1               # the vector table's stack
+  ; arm_ldr_offset R0 R0 4; arm_bx R0                                           # and reset vector
+  ]
+
+_const = \l \items List.concat (label l) items
+_hex_word = compose word Nat.from_hex
+# The pictures shown and to be shown, one word per LED in chain order, at the
+# top of SRAM; below them the heap.
+_heap_end = Nat.sub (Nat.from_hex "20082000") (Nat.mul 8 (Nat.mul _side _side))
+_pool = \shows
+  let (List.length (Pair.fst (Asm.image 8 16 shows))) $ \n
+  List.concat_list
+  [ [Asm.Align 4]
+  ; _const "=clocks" $ _hex_word "40010000"
+  ; _const "=qspi_ss_ctrl" $ _hex_word "4003001C"
+  ; _const "=watchdog" $ _hex_word "400D8000"
+  ; _const "=flash" $ word firmware_base_address
+  ; _const "=shown" $ word _heap_end
+  ; _const "=target" $ word (Nat.add _heap_end (Nat.mul 4 (Nat.mul _side _side)))
+  ; _const "=heap_end" $ word _heap_end
+  ; _const "leaf" $ word 0; word 0
+  ; word_of "leaf"; word 0         # true
+  # The collector's and render's state: the heap's base, and where allocation
+  # starts, the shows' image being all the heap holds at first; the heap's marks
+  # after [stage t] and after [stage t y]; the show's index, the step it slews by
+  # and whether it settles; where the last collection ended.
+  ; _const "state" $ List.concat_list
+      [ [Asm.Ref 4 (\_ \root Asm.u32 (Nat.add root 4)) "root"]
+      ; [Asm.Ref 4 (\_ \root Asm.u32 (Nat.add root (Nat.add 4 n))) "root"]
+      ; word 0; word 0; word 0; word 0; word 0; word 0
+      ]
+  # The shows' root, then their nodes, where the heap starts.
+  ; _const "root" [Asm.Ref (Nat.add 4 n)
+      (\a \leaf Pair.match (\bytes \root List.concat (Asm.u32 root) bytes) (Asm.image leaf (Nat.add a 4) shows))
+      "leaf"]
+  ]
+
+# collect: a whole collection now. Clobbers r0-r3 and sets the limit.
+_collect = List.concat_list
+  [ label "collect"
+  ; arm_push [LR]
+  ; arm_movs R0 0; arm_mov R11 R0
+  ; arm_adr R1 "state"; arm_str_offset R0 R1 28
+  ; arm_adr R0 "leaf"; arm_mov R1 R0; arm_bl "apply"   # a cell, no room for which collects
+  ; arm_pop [PC]
+  ]
+
+# [settle] keeps sending frames until the picture is reached before the next t:
+# for a program that takes far longer to work a picture out than to send one,
+# which would otherwise spend all of its time on pictures it barely shows.
+# The machine takes the show SCRATCH0 names (the first after power-up), applies
+# its program to that index once — the stage, which works out whatever does
+# not change with t — and keeps only what the stage needs: everything else of
+# the image, the other shows included, goes with the next collection. What is
+# left is frozen below the heap, which no collection moves again: nothing in it
+# points at a newer cell.
+_machine = \shows let (List.length shows) $ \count Asm.assemble _machine_base $ List.concat_list
+  [ arm_mov R8 SP                 # the stack's top, for the collector
+  ; arm_movs R2 9; arm_lsls R2 R2 6; _unreset []   # IO_BANK0 and PADS_BANK0
+  ; _gpio_out
+  ; set_single_bit R1 _led; arm_str_offset R1 R0 24           # onboard LED on: pins are set up
+  ; _clocks
+  ; set_single_bit R0 24; arm_subs R0 1; arm_bne_up 2           # the strip's supply settles, ≥ 0.2 s
+  ; _darken "=shown0"                                           # SRAM starts out arbitrary: black, shown once,
+  ; arm_bl "send"                                                                # over whatever the strip woke up with
+  ; arm_sub_sp 16                 # render's [stage t], [stage t y] and next pixel, and the stage
+  ; arm_b_to "boot"
+  # Pc-relative loads look at most 1020 bytes ahead: what reads nothing from the
+  # pool at the end goes here, out of the way of what does, and so does what
+  # only setting up and gamma read, within their reach.
+  ; _color
+  ; _gamma_word
+  ; [Asm.Align 4]
+  ; _const "=resets" $ _hex_word "40020000"
+  ; _const "=clocks0" $ _hex_word "40010000"
+  ; _const "=xosc" $ _hex_word "40048000"
+  ; _const "=xosc_ctrl" $ _hex_word "00FABAA0"
+  ; _const "=pll_sys" $ _hex_word "40050000"
+  ; _const "=gpio_ctrl" $ word (Nat.add (Nat.from_hex "40028004") (Nat.mul 8 _clock))
+  ; _const "=pads_bank0" $ _hex_word "40038000"
+  ; _const "=shown0" $ word _heap_end
+  ; _const "gamma_table" [Asm.Bytes _gamma]
+  ; label "boot"
+  ; arm_ldr_to R0 "=watchdog"; arm_ldr_offset R0 R0 12           # the show: SCRATCH0's
+  ; arm_cmp_imm R0 count; arm_bcc_down 2; arm_movs R0 0
+  ; arm_adr R3 "state"; arm_str_offset R0 R3 16
+  ; arm_ldr_offset R7 R3 4        # the image is all the heap holds so far
+  ; arm_ldr_to R2 "root"
+  ; label "find"; arm_cbz_to R0 "found"; arm_ldr_offset R2 R2 4; arm_subs R0 1; arm_b_to "find"
+  ; label "found"; arm_ldr_offset R2 R2 0                       # △ (△ settle step) (△ fps program)
+  ; arm_ldmia R2 [R0; R2]
+  ; arm_ldr_offset R2 R2 4; arm_str_sp R2 12                    # the program
+  ; arm_ldmia R0 [R1; R2]
+  ; arm_ldr_offset R1 R1 0; arm_str_offset R1 R3 24             # settles unless a leaf
+  ; arm_movs R0 0; arm_movs R1 1                                # the step from its bits
+  ; label "step_bit"
+  ; arm_ldr_offset R4 R2 0; arm_cbz_to R4 "step_done"
+  ; arm_ldr_offset R4 R4 0; arm_if_nonzero R4 (arm_orrs R0 R1)
+  ; arm_lsls R1 R1 1; arm_ldr_offset R2 R2 4; arm_b_to "step_bit"
+  ; label "step_done"; arm_str_offset R0 R3 20
+  ; arm_bl "collect"              # the program alone, at the heap's base
+  ; arm_ldr_sp R0 12; arm_adr R3 "state"; arm_ldr_offset R1 R3 16
+  ; arm_bl "apply_nat"; arm_str_sp R0 12                        # the stage
+  ; arm_bl "collect"                                            # it alone, at the heap's base,
+  ; arm_adr R3 "state"; arm_str_offset R7 R3 0                  # and frozen
+  ; arm_movs R6 0
+  ; label "frame"
+  ; _render
+  ; label "approach"
+  ; arm_bl "slew"                 # one frame per t, a step closer to its picture, sent
+  ; arm_adr R0 "state"; arm_ldr_offset R0 R0 24; arm_cbz_to R0 "next_t"
+  ; arm_mov R0 R10; arm_cmp_imm R0 0; arm_bne_to "approach"
+  ; label "next_t"
+  ; arm_adds R6 1
+  ; arm_b_to "frame"
+  ; _slew
+  ; _send
+  ; _bootsel
+  ; _button count
+  ; _apply
+  ; _gc
+  ; _apply_nat
+  ; _collect
+  ; _pool shows
+  ]
+
+# A show: a program, t counting frames, and how the machine shows it — whether
+# it settles, and the step it slews by — and how many frames a second, in
+# tenths, the board manages for it: the pace anything else showing it keeps.
+# The machine applies a show's program to the show's index first, once, and
+# then to t, y and x: [show_staged] takes such a program, the others one that
+# needs no stage.
+show_staged = \step \fps \program △ (△ false step) (△ fps program)
+show_slewing = \step \fps \program show_staged step fps (\_ program)
+show = show_slewing 8
+show_settled = \fps \program △ (△ true 8) (△ fps (\_ program))
+
+# [tc_firmware shows]: one machine with all of [shows] in its image. The loader
+# copies it to SRAM, last word first, and runs it there; it takes the show the
+# watchdog's scratch register names, and BOOTSEL the next.
+tc_firmware = \shows
+  let (_machine shows) $ \machine
+  let (List.concat machine (List.repeat (Nat.mod (Nat.sub 4 (Nat.mod (List.length machine) 4)) 4) 0)) $ \machine
+  Asm.assemble firmware_base_address $ List.concat_list
+  [ _boot _stack_top "start"
+  ; label "start"
+  ; arm_adr R0 "machine"; arm_ldr_to R2 "=size"
+  ; arm_mov R1 SP                   # the machine's base, the stack's top
+  ; arm_subs R2 4; arm_ldr_reg R3 R0 R2; arm_str_reg R3 R1 R2; arm_bne_up 6
+  ; arm_mov PC R1                   # a branch, staying in Thumb
+  ; [Asm.Align 4]
+  ; _const "=size" $ word (List.length machine)
+  ; label "machine"; [Asm.Bytes machine]
+  ]
+
+# What the board shows, as text to check a simulation against: [frames show n]
+# is its first n frames — a black one, then for each t
+# one frame closer to the image of f t, f the show's program, or as many as it
+# takes to reach it, if the show settles.
+_coords = List.range _side
+_image = \f \t let (f t) $ \ft List.map (\y let (ft y) $ \fty List.map (\x let (fty x) $ \c List.map (\i Asm.byte (List.nth_or 0 i c)) [0; 1; 2]) _coords) _coords
+# A pixel a step closer, as _slew has it. The recursions get self as an
+# argument: evaluation is eager, so anything a branch could compute without
+# it would be computed whichever branch is taken.
+_toward = \step \s \t
+  let (List.foldl Nat.max 0 (List.zip_with Nat.diff s t)) $ \d
+  Bool.match
+    (\d let (Nat.div (Nat.add (Nat.mul step 65536) (Nat.pred d)) d) $ \r
+      List.zip_with (\s \t let (Nat.shr 16 (Nat.mul (Nat.diff s t) r)) $ \m Bool.match (Nat.sub s m) (Nat.add s m) (Nat.is_lte s t)) s t)
+    (\_ t)
+    (Nat.is_lte d step) d
+_step = \step List.zip_with (List.zip_with (_toward step))
+# n frames toward target, settling or not, then the rest of them by [rest]
+_chase = \settle \step \target \rest fix $ \self \shown \n Nat.match (\_ []) (\m \shown
+    let (_step step shown target) $ \next
+    △ next (Bool.match rest self (Bool.and settle (Bool.not (equal next target))) next m)) n shown
+_frames = \settle \step \f fix $ \self \shown \n \t Nat.match (\_ [])
+  (\_ \t _chase settle step (_image f t) (\shown \n self shown n (Nat.succ t)) shown n) n t
+_black = List.repeat _side $ List.repeat _side [0; 0; 0]
+_frame_text = \frame List.concat_map (\row
+  List.concat_list ["  "; List.join " " (List.map (compose (List.concat_map Nat.byte_to_hex) _corrected) row); "\n"]) frame
+_frames_text = \settle \step \f \n List.concat_map _frame_text (△ _black (_frames settle step f _black (Nat.pred n) 0))
+frames = \show \n Pair.match (\how \paced Pair.match (\settle \step _frames_text settle step (Pair.snd paced 0) n) how) show
+
+# ── In a browser ─────────────────────────────────────────────────────────────
+# [viewer shows], what tc_firmware makes of [shows], as a web page that
+# evaluates them itself: the first shows, and a BOOTSEL button moves on to the
+# next, from the last round to the first. Their programs are laid out as one
+# image, as the machine lays one out, so what they share is there once, and
+# the page reads that back into trees and applies them in a worker, staged as
+# the machine stages them, a frame at a time at each show's pace. No board, no
+# slew: each pixel shows the colour its program gives.
+_viewer_style = "
+    body{margin:0;padding:16px;background:#101214;color:#d8dde2;font:15px system-ui,sans-serif;display:grid;gap:12px;justify-items:center}
+    canvas{width:min(100%,500px);aspect-ratio:1;background:#050607;border-radius:10px}
+    nav{display:flex;gap:14px;align-items:center}
+    button{width:56px;height:56px;border-radius:50%;border:6px solid #2a2f34;background:#f2f2ee;cursor:pointer;box-shadow:0 2px 0 #000}
+    button:active{transform:translateY(2px);box-shadow:none}
+    button:focus-visible{outline:2px solid #6fd1bd;outline-offset:3px}
+    label{font:600 13px system-ui,sans-serif;letter-spacing:.08em}
+    output{color:#8a949e;font-variant-numeric:tabular-nums}"
+_viewer_worker = "
+  const L = { u: null, v: null }, T = { u: L, v: null };
+  let programs, stages;
+  const load = (hex, root) => {
+    const word = i => parseInt(hex.substr(i * 8 + 6, 2) + hex.substr(i * 8 + 4, 2) + hex.substr(i * 8 + 2, 2) + hex.substr(i * 8, 2), 16);
+    const nodes = [], at = a => a === 8 ? L : nodes[(a - 16) / 8];
+    for (let i = 0; i < hex.length / 16; i++) { const u = word(2 * i), v = word(2 * i + 1); nodes.push({ u: at(u), v: v ? at(v) : null }); }
+    const list = [];
+    for (let l = at(root); l.u; l = l.v) list.push(l.u);
+    return list;
+  };
+  const apply = (a, b) => {
+    const k = [];
+    for (;;) {
+      let r;
+      if (!a.u) r = { u: b, v: null };
+      else if (!a.v) r = { u: a.u, v: b };
+      else if (!a.u.u) r = a.v;
+      else if (!a.u.v) { k.push(a.u.u, b); a = a.v; continue; }
+      else if (!b.u) r = a.u.u;
+      else if (!b.v) { a = a.u.v; b = b.u; continue; }
+      else { k.push(null, b.v); a = a.v; b = b.u; continue; }
+      if (!k.length) return r;
+      const c = k.pop(), x = k.pop();
+      if (x) { k.push(null, r); a = x; b = c; } else { a = r; b = c; }
+    }
+  };
+  const nat = n => n ? { u: n & 1 ? T : L, v: nat(n >> 1) } : L;
+  const num = l => { let n = 0; for (let w = 1; l.u; l = l.v, w *= 2) if (l.u.u) n += w; return n & 255; };
+  const frame = (p, t) => {
+    const out = new Uint8Array(625 * 3), pt = apply(p, nat(t));
+    for (let y = 0; y < 25; y++) {
+      const py = apply(pt, nat(y));
+      for (let x = 0; x < 25; x++) {
+        let c = apply(py, nat(x));
+        for (let i = 0; i < 3 && c.u; i++, c = c.v) out[(y * 25 + x) * 3 + i] = num(c.u);
+      }
+    }
+    return out;
+  };
+  onmessage = e => {
+    if (e.data.hex) { programs = load(e.data.hex, e.data.root); stages = []; return; }
+    const i = e.data.show;
+    if (!stages[i]) stages[i] = apply(programs[i], nat(i));
+    postMessage({ show: i, t: e.data.t, frame: frame(stages[i], e.data.t) });
+  };"
+_viewer_script = \shows \root List.concat_list ["
+  const fps = ["; List.join ", " (List.map (\show Nat.to_string (Pair.fst (Pair.snd show))) shows); "];
+  const hex = document.getElementById('image').textContent, root = "; Nat.to_string root; ";
+  const source = URL.createObjectURL(new Blob([document.getElementById('worker').textContent]));
+  const canvas = document.querySelector('canvas'), g = canvas.getContext('2d'), label = document.querySelector('output');
+  let worker, current = 0, start, shown, busy;
+  const begin = () => { worker = new Worker(source); worker.postMessage({ hex, root }); worker.onmessage = e => { busy = false; shown = e.data.t; draw(e.data.frame); }; busy = false; };
+  const draw = f => {
+    const s = canvas.width / 25;
+    g.fillStyle = '#050607'; g.fillRect(0, 0, canvas.width, canvas.height);
+    for (let i = 0; i < 625; i++) {
+      g.fillStyle = 'rgb(' + f[3 * i] + ',' + f[3 * i + 1] + ',' + f[3 * i + 2] + ')';
+      g.beginPath(); g.arc((i % 25 + 0.5) * s, (Math.floor(i / 25) + 0.5) * s, s * 0.42, 0, 7); g.fill();
+    }
+  };
+  const choose = i => {
+    current = i % fps.length; label.textContent = (current + 1) + ' of ' + fps.length;
+    if (busy) { worker.terminate(); begin(); }
+    start = performance.now(); shown = -1; draw(new Uint8Array(625 * 3));
+  };
+  const tick = now => {
+    const t = Math.floor((now - start) * fps[current] / 10000);
+    if (!busy && t !== shown) { busy = true; worker.postMessage({ show: current, t }); }
+    requestAnimationFrame(tick);
+  };
+  document.querySelector('button').onclick = () => choose(current + 1);
+  begin(); choose(0); requestAnimationFrame(tick);"]
+viewer = \shows Pair.match (\bytes \root Html.page "Pico" _viewer_style
+    [Xml.element "canvas" [△ "width" "500"; △ "height" "500"] [""];
+     Xml.element "nav" []
+       [Xml.element "button" [△ "id" "bootsel"; △ "aria-label" "BOOTSEL: next show"] [""];
+        Xml.element "label" [△ "for" "bootsel"] ["BOOTSEL"]; Xml.element "output" [] [""]];
+     Xml.element "script" [△ "type" "text/plain"; △ "id" "image"] [List.concat_map Nat.byte_to_hex bytes];
+     Xml.element "script" [△ "type" "text/plain"; △ "id" "worker"] [_viewer_worker];
+     Xml.element "script" [] [_viewer_script shows root]])
+  (Asm.image 8 16 (List.map (\show Pair.snd (Pair.snd show)) shows))
+
+pixel = \t \y \x [x; y; t]
+
+tc = show 505 pixel
+file "tc.uf2" "application/octet-stream" $ uf2 $ tc_firmware [tc]
+# = tc.uf2 sha256:42ca29ab6400adeb5a4e60be36a09e5c9ef2d7ca778bcfe7bec4e8e7bc7188e8
+file "tc.txt" "text/plain" $ frames tc 6
+# = tc.txt sha256:5ab82d72450356460c029ea6f6fbf33acbccdeae1df883f1adbaeff533693932
+
+# ── Tables ───────────────────────────────────────────────────────────────────
+# The board pays for arithmetic on binary nats in hundreds of reductions per
+# operation, so a pixel should do next to none: what depends on neither the
+# pixel nor the frame is best a table, made here, and indexed by the bits of x,
+# y and t themselves.
+#
+# [table k g] holds g n for every n below 2^k as a trie on n's bits, least
+# significant first; [lookup k table n] walks it, reading a nat with fewer bits
+# as padded with zeros and ignoring any beyond the k-th. It triages by hand:
+# through List.match and Bool.match a lookup costs twice the reductions.
+table = \k Fn.pow k (\inner \g △ (inner (\m g (Nat.double m))) (inner (\m g (Nat.succ (Nat.double m))))) (\g g 0)
+lookup = \k Fn.pow k (\inner \table \bits triage
+  (\table inner (Pair.fst table) △)
+  _
+  (\b \rest \table inner (triage Pair.fst (\_ Pair.snd) _ b table) rest)
+  bits table) (\table \_ table)
+
+Nat.to_string $ lookup 5 (table 5 (Nat.mul 3)) 21
+# = 63
+
+# ── A picture: fix, in 37 nodes ─────────────────────────────────────────────
+# The fixpoint combinator as a tree, every node coloured by the part of the
+# program it belongs to:
+#
+#   fix f = △ (△ knot) (△ (△ (△ (△ △ f)) (△ (△ knot))))
+#   knot  = △ △ (△ (△ △ △) (△ (△ id) △))
+#   id    = △ (△ (△ △)) △
+#
+# It is drawn level by level, two rows to a level — its 13 levels are the
+# matrix's 25 rows — at columns scaled from a drawing of the record tree.
+_unfold = 0
+_const = 1
+_triage = 2
+_dup = 3
+_id = 4
+_compose = 5
+_white = 6                          # the stem holding compose
+_f = 7                              # f itself, the functional: no △ of fix's own
+_n = \group \x \children △ (△ group x) children
+_fix_record =
+  _n _unfold 9
+    [ _n _unfold 3
+      [ _n _const 3
+        [ _n _const 0 [];
+        _n _triage 5
+          [ _n _triage 3
+            [ _n _triage 2 [];
+            _n _triage 4 [] ];
+          _n _dup 8
+            [ _n _dup 7
+              [ _n _id 7
+                [ _n _id 6
+                  [ _n _id 6
+                    [ _n _id 6 [] ] ];
+                _n _id 8 [] ] ];
+            _n _dup 9 [] ] ] ] ];
+    _n _white 15
+      [ _n _compose 15
+        [ _n _compose 12
+          [ _n _compose 12
+            [ _n _compose 11 [];
+            _n _f 13 [] ] ];
+        _n _unfold 17
+          [ _n _unfold 17
+            [ _n _const 17
+              [ _n _const 15 [];
+              _n _triage 20
+                [ _n _triage 17
+                  [ _n _triage 16 [];
+                  _n _triage 18 [] ];
+                _n _dup 23
+                  [ _n _dup 21
+                    [ _n _id 21
+                      [ _n _id 20
+                        [ _n _id 20
+                          [ _n _id 20 [] ] ];
+                      _n _id 22 [] ] ];
+                  _n _dup 24 [] ] ] ] ] ] ] ] ]
+
+# The record with its colours taken off is fix itself, f standing for f.
+_fix = \f
+  let (△ △ (△ (△ △ △) (△ (△ (△ (△ (△ △)) △)) △))) $ \knot
+  △ (△ knot) (△ (△ (△ (△ △ f)) (△ (△ knot))))
+_uncoloured = fix $ \self \node Pair.match (\head \children Pair.match (\group \_
+    Bool.match (List.foldl (\t \c t (self c)) △ children) "f" (equal group _f)) head) node
+_to_string = Bool.to_source
+equal (_uncoloured _fix_record) (_fix "f")
+# = true
+
+# Every node's pixel and, toward each child, the pixels of the edge between:
+# △ (△ x y) (△ group (△ edge depth)), the edge's taking the child's group and
+# depth. An edge spans one row, the inner points of a straight line. The
+# recursion takes the child first: [self (Nat.succ depth)] alone would go
+# active as soon as depth is bound, and recurse without end.
+_fix_round = \a \k \n Nat.div (Nat.add (Nat.mul 2 (Nat.mul a k)) n) (Nat.mul 2 n)   # a k / n, rounded
+_fix_edge = \px \py \cx
+  let (Nat.diff px cx) $ \dx
+  let (Bool.match 2 dx (Nat.is_lte 2 dx)) $ \n
+  List.map (\k △
+    (Bool.match (\o Nat.sub px o) (\o Nat.add px o) (Nat.is_lte px cx) (_fix_round dx k n))
+    (Nat.add py (_fix_round 2 k n))) (List.drop 1 (List.range n))
+_fix_pixels = fix $ \self \node \depth Pair.match (\head \children Pair.match (\group \x
+    let (Nat.mul 2 depth) $ \y
+    △ (△ (△ x y) (△ group (△ false depth)))
+      (List.concat_map (\child Pair.match (\head \_ Pair.match (\cgroup \cx
+          List.concat
+            (List.map (\p △ p (△ cgroup (△ true (Nat.succ depth)))) (_fix_edge x y cx))
+            (self child (Nat.succ depth))) head) child) children)) head) node
+# Nodes before edges, so that where one meets the other the node shows; then
+# per row and column the first drawn there, △ where nothing is.
+_fix_drawn = let (_fix_pixels _fix_record 0) $ \all
+  let (\edge List.filter (\p equal edge (Pair.fst (Pair.snd (Pair.snd p)))) all) $ \only
+  List.concat (only false) (only true)
+_fix_rows = table 5 (\y
+  let (List.filter (\p equal y (Pair.snd (Pair.fst p))) _fix_drawn) $ \row
+  table 5 (\x List.head_or △ (List.map Pair.snd (List.filter (\p equal x (Pair.fst (Pair.fst p))) row))))
+
+# Colours: the record's own, at half strength for the supply, edges at a third
+# of their node's.
+_fix_hues = [[242; 187; 46]; [255; 107; 112]; [47; 192; 207]; [160; 140; 245];
+             [239; 127; 196]; [90; 160; 255]; [255; 255; 255]; [120; 120; 120]]
+_fix_scaled = \d \c List.map (\v Nat.div v d) c
+_fix_colour = \cell triage [0; 0; 0] (\_ [0; 0; 0]) (\g \rest Pair.match (\edge \_
+    _fix_scaled (Bool.match 2 6 edge) (List.nth_or [0; 0; 0] g _fix_hues)) rest) cell
+
+# A still picture, the same every frame: worked out here, at build time.
+fix_tree = let (List.map (\y List.map (\x _fix_colour (lookup 5 (lookup 5 _fix_rows y) x)) _coords) _coords) $ \image
+  \t \y let (List.nth_or [] y image) $ \row \x List.nth_or [0; 0; 0] x row
+
+tc_tree = show 10 fix_tree
+file "tc_tree.uf2" "application/octet-stream" $ uf2 $ tc_firmware [tc_tree]
+# = tc_tree.uf2 sha256:2a596061df9349fb6710787a90ae2c91d0ab0ef6a62b1593e2460a4643064e97
+
+# ── QR codes, made on the board ──────────────────────────────────────────────
+# Qr.create, as it is, run by the machine: every frame encodes the next of four
+# messages (Version 1, 21×21) and shows it with a border two modules wide —
+# light modules lit, dark ones off. The message depends on t, so it is the
+# board that encodes it, once a frame, not the build.
+_qr_messages = ["treecalcul.us"; "tree calculus"; "on a pico 2"; "LambAda"]
+_qr_light = [64; 64; 64]
+_qr_border = List.repeat 2 (List.repeat _side _qr_light)
+qr = \t
+  let (Qr.create (List.nth_or "" (Nat.mod t 4) _qr_messages)) $ \grid
+  let (List.concat_list [_qr_border; List.map (\row List.concat_list
+      [List.repeat 2 _qr_light; List.map (\v Bool.match _qr_light [0; 0; 0] (equal v 1)) row; List.repeat 2 _qr_light]) grid; _qr_border]) $ \image
+  \y let (List.nth_or [] y image) $ \row
+  \x List.nth_or [0; 0; 0] x row
+
+tc_qr = show_settled 1 qr
+file "tc_qr.uf2" "application/octet-stream" $ uf2 $ tc_firmware [tc_qr]
+# = tc_qr.uf2 sha256:5e834e12cf9a36038bcaf49ed2cb89fe966fd1df8d1e7614b35ef768c04dfa97
