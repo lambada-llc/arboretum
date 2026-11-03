@@ -1,0 +1,24 @@
+# QR codes, made on the board: Qr.create, as it is, run by the machine. Every
+# frame encodes the next of four messages (Version 1, 21×21) and shows it with a
+# border two modules wide — light modules lit, dark ones off. The message
+# depends on t, so it is the board that encodes it, once a frame, not the build.
+_messages = ["treecalcul.us"; "tree calculus"; "on a pico 2"; "LambAda"]
+_light = [64; 64; 64]
+_border = List.repeat 2 (List.repeat Pico.Matrix.side _light)
+# The picture:
+qr = \t
+  let (Qr.create (List.nth_or "" (Nat.mod t 4) _messages)) $ \grid
+  let (List.concat_list [_border; List.map (\row List.concat_list
+      [List.repeat 2 _light; List.map (\v Bool.match _light [0; 0; 0] (equal v 1)) row; List.repeat 2 _light]) grid; _border]) $ \image
+  \y let (List.nth_or [] y image) $ \row
+  \x List.nth_or [0; 0; 0] x row
+
+# On the board: each code until it is reached, about 10.5 s of the board's time.
+qr_show = Pico.Matrix.show_settled 1 qr
+
+# What it draws, each code shown for 10 s:
+Pico.Matrix.svg "qr.svg" 4 qr_show
+# = qr.svg sha256:5984964f716b8334a6458337829f7f9cf6b7c65dccbb87cd99a2f31d476ce068
+# The image to flash:
+Pico.Matrix.flash "qr.uf2" [qr_show]
+# = qr.uf2 sha256:5e834e12cf9a36038bcaf49ed2cb89fe966fd1df8d1e7614b35ef768c04dfa97

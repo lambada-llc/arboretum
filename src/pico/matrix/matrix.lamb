@@ -1,0 +1,563 @@
+# A firmware for a 25×25 WS2801 LED matrix — clock on GPIO18, data on GPIO19,
+# wired as a serpentine, the onboard LED on GPIO25 — built on pico.lamb's tree
+# calculus machine. Between two frames, every LED gets the colour
+# [program t y x] — t the frame number, y the row and x the column, both 0..24
+# from the top left — whose answer is a list of red, green and blue as nats, of
+# which the low 8 bits count. While the bits go out to the strip nothing is
+# evaluated, so the strip never sees a pause it would latch on.
+#
+# A program goes onto the board as a show (show, show_slewing, …): [flash name
+# shows] is the image to copy onto it, and [svg name n show] previews one. Each
+# demo beside this file is one show.
+#
+# The machine code here is written in pico.lamb's vocabulary by its full names,
+# Pico.arm_movs and so on: LambAda reads another file's definitions no other way.
+
+# ── The strip ────────────────────────────────────────────────────────────────
+side = 25
+_clock = 18
+_data = 19
+_led = 25
+
+# The pins as SIO outputs: FUNCSEL 5, pads at their reset value but no longer
+# isolated (ISO) — 4 mA, pull-down, Schmitt — and output enabled. The control
+# registers are addressed from the clock pin's, the lowest.
+_pins = [_clock; _data; _led]
+_gpio_out = List.concat_list
+  [ Pico.arm_ldr_to Pico.R0 "=gpio_ctrl"; Pico.arm_movs Pico.R1 5
+  ; List.concat_map (\p Pico.arm_str_offset Pico.R1 Pico.R0 (Nat.mul 8 (Nat.sub p _clock))) _pins
+  ; Pico.arm_ldr_to Pico.R0 "=pads_bank0"; Pico.arm_movs Pico.R1 22
+  ; List.concat_map (\p Pico.arm_str_offset Pico.R1 Pico.R0 (Nat.add 4 (Nat.mul 4 p))) _pins
+  ; Pico.sio Pico.R0
+  ; Pico.arm_movs Pico.R1 (Nat.sum (List.map (\p Nat.pow2 (Nat.sub p _clock)) _pins)); Pico.arm_lsls Pico.R1 Pico.R1 _clock
+  ; Pico.arm_str_offset Pico.R1 Pico.R0 56                 # GPIO_OE_SET
+  ]
+
+# The strip's drivers light an LED in proportion to its value, the eye does
+# not: a channel at 154 shows as about 60% where a screen would show 30%, so
+# minor channels come out far too strong and colours drift toward white. Each
+# channel goes out through [_gamma], 255·(v/255)^2.5, the curve commonly used
+# for these strips: ⌊√(v^5·2^16/255^3)⌉ / 256, rounded.
+_gamma = List.map (\v
+    let (Nat.div (Nat.mul (Nat.pow v 5) 65536) 16581375) $ \n
+    let (List.foldl (\r \b let (Nat.add r b) $ \c Bool.match r c (Nat.is_lte (Nat.mul c c) n)) 0
+      (List.map Nat.pow2 (List.reverse (List.range 16)))) $ \r
+    Nat.div (Nat.add r 128) 256)
+  (List.range 256)
+_corrected = List.map (\c List.nth_or 0 c _gamma)
+List.join " " $ List.map (compose (List.join ",") (List.map Nat.to_string)) $ List.map _corrected [[255; 154; 60]; [10; 95; 25]; [64; 32; 0]; [255; 255; 255]; [0; 0; 0]]
+# = 255,72,7 0,22,1 8,1,0 255,255,255 0,0,0
+
+# color(r0) -> r0: 0xRRGGBB from a list of up to three nats, a missing one 0,
+# each read to its eighth bit at most. Clobbers r1-r3.
+_color = List.concat_list
+  [ Pico.label "color"
+  ; Pico.arm_push [Pico.R4; Pico.R5; Pico.LR]
+  ; Pico.arm_movs Pico.R1 0
+  ; Pico.arm_movs Pico.R4 3
+  ; Pico.label "color_channel"
+  ; Pico.arm_lsls Pico.R1 Pico.R1 8
+  ; Pico.arm_ldr_offset Pico.R2 Pico.R0 0          # the nat, 0 once the list has ended
+  ; Pico.arm_cbz_to Pico.R2 "color_next"
+  ; Pico.arm_ldr_offset Pico.R0 Pico.R0 4
+  ; Pico.arm_movs Pico.R3 1                   # weight of the bit being read
+  ; Pico.label "color_bit"
+  ; Pico.arm_ldr_offset Pico.R5 Pico.R2 0          # the bit, 0 once the nat has ended
+  ; Pico.arm_cbz_to Pico.R5 "color_next"
+  ; Pico.arm_ldr_offset Pico.R5 Pico.R5 0          # false is a leaf, true a stem
+  ; Pico.arm_if_nonzero Pico.R5 (Pico.arm_orrs Pico.R1 Pico.R3)
+  ; Pico.arm_ldr_offset Pico.R2 Pico.R2 4
+  ; Pico.arm_lsls Pico.R3 Pico.R3 1
+  ; Pico.arm_lsrs Pico.R5 Pico.R3 8
+  ; Pico.arm_beq_to "color_bit"
+  ; Pico.label "color_next"
+  ; Pico.arm_subs Pico.R4 1
+  ; Pico.arm_bne_to "color_channel"
+  ; Pico.arm_mov Pico.R0 Pico.R1
+  ; Pico.arm_pop [Pico.R4; Pico.R5; Pico.PC]
+  ]
+
+# gamma(r0) -> r0: 0xRRGGBB, each channel through _gamma; r1-r3 clobbered.
+_gamma_word = List.concat_list
+  [ Pico.label "gamma"
+  ; Pico.arm_adr Pico.R3 "gamma_table"; Pico.arm_movs Pico.R1 0
+  ; List.concat_map (\k List.concat_list
+      [Pico.arm_lsls Pico.R2 Pico.R0 (Nat.sub 24 k); Pico.arm_lsrs Pico.R2 Pico.R2 24; Pico.arm_ldrb_reg Pico.R2 Pico.R3 Pico.R2; Pico.arm_lsls Pico.R2 Pico.R2 k; Pico.arm_orrs Pico.R1 Pico.R2]) [16; 8; 0]
+  ; Pico.arm_mov Pico.R0 Pico.R1
+  ; Pico.arm_bx Pico.LR
+  ]
+
+# Every pixel into the target frame, in the chain's order. The stage is
+# applied a coordinate at a time, [stage t] once a frame, that to y once a row,
+# that to x once a pixel, so what one works out is not worked out again; and
+# after each pixel, and each row, the heap goes back to where the application
+# before it left it, or to where a collection since has ended its slide.
+# The chain starts at the bottom right and its rows run alternately left and
+# right: r4 is y, counting down, r5 the place along the row, x running either
+# way, r6 t. The stack holds [stage t], then [stage t y], where the collector
+# sees them, then where the next pixel goes, then the stage.
+_mark = \offset List.concat (Pico.arm_adr Pico.R0 "state") (Pico.arm_str_offset Pico.R7 Pico.R0 offset)
+_back_to = \offset List.concat_list
+  [Pico.arm_adr Pico.R0 "state"; Pico.arm_ldr_offset Pico.R7 Pico.R0 offset]
+_render = List.concat_list
+  [ Pico.arm_adr Pico.R0 "state"; Pico.arm_ldr_offset Pico.R7 Pico.R0 0   # last frame's trees are all garbage
+  ; Pico.arm_movs Pico.R0 0; Pico.arm_str_sp Pico.R0 0; Pico.arm_str_sp Pico.R0 4            # no stale roots
+  ; Pico.arm_ldr_sp Pico.R0 12; Pico.arm_mov Pico.R1 Pico.R6; Pico.arm_bl "apply_nat"; Pico.arm_str_sp Pico.R0 0
+  ; _mark 8
+  ; Pico.arm_ldr_to Pico.R0 "=target"; Pico.arm_str_sp Pico.R0 8
+  ; Pico.arm_movs Pico.R4 (Nat.pred side)
+  ; Pico.label "row"
+  ; Pico.arm_bl "button"
+  ; _back_to 8
+  ; Pico.arm_ldr_sp Pico.R0 0; Pico.arm_mov Pico.R1 Pico.R4; Pico.arm_bl "apply_nat"; Pico.arm_str_sp Pico.R0 4
+  ; _mark 12
+  ; Pico.arm_movs Pico.R5 0
+  ; Pico.label "pixel"
+  ; _back_to 12
+  ; Pico.arm_movs Pico.R1 (Nat.pred side); Pico.arm_subs_reg Pico.R1 Pico.R1 Pico.R5; Pico.arm_lsrs Pico.R2 Pico.R4 1
+  ; Pico.arm_if_carry_set (Pico.arm_mov Pico.R1 Pico.R5)                                     # x
+  ; Pico.arm_ldr_sp Pico.R0 4; Pico.arm_bl "apply_nat"
+  ; Pico.arm_bl "color"
+  ; Pico.arm_ldr_sp Pico.R1 8; Pico.arm_stmia Pico.R1 [Pico.R0]; Pico.arm_str_sp Pico.R1 8
+  ; Pico.arm_adds Pico.R5 1; Pico.arm_cmp_imm Pico.R5 side; Pico.arm_bne_to "pixel"
+  ; Pico.arm_subs Pico.R4 1; Pico.arm_bcs_to "row"
+  ]
+
+# What is shown out to the strip, gamma corrected, 24 bits per LED, red's most significant first: a
+# bit is taken on the clock's rising edge, and a clock held low for 500 µs
+# latches the chain. Each delay iteration takes at least two cycles, so at
+# 150 MHz a half bit is at least 0.5 µs and the latch at least 870 µs.
+_delay = \rd \n List.concat_list [Pico.arm_movs rd n; Pico.arm_subs rd 1; Pico.arm_bne_up 2]
+_send = List.concat_list
+  [ Pico.label "send"
+  ; Pico.arm_push [Pico.LR]
+  ; Pico.arm_ldr_to Pico.R4 "=shown"
+  ; Pico.arm_movs Pico.R5 side; Pico.arm_muls Pico.R5 Pico.R5
+  ; Pico.label "send_led"
+  ; Pico.arm_ldmia Pico.R4 [Pico.R0]; Pico.arm_bl "gamma"
+  ; Pico.sio Pico.R2
+  ; Pico.arm_lsls Pico.R0 Pico.R0 8
+  ; Pico.arm_movs Pico.R1 24
+  ; Pico.label "send_bit"
+  ; Pico.set_single_bit Pico.R3 _data
+  ; Pico.arm_str_offset Pico.R3 Pico.R2 32                 # data low (GPIO_OUT_CLR)
+  ; Pico.arm_lsls Pico.R0 Pico.R0 1
+  ; Pico.arm_if_carry_set (Pico.arm_str_offset Pico.R3 Pico.R2 24)   # data high (GPIO_OUT_SET)
+  ; _delay Pico.R7 40
+  ; Pico.set_single_bit Pico.R3 _clock
+  ; Pico.arm_str_offset Pico.R3 Pico.R2 24                 # clock high
+  ; _delay Pico.R7 40
+  ; Pico.arm_str_offset Pico.R3 Pico.R2 32                 # clock low
+  ; Pico.arm_subs Pico.R1 1; Pico.arm_bne_to "send_bit"
+  ; Pico.arm_subs Pico.R5 1; Pico.arm_bne_to "send_led"
+  ; Pico.set_single_bit Pico.R7 16; Pico.arm_subs Pico.R7 1; Pico.arm_bne_up 2
+  ; Pico.set_single_bit Pico.R3 _led; Pico.arm_str_offset Pico.R3 Pico.R2 40   # the onboard LED toggles once per frame
+  ; Pico.arm_pop [Pico.PC]
+  ]
+
+# Power draw that jumps from one frame to the next can upset a marginal supply,
+# so what is shown moves toward the target by at most [step] a frame sent (8
+# unless a program asks otherwise) — the channel with the farthest to go by
+# step, the other two by as large a part of their way, so that a colour fades
+# along a straight line and keeps its hue: each by ⌊|a|·r/2^16⌋, a its way and
+# r = ⌈step·2^16/d⌉ for d the farthest. Both are colours as the program has
+# them; what is sent is the shown one gamma corrected, by send, which slew runs on into.
+# r10 is left nonzero if any pixel has yet to arrive. The target is the latest t's picture, so how
+# fast things change is the program's to say — a picture that should hold
+# still for a while is one t does not change for a while.
+_byte = \s \a List.concat_list [Pico.arm_mov s a; Pico.arm_lsrs_reg s Pico.R5; Pico.arm_uxtb s s]   # s = channel r5 of a
+_slew = List.concat_list
+  [ Pico.label "slew"
+  ; Pico.arm_push [Pico.R6]
+  ; Pico.arm_movs Pico.R0 0; Pico.arm_mov Pico.R10 Pico.R0
+  ; Pico.arm_movs Pico.R7 side; Pico.arm_muls Pico.R7 Pico.R7; Pico.arm_lsls Pico.R7 Pico.R7 2   # past the last pixel's offset
+  ; Pico.label "slew_pixel"
+  ; Pico.arm_subs Pico.R7 4
+  ; Pico.arm_ldr_to Pico.R4 "=shown"; Pico.arm_ldr_reg Pico.R0 Pico.R4 Pico.R7
+  ; Pico.arm_ldr_to Pico.R4 "=target"; Pico.arm_ldr_reg Pico.R1 Pico.R4 Pico.R7
+  ; Pico.arm_cmp Pico.R0 Pico.R1; Pico.arm_beq_to "slew_next"
+  ; Pico.arm_movs Pico.R2 0                   # the farthest way
+  ; Pico.arm_movs Pico.R5 16
+  ; Pico.label "slew_way"
+  ; _byte Pico.R3 Pico.R0; _byte Pico.R4 Pico.R1
+  ; Pico.arm_subs_reg Pico.R3 Pico.R4 Pico.R3; Pico.arm_bcs_down 2; Pico.arm_negs Pico.R3 Pico.R3
+  ; Pico.arm_cmp Pico.R3 Pico.R2; Pico.arm_bls_down 2; Pico.arm_mov Pico.R2 Pico.R3
+  ; Pico.arm_subs Pico.R5 8; Pico.arm_bcs_to "slew_way"
+  ; Pico.arm_adr Pico.R3 "state"; Pico.arm_ldr_offset Pico.R3 Pico.R3 20   # the step
+  ; Pico.arm_cmp Pico.R2 Pico.R3; Pico.arm_bhi_down 4
+  ; Pico.arm_mov Pico.R2 Pico.R1; Pico.arm_b_to "slew_store"   # there this frame
+  ; Pico.arm_mov Pico.R10 Pico.R2
+  ; Pico.arm_lsls Pico.R6 Pico.R3 16; Pico.arm_subs Pico.R6 1; Pico.arm_adds_reg Pico.R6 Pico.R6 Pico.R2; Pico.arm_udiv Pico.R6 Pico.R6 Pico.R2   # r
+  ; Pico.arm_movs Pico.R2 0
+  ; Pico.arm_movs Pico.R5 16
+  ; Pico.label "slew_channel"
+  ; _byte Pico.R3 Pico.R0; _byte Pico.R4 Pico.R1
+  ; Pico.arm_lsls Pico.R2 Pico.R2 8
+  ; Pico.arm_subs_reg Pico.R4 Pico.R4 Pico.R3; Pico.arm_bcc_down 8
+  ; Pico.arm_muls Pico.R4 Pico.R6; Pico.arm_lsrs Pico.R4 Pico.R4 16; Pico.arm_adds_reg Pico.R3 Pico.R3 Pico.R4; Pico.arm_b_down 8
+  ; Pico.arm_negs Pico.R4 Pico.R4; Pico.arm_muls Pico.R4 Pico.R6; Pico.arm_lsrs Pico.R4 Pico.R4 16; Pico.arm_subs_reg Pico.R3 Pico.R3 Pico.R4
+  ; Pico.arm_orrs Pico.R2 Pico.R3
+  ; Pico.arm_subs Pico.R5 8; Pico.arm_bcs_to "slew_channel"
+  ; Pico.label "slew_store"
+  ; Pico.arm_ldr_to Pico.R4 "=shown"; Pico.arm_str_reg Pico.R2 Pico.R4 Pico.R7
+  ; Pico.label "slew_next"
+  ; Pico.arm_cmp_imm Pico.R7 0; Pico.arm_bne_to "slew_pixel"
+  ; Pico.arm_pop [Pico.R6]                    # and on into send
+  ]
+
+# ── The button ───────────────────────────────────────────────────────────────
+# BOOTSEL switches shows. The button pulls the flash's chip select low, so it
+# reads only while the chip select's output is overridden off, which code
+# running from flash could not survive — this runs from SRAM. bootsel: carry
+# clear while the button is down; r0-r3 clobbered. button: returns at once
+# unless the button is down; then waits for it to come up and for its contacts
+# to settle, fades what is shown to black as slew would to any picture — the
+# black frame a machine starts with is then no jump in the strip's draw — keeps
+# the next show's index in a watchdog scratch register, puts clk_sys back on
+# the ring oscillator, where reading flash is safe again, and starts over through
+# the image's reset vector: the loader copies the machine and its shows afresh,
+# and the machine takes that show.
+# It is looked at every row and every collection: a press lasts a tenth of a
+# second or so, and a frame can take far longer.
+# The picture at [buffer] all black; r0-r2 clobbered.
+_darken = \buffer List.concat_list
+  [ Pico.arm_ldr_to Pico.R0 buffer; Pico.arm_movs Pico.R1 0; Pico.arm_movs Pico.R2 side; Pico.arm_muls Pico.R2 Pico.R2
+  ; Pico.arm_stmia Pico.R0 [Pico.R1]; Pico.arm_subs Pico.R2 1; Pico.arm_bne_up 4
+  ]
+_bootsel = List.concat_list
+  [ Pico.label "bootsel"
+  ; Pico.arm_ldr_to Pico.R0 "=qspi_ss_ctrl"; Pico.arm_ldr_offset Pico.R1 Pico.R0 0
+  ; Pico.arm_movs Pico.R2 2; Pico.arm_lsls Pico.R2 Pico.R2 14; Pico.arm_orrs Pico.R1 Pico.R2; Pico.arm_str_offset Pico.R1 Pico.R0 0    # OEOVER: disabled
+  ; Pico.set_single_bit Pico.R3 10; Pico.arm_subs Pico.R3 1; Pico.arm_bne_up 2                           # the pull-up lifts it
+  ; Pico.sio Pico.R3; Pico.arm_ldr_offset Pico.R3 Pico.R3 8                                             # GPIO_HI_IN
+  ; Pico.arm_bics Pico.R1 Pico.R2; Pico.arm_str_offset Pico.R1 Pico.R0 0                                      # OEOVER: normal
+  ; Pico.arm_lsls Pico.R3 Pico.R3 5                                                            # QSPI_CSN into carry
+  ; Pico.arm_bx Pico.LR
+  ]
+_button = \count List.concat_list
+  [ Pico.label "button"
+  ; Pico.arm_push [Pico.R0; Pico.R1; Pico.R2; Pico.R3; Pico.LR]
+  ; Pico.arm_bl "bootsel"; Pico.arm_bcc_to "button_down"
+  ; Pico.arm_pop [Pico.R0; Pico.R1; Pico.R2; Pico.R3; Pico.PC]
+  ; Pico.label "button_down"
+  ; Pico.arm_bl "bootsel"; Pico.arm_bcc_to "button_down"
+  ; Pico.set_single_bit Pico.R0 22; Pico.arm_subs Pico.R0 1; Pico.arm_bne_up 2                           # ≥ 50 ms
+  ; _darken "=target"
+  ; Pico.label "button_fade"
+  ; Pico.arm_bl "slew"; Pico.arm_mov Pico.R0 Pico.R10; Pico.arm_cmp_imm Pico.R0 0; Pico.arm_bne_to "button_fade"
+  ; Pico.arm_adr Pico.R1 "state"; Pico.arm_ldr_offset Pico.R1 Pico.R1 16; Pico.arm_adds Pico.R1 1                  # the next show
+  ; Pico.arm_cmp_imm Pico.R1 count; Pico.arm_bcc_down 2; Pico.arm_movs Pico.R1 0
+  ; Pico.arm_ldr_to Pico.R0 "=watchdog"; Pico.arm_str_offset Pico.R1 Pico.R0 12                           # SCRATCH0
+  ; Pico.arm_ldr_to Pico.R4 "=clocks"; Pico.slow_clocks
+  ; Pico.arm_ldr_to Pico.R0 "=flash"; Pico.arm_ldr_offset Pico.R1 Pico.R0 0; Pico.arm_mov Pico.SP Pico.R1               # the vector table's stack
+  ; Pico.arm_ldr_offset Pico.R0 Pico.R0 4; Pico.arm_bx Pico.R0                                           # and reset vector
+  ]
+
+# ── The firmware ─────────────────────────────────────────────────────────────
+_const = \l \items List.concat (Pico.label l) items
+_hex_word = compose Pico.word Nat.from_hex
+# The pictures shown and to be shown, one word per LED in chain order, at the
+# top of SRAM; below them the heap.
+_heap_end = Nat.sub (Nat.from_hex "20082000") (Nat.mul 8 (Nat.mul side side))
+_pool = \shows
+  let (List.length (Pair.fst (Asm.image 8 16 shows))) $ \n
+  List.concat_list
+  [ [Asm.Align 4]
+  ; _const "=clocks" $ _hex_word "40010000"
+  ; _const "=qspi_ss_ctrl" $ _hex_word "4003001C"
+  ; _const "=watchdog" $ _hex_word "400D8000"
+  ; _const "=flash" $ Pico.word Pico.firmware_base_address
+  ; _const "=shown" $ Pico.word _heap_end
+  ; _const "=target" $ Pico.word (Nat.add _heap_end (Nat.mul 4 (Nat.mul side side)))
+  ; _const "=heap_end" $ Pico.word _heap_end
+  ; _const "leaf" $ Pico.word 0; Pico.word 0
+  ; Pico.word_of "leaf"; Pico.word 0         # true
+  # The collector's and render's state: the heap's base, and where allocation
+  # starts, the shows' image being all the heap holds at first; the heap's marks
+  # after [stage t] and after [stage t y]; the show's index, the step it slews by
+  # and whether it settles; where the last collection ended.
+  ; _const "state" $ List.concat_list
+      [ [Asm.Ref 4 (\_ \root Asm.u32 (Nat.add root 4)) "root"]
+      ; [Asm.Ref 4 (\_ \root Asm.u32 (Nat.add root (Nat.add 4 n))) "root"]
+      ; Pico.word 0; Pico.word 0; Pico.word 0; Pico.word 0; Pico.word 0; Pico.word 0
+      ]
+  # The shows' root, then their nodes, where the heap starts.
+  ; _const "root" [Asm.Ref (Nat.add 4 n)
+      (\a \leaf Pair.match (\bytes \root List.concat (Asm.u32 root) bytes) (Asm.image leaf (Nat.add a 4) shows))
+      "leaf"]
+  ]
+
+# [settle] keeps sending frames until the picture is reached before the next t:
+# for a program that takes far longer to work a picture out than to send one,
+# which would otherwise spend all of its time on pictures it barely shows.
+# The machine takes the show SCRATCH0 names (the first after power-up), applies
+# its program to that index once — the stage, which works out whatever does
+# not change with t — and keeps only what the stage needs: everything else of
+# the image, the other shows included, goes with the next collection. What is
+# left is frozen below the heap, which no collection moves again: nothing in it
+# points at a newer cell.
+_machine = \shows let (List.length shows) $ \count Asm.assemble Pico.machine_base $ List.concat_list
+  [ Pico.arm_mov Pico.R8 Pico.SP                 # the stack's top, for the collector
+  ; Pico.arm_movs Pico.R2 9; Pico.arm_lsls Pico.R2 Pico.R2 6; Pico.unreset []   # IO_BANK0 and PADS_BANK0
+  ; _gpio_out
+  ; Pico.set_single_bit Pico.R1 _led; Pico.arm_str_offset Pico.R1 Pico.R0 24           # onboard LED on: pins are set up
+  ; Pico.clocks
+  ; Pico.set_single_bit Pico.R0 24; Pico.arm_subs Pico.R0 1; Pico.arm_bne_up 2           # the strip's supply settles, ≥ 0.2 s
+  ; _darken "=shown0"                                           # SRAM starts out arbitrary: black, shown once,
+  ; Pico.arm_bl "send"                                                                # over whatever the strip woke up with
+  ; Pico.arm_sub_sp 16                 # render's [stage t], [stage t y] and next pixel, and the stage
+  ; Pico.arm_b_to "boot"
+  # Pc-relative loads look at most 1020 bytes ahead: what reads nothing from the
+  # pool at the end goes here, out of the way of what does, and so does what
+  # only setting up and gamma read, within their reach.
+  ; _color
+  ; _gamma_word
+  ; [Asm.Align 4]
+  ; _const "=resets" $ _hex_word "40020000"
+  ; _const "=clocks0" $ _hex_word "40010000"
+  ; _const "=xosc" $ _hex_word "40048000"
+  ; _const "=xosc_ctrl" $ _hex_word "00FABAA0"
+  ; _const "=pll_sys" $ _hex_word "40050000"
+  ; _const "=gpio_ctrl" $ Pico.word (Nat.add (Nat.from_hex "40028004") (Nat.mul 8 _clock))
+  ; _const "=pads_bank0" $ _hex_word "40038000"
+  ; _const "=shown0" $ Pico.word _heap_end
+  ; _const "gamma_table" [Asm.Bytes _gamma]
+  ; Pico.label "boot"
+  ; Pico.arm_ldr_to Pico.R0 "=watchdog"; Pico.arm_ldr_offset Pico.R0 Pico.R0 12           # the show: SCRATCH0's
+  ; Pico.arm_cmp_imm Pico.R0 count; Pico.arm_bcc_down 2; Pico.arm_movs Pico.R0 0
+  ; Pico.arm_adr Pico.R3 "state"; Pico.arm_str_offset Pico.R0 Pico.R3 16
+  ; Pico.arm_ldr_offset Pico.R7 Pico.R3 4        # the image is all the heap holds so far
+  ; Pico.arm_ldr_to Pico.R2 "root"
+  ; Pico.label "find"; Pico.arm_cbz_to Pico.R0 "found"; Pico.arm_ldr_offset Pico.R2 Pico.R2 4; Pico.arm_subs Pico.R0 1; Pico.arm_b_to "find"
+  ; Pico.label "found"; Pico.arm_ldr_offset Pico.R2 Pico.R2 0                       # △ (△ settle step) (△ fps program)
+  ; Pico.arm_ldmia Pico.R2 [Pico.R0; Pico.R2]
+  ; Pico.arm_ldr_offset Pico.R2 Pico.R2 4; Pico.arm_str_sp Pico.R2 12                    # the program
+  ; Pico.arm_ldmia Pico.R0 [Pico.R1; Pico.R2]
+  ; Pico.arm_ldr_offset Pico.R1 Pico.R1 0; Pico.arm_str_offset Pico.R1 Pico.R3 24             # settles unless a leaf
+  ; Pico.arm_movs Pico.R0 0; Pico.arm_movs Pico.R1 1                                # the step from its bits
+  ; Pico.label "step_bit"
+  ; Pico.arm_ldr_offset Pico.R4 Pico.R2 0; Pico.arm_cbz_to Pico.R4 "step_done"
+  ; Pico.arm_ldr_offset Pico.R4 Pico.R4 0; Pico.arm_if_nonzero Pico.R4 (Pico.arm_orrs Pico.R0 Pico.R1)
+  ; Pico.arm_lsls Pico.R1 Pico.R1 1; Pico.arm_ldr_offset Pico.R2 Pico.R2 4; Pico.arm_b_to "step_bit"
+  ; Pico.label "step_done"; Pico.arm_str_offset Pico.R0 Pico.R3 20
+  ; Pico.arm_bl "collect"              # the program alone, at the heap's base
+  ; Pico.arm_ldr_sp Pico.R0 12; Pico.arm_adr Pico.R3 "state"; Pico.arm_ldr_offset Pico.R1 Pico.R3 16
+  ; Pico.arm_bl "apply_nat"; Pico.arm_str_sp Pico.R0 12                        # the stage
+  ; Pico.arm_bl "collect"                                            # it alone, at the heap's base,
+  ; Pico.arm_adr Pico.R3 "state"; Pico.arm_str_offset Pico.R7 Pico.R3 0                  # and frozen
+  ; Pico.arm_movs Pico.R6 0
+  ; Pico.label "frame"
+  ; _render
+  ; Pico.label "approach"
+  ; Pico.arm_bl "slew"                 # one frame per t, a step closer to its picture, sent
+  ; Pico.arm_adr Pico.R0 "state"; Pico.arm_ldr_offset Pico.R0 Pico.R0 24; Pico.arm_cbz_to Pico.R0 "next_t"
+  ; Pico.arm_mov Pico.R0 Pico.R10; Pico.arm_cmp_imm Pico.R0 0; Pico.arm_bne_to "approach"
+  ; Pico.label "next_t"
+  ; Pico.arm_adds Pico.R6 1
+  ; Pico.arm_b_to "frame"
+  ; _slew
+  ; _send
+  ; _bootsel
+  ; _button count
+  ; Pico.apply
+  ; Pico.gc
+  ; Pico.apply_nat
+  ; Pico.collect
+  ; _pool shows
+  ]
+
+# A show: a program, t counting frames, and how the machine shows it — whether
+# it settles, and the step it slews by — and how many frames a second, in
+# tenths, the board manages for it: the pace anything else showing it keeps.
+# The machine applies a show's program to the show's index first, once, and
+# then to t, y and x: [show_staged] takes such a program, the others one that
+# needs no stage.
+show_staged = \step \fps \program △ (△ false step) (△ fps program)
+show_slewing = \step \fps \program show_staged step fps (\_ program)
+show = show_slewing 8
+show_settled = \fps \program △ (△ true 8) (△ fps (\_ program))
+
+# [tc_firmware shows]: one machine with all of [shows] in its image. The loader
+# copies it to SRAM, last word first, and runs it there; it takes the show the
+# watchdog's scratch register names, and BOOTSEL the next.
+tc_firmware = \shows
+  let (_machine shows) $ \machine
+  let (List.concat machine (List.repeat (Nat.mod (Nat.sub 4 (Nat.mod (List.length machine) 4)) 4) 0)) $ \machine
+  Asm.assemble Pico.firmware_base_address $ List.concat_list
+  [ Pico.boot Pico.stack_top "start"
+  ; Pico.label "start"
+  ; Pico.arm_adr Pico.R0 "machine"; Pico.arm_ldr_to Pico.R2 "=size"
+  ; Pico.arm_mov Pico.R1 Pico.SP                   # the machine's base, the stack's top
+  ; Pico.arm_subs Pico.R2 4; Pico.arm_ldr_reg Pico.R3 Pico.R0 Pico.R2; Pico.arm_str_reg Pico.R3 Pico.R1 Pico.R2; Pico.arm_bne_up 6
+  ; Pico.arm_mov Pico.PC Pico.R1                   # a branch, staying in Thumb
+  ; [Asm.Align 4]
+  ; _const "=size" $ Pico.word (List.length machine)
+  ; Pico.label "machine"; [Asm.Bytes machine]
+  ]
+
+# ── Checking it ──────────────────────────────────────────────────────────────
+# What the board shows, as text to check a simulation against: [frames show n]
+# is its first n frames — a black one, then for each t
+# one frame closer to the image of f t, f the show's program, or as many as it
+# takes to reach it, if the show settles.
+_coords = List.range side
+_image = \f \t let (f t) $ \ft List.map (\y let (ft y) $ \fty List.map (\x let (fty x) $ \c List.map (\i Asm.byte (List.nth_or 0 i c)) [0; 1; 2]) _coords) _coords
+# A pixel a step closer, as _slew has it. The recursions get self as an
+# argument: evaluation is eager, so anything a branch could compute without
+# it would be computed whichever branch is taken.
+_toward = \step \s \t
+  let (List.foldl Nat.max 0 (List.zip_with Nat.diff s t)) $ \d
+  Bool.match
+    (\d let (Nat.div (Nat.add (Nat.mul step 65536) (Nat.pred d)) d) $ \r
+      List.zip_with (\s \t let (Nat.shr 16 (Nat.mul (Nat.diff s t) r)) $ \m Bool.match (Nat.sub s m) (Nat.add s m) (Nat.is_lte s t)) s t)
+    (\_ t)
+    (Nat.is_lte d step) d
+_step = \step List.zip_with (List.zip_with (_toward step))
+# n frames toward target, settling or not, then the rest of them by [rest]
+_chase = \settle \step \target \rest fix $ \self \shown \n Nat.match (\_ []) (\m \shown
+    let (_step step shown target) $ \next
+    △ next (Bool.match rest self (Bool.and settle (Bool.not (equal next target))) next m)) n shown
+_frames = \settle \step \f fix $ \self \shown \n \t Nat.match (\_ [])
+  (\_ \t _chase settle step (_image f t) (\shown \n self shown n (Nat.succ t)) shown n) n t
+_black = List.repeat side $ List.repeat side [0; 0; 0]
+_frame_text = \frame List.concat_map (\row
+  List.concat_list ["  "; List.join " " (List.map (compose (List.concat_map Nat.byte_to_hex) _corrected) row); "\n"]) frame
+_frames_text = \settle \step \f \n List.concat_map _frame_text (△ _black (_frames settle step f _black (Nat.pred n) 0))
+frames = \show \n Pair.match (\how \paced Pair.match (\settle \step _frames_text settle step (Pair.snd paced 0) n) how) show
+
+# [preview show n]: the show's first n frames as an animated SVG, each the image
+# of its program for that t, played at the show's pace — the pictures the
+# program means, before the board slews toward them or corrects them for its
+# LEDs. An LED is a circle whose fill steps through the colours it changes to,
+# at the frames it changes at.
+_pv_hex = \c List.concat_list ["#"; List.concat_map Nat.byte_to_hex c]
+_pv_key = \n \k let (Nat.to_string (Nat.div (Nat.mul k 10000) n)) $ \d       # k/n, to 4 places
+  Bool.match (List.concat_list ["0."; List.concat_list (List.repeat (Nat.sub 4 (List.length d)) "0"); d]) "0" (Nat.is_zero k)
+_pv_changes = \cs List.reverse $ List.foldl (\l \kc
+    triage [kc] _ (\last \_ Bool.match (△ kc l) l (equal (Pair.snd last) (Pair.snd kc))) l)
+  [] (List.zip_with △ (List.range (List.length cs)) cs)
+_pv_led = \n \dur \yx \cs
+  let (_pv_changes cs) $ \changes
+  let (\v Nat.to_string (Nat.add 5 (Nat.mul 10 v))) $ \at
+  Pair.match (\y \x Xml.element "circle" [△ "cx" (at x); △ "cy" (at y); △ "r" "4"; △ "fill" (Pair.snd (List.head_or △ changes))]
+    (triage (\_ []) _ (\_ \_ \changes [Xml.element "animate"
+        [△ "attributeName" "fill"; △ "calcMode" "discrete"; △ "dur" dur; △ "repeatCount" "indefinite";
+         △ "keyTimes" (List.join ";" (List.map (compose (_pv_key n) Pair.fst) changes));
+         △ "values" (List.join ";" (List.map Pair.snd changes))] []])
+      (List.drop 1 changes) changes)) yx
+preview = \show \n
+  let (Pair.snd show) $ \paced
+  let (Pair.snd paced 0) $ \program
+  let (List.map (\t List.concat_map (List.map _pv_hex) (_image program t)) (List.range n)) $ \frames
+  let (List.concat_list [Nat.to_string (Nat.div (Nat.mul n 10000) (Pair.fst paced)); "ms"]) $ \dur
+  Svg.root (Nat.mul 10 side) (Nat.mul 10 side) 1 []
+    (△ (Svg.background "#000") (List.zip_with (\yx \cs List.concat_list ["\n"; _pv_led n dur yx cs])
+      (List.concat_map (\y List.map (△ y) _coords) _coords)
+      (List.foldr (List.zip_with △) (List.repeat (Nat.mul side side) []) frames)))
+List.join " " $ List.map (_pv_key 7) [0; 1; 6]
+# = 0 0.1428 0.8571
+
+# The files a demo ends with: [svg name n show], n frames of the show as above,
+# and [flash name shows], the image to copy onto the board in BOOTSEL mode.
+svg = \name \n \show △ (△ name "image/svg+xml") (preview show n)
+flash = \name \shows △ (△ name "application/octet-stream") (Pico.uf2 (tc_firmware shows))
+
+# ── In a browser ─────────────────────────────────────────────────────────────
+# [viewer shows], what tc_firmware makes of [shows], as a web page that
+# evaluates them itself: the first shows, and a BOOTSEL button moves on to the
+# next, from the last round to the first. Their programs are laid out as one
+# image, as the machine lays one out, so what they share is there once, and
+# the page reads that back into trees and applies them in a worker, staged as
+# the machine stages them, a frame at a time at each show's pace. No board, no
+# slew: each pixel shows the colour its program gives.
+_viewer_style = "
+    body{margin:0;padding:16px;background:#101214;color:#d8dde2;font:15px system-ui,sans-serif;display:grid;gap:12px;justify-items:center}
+    canvas{width:min(100%,500px);aspect-ratio:1;background:#050607;border-radius:10px}
+    nav{display:flex;gap:14px;align-items:center}
+    button{width:56px;height:56px;border-radius:50%;border:6px solid #2a2f34;background:#f2f2ee;cursor:pointer;box-shadow:0 2px 0 #000}
+    button:active{transform:translateY(2px);box-shadow:none}
+    button:focus-visible{outline:2px solid #6fd1bd;outline-offset:3px}
+    label{font:600 13px system-ui,sans-serif;letter-spacing:.08em}
+    output{color:#8a949e;font-variant-numeric:tabular-nums}"
+_viewer_worker = "
+  const L = { u: null, v: null }, T = { u: L, v: null };
+  let programs, stages;
+  const load = (hex, root) => {
+    const word = i => parseInt(hex.substr(i * 8 + 6, 2) + hex.substr(i * 8 + 4, 2) + hex.substr(i * 8 + 2, 2) + hex.substr(i * 8, 2), 16);
+    const nodes = [], at = a => a === 8 ? L : nodes[(a - 16) / 8];
+    for (let i = 0; i < hex.length / 16; i++) { const u = word(2 * i), v = word(2 * i + 1); nodes.push({ u: at(u), v: v ? at(v) : null }); }
+    const list = [];
+    for (let l = at(root); l.u; l = l.v) list.push(l.u);
+    return list;
+  };
+  const apply = (a, b) => {
+    const k = [];
+    for (;;) {
+      let r;
+      if (!a.u) r = { u: b, v: null };
+      else if (!a.v) r = { u: a.u, v: b };
+      else if (!a.u.u) r = a.v;
+      else if (!a.u.v) { k.push(a.u.u, b); a = a.v; continue; }
+      else if (!b.u) r = a.u.u;
+      else if (!b.v) { a = a.u.v; b = b.u; continue; }
+      else { k.push(null, b.v); a = a.v; b = b.u; continue; }
+      if (!k.length) return r;
+      const c = k.pop(), x = k.pop();
+      if (x) { k.push(null, r); a = x; b = c; } else { a = r; b = c; }
+    }
+  };
+  const nat = n => n ? { u: n & 1 ? T : L, v: nat(n >> 1) } : L;
+  const num = l => { let n = 0; for (let w = 1; l.u; l = l.v, w *= 2) if (l.u.u) n += w; return n & 255; };
+  const frame = (p, t) => {
+    const out = new Uint8Array(625 * 3), pt = apply(p, nat(t));
+    for (let y = 0; y < 25; y++) {
+      const py = apply(pt, nat(y));
+      for (let x = 0; x < 25; x++) {
+        let c = apply(py, nat(x));
+        for (let i = 0; i < 3 && c.u; i++, c = c.v) out[(y * 25 + x) * 3 + i] = num(c.u);
+      }
+    }
+    return out;
+  };
+  onmessage = e => {
+    if (e.data.hex) { programs = load(e.data.hex, e.data.root); stages = []; return; }
+    const i = e.data.show;
+    if (!stages[i]) stages[i] = apply(programs[i], nat(i));
+    postMessage({ show: i, t: e.data.t, frame: frame(stages[i], e.data.t) });
+  };"
+_viewer_script = \shows \root List.concat_list ["
+  const fps = ["; List.join ", " (List.map (\show Nat.to_string (Pair.fst (Pair.snd show))) shows); "];
+  const hex = document.getElementById('image').textContent, root = "; Nat.to_string root; ";
+  const source = URL.createObjectURL(new Blob([document.getElementById('worker').textContent]));
+  const canvas = document.querySelector('canvas'), g = canvas.getContext('2d'), label = document.querySelector('output');
+  let worker, current = 0, start, shown, busy;
+  const begin = () => { worker = new Worker(source); worker.postMessage({ hex, root }); worker.onmessage = e => { busy = false; shown = e.data.t; draw(e.data.frame); }; busy = false; };
+  const draw = f => {
+    const s = canvas.width / 25;
+    g.fillStyle = '#050607'; g.fillRect(0, 0, canvas.width, canvas.height);
+    for (let i = 0; i < 625; i++) {
+      g.fillStyle = 'rgb(' + f[3 * i] + ',' + f[3 * i + 1] + ',' + f[3 * i + 2] + ')';
+      g.beginPath(); g.arc((i % 25 + 0.5) * s, (Math.floor(i / 25) + 0.5) * s, s * 0.42, 0, 7); g.fill();
+    }
+  };
+  const choose = i => {
+    current = i % fps.length; label.textContent = (current + 1) + ' of ' + fps.length;
+    if (busy) { worker.terminate(); begin(); }
+    start = performance.now(); shown = -1; draw(new Uint8Array(625 * 3));
+  };
+  const tick = now => {
+    const t = Math.floor((now - start) * fps[current] / 10000);
+    if (!busy && t !== shown) { busy = true; worker.postMessage({ show: current, t }); }
+    requestAnimationFrame(tick);
+  };
+  document.querySelector('button').onclick = () => choose(current + 1);
+  begin(); choose(0); requestAnimationFrame(tick);"]
+viewer = \shows Pair.match (\bytes \root Html.page "Pico" _viewer_style
+    [Xml.element "canvas" [△ "width" "500"; △ "height" "500"] [""];
+     Xml.element "nav" []
+       [Xml.element "button" [△ "id" "bootsel"; △ "aria-label" "BOOTSEL: next show"] [""];
+        Xml.element "label" [△ "for" "bootsel"] ["BOOTSEL"]; Xml.element "output" [] [""]];
+     Xml.element "script" [△ "type" "text/plain"; △ "id" "image"] [List.concat_map Nat.byte_to_hex bytes];
+     Xml.element "script" [△ "type" "text/plain"; △ "id" "worker"] [_viewer_worker];
+     Xml.element "script" [] [_viewer_script shows root]])
+  (Asm.image 8 16 (List.map (\show Pair.snd (Pair.snd show)) shows))

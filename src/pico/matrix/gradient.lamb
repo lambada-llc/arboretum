@@ -1,0 +1,185 @@
+# A gradient scrolling across the matrix, written in machine code alone, with no
+# tree calculus machine: the plainest check of the wiring and of the strip's
+# timing. The onboard LED (GPIO25) toggles once a frame.
+gradient_program = stage List.concat_list
+  [ Pico.reg_alloc $ \r_const_pool \reg_alloc
+    let (\rdest \index Pico.arm_ldr_offset rdest r_const_pool (Nat.mul 4 index)) $ \arm_load_const
+    List.concat_list
+    [ Pico.arm_mov r_const_pool Pico.PC # PC is this instruction +4 at time of execution, so this points at the constants below
+    ; Pico.arm_b_down $ Nat.mul 4 7 # skip constants
+    ; Pico.word $ Nat.from_hex "40028094" # GPIO18 control register address (0x40028000 + 18*8 + 4)
+    ; Pico.word $ Nat.from_hex "4003804C" # GPIO18 pad register address (0x40038000 + 18*4 + 4)
+    ; Pico.word $ Nat.from_hex "4002809C" # GPIO19 control register address (0x40028000 + 19*8 + 4)
+    ; Pico.word $ Nat.from_hex "40038050" # GPIO19 pad register address (0x40038000 + 19*4 + 4)
+    ; Pico.word $ Nat.from_hex "400280CC" # GPIO25 control register address (0x40028000 + 25*8 + 4)
+    ; Pico.word $ Nat.from_hex "40038068" # GPIO25 pad register address (0x40038000 + 25*4 + 4)
+    ; Pico.word $ Nat.from_bin "10000011000000000000000000" # bitmask with 18, 19, 25 set (for GPIO_FUNC_SIO)
+    ; # Write 5 (GPIO_FUNC_SIO) to GPIO18,19,25 control register
+      reg_alloc $ \r_temp1 \reg_alloc
+      reg_alloc $ \r_temp2 \reg_alloc
+      List.concat_list
+      [ Pico.arm_movs r_temp1 5
+      ; arm_load_const r_temp2 0
+      ; Pico.arm_str r_temp1 r_temp2
+      ; arm_load_const r_temp2 2
+      ; Pico.arm_str r_temp1 r_temp2
+      ; arm_load_const r_temp2 4
+      ; Pico.arm_str r_temp1 r_temp2
+      ]
+    ; # Configure as outputs: clear OD and ISO bits (bits 8:7) -- set IE (bit 6) via [arm_orrs] for inputs!
+      reg_alloc $ \r_mask \reg_alloc
+      reg_alloc $ \r_addr \reg_alloc
+      reg_alloc $ \r_temp \reg_alloc
+      List.concat_list
+      [ Pico.arm_movs r_mask (Nat.from_bin "11000000")
+      ; Pico.arm_lsls r_mask r_mask 1
+      # - Load GPIO18 pad register address, load register, modify bits, write back
+      ; arm_load_const r_addr 1
+      ; Pico.arm_ldr_indirect r_temp r_addr
+      ; Pico.arm_bics r_temp r_mask
+      ; Pico.arm_str r_temp r_addr
+      # - Load GPIO19 pad register address, load register, modify bits, write back
+      ; arm_load_const r_addr 3
+      ; Pico.arm_ldr_indirect r_temp r_addr
+      ; Pico.arm_bics r_temp r_mask
+      ; Pico.arm_str r_temp r_addr
+      # - Load GPIO25 pad register address, load register, modify bits, write back
+      ; arm_load_const r_addr 5
+      ; Pico.arm_ldr_indirect r_temp r_addr
+      ; Pico.arm_bics r_temp r_mask
+      ; Pico.arm_str r_temp r_addr
+      ]
+    ; # SIO: configure GPIO18,19,25 as output (load SIO base address, load bitmask, write to GPIO_OE_SET)
+      reg_alloc $ \r_siobase \reg_alloc
+      reg_alloc $ \r_bitmask \reg_alloc
+      List.concat_list
+      [ Pico.arm_movs r_siobase $ Nat.from_hex "D0"
+      ; Pico.arm_lsls r_siobase r_siobase 24 # SIO base address = D0 00 00 00
+      ; arm_load_const r_bitmask 6
+      ; Pico.arm_str_offset r_bitmask r_siobase 56
+      ]
+    ]
+  ; # configure RAM
+    Pico.reg_alloc $ \r_ramaddr \reg_alloc
+    List.concat_list
+    [ Pico.set_single_bit r_ramaddr 29 # RAM base addr
+    ; Pico.arm_for_decr reg_alloc 25 $ \r_y \reg_alloc
+      Pico.arm_for_decr reg_alloc 25 $ \r_x \reg_alloc
+      reg_alloc $ \r_rgb \reg_alloc
+      reg_alloc $ \r_temp \reg_alloc
+      List.concat_list
+      [ Pico.arm_mov r_rgb r_y # R = y/4
+      ; Pico.arm_lsrs r_rgb r_rgb 2
+      ; Pico.arm_lsls r_rgb r_rgb 8
+      ; Pico.arm_mov r_temp r_x # G = x/4
+      ; Pico.arm_lsrs r_temp r_temp 2
+      ; Pico.arm_orrs r_rgb r_temp
+      ; Pico.arm_lsls r_rgb r_rgb 8
+      ; Pico.arm_movs r_temp $ Nat.from_hex "01" # B
+      ; Pico.arm_orrs r_rgb r_temp
+      ; Pico.arm_str r_rgb r_ramaddr
+      ; Pico.arm_adds r_ramaddr 4 # next word
+      ]
+    ; Pico.arm_for_decr reg_alloc 25 $ \r_y \reg_alloc
+      Pico.arm_for_decr reg_alloc 25 $ \r_x \reg_alloc
+      reg_alloc $ \r_rgb \reg_alloc
+      reg_alloc $ \r_temp \reg_alloc
+      List.concat_list
+      [ Pico.arm_mov r_rgb r_x # R = x/4
+      ; Pico.arm_lsrs r_rgb r_rgb 2
+      ; Pico.arm_lsls r_rgb r_rgb 8
+      ; Pico.arm_mov r_temp r_y # G = y/4
+      ; Pico.arm_lsrs r_temp r_temp 2
+      ; Pico.arm_orrs r_rgb r_temp
+      ; Pico.arm_lsls r_rgb r_rgb 8
+      ; Pico.arm_movs r_temp $ Nat.from_hex "04" # B
+      ; Pico.arm_orrs r_rgb r_temp
+      ; Pico.arm_str r_rgb r_ramaddr
+      ; Pico.arm_adds r_ramaddr 4 # next word
+      ]
+    ]
+  ; let (\func \reg_alloc \pin
+      reg_alloc $ \r_siobase \reg_alloc
+      reg_alloc $ \r_bitmask \reg_alloc
+      List.concat_list
+      [ Pico.arm_movs r_siobase $ Nat.from_hex "D0"
+      ; Pico.arm_lsls r_siobase r_siobase 24 # SIO base address = D0 00 00 00
+      ; Pico.set_single_bit r_bitmask pin
+      ; Pico.arm_str_offset r_bitmask r_siobase func
+      ]
+    ) $ \arm_gpio_out_func
+    let (arm_gpio_out_func 24) $ \arm_gpio_out_set
+    let (arm_gpio_out_func 32) $ \arm_gpio_out_clr
+    let (arm_gpio_out_func 40) $ \arm_gpio_out_xor
+    # WS2801 LED strip wisdom:
+    # - Pause clock for >0.5ms to render sent data
+    # - Drive at ~1MHz (strip may support higher speeds, but unsure)
+    Pico.reg_alloc $ \r_counter \reg_alloc
+    List.concat_list
+    [ Pico.arm_movs r_counter 0
+    ; arm_gpio_out_set reg_alloc 25 # turn on onboard LED (=> indicates setup above completed)
+    ; # give caps time to charge, LED strips should be reliably powered before we send data!
+      Pico.arm_sleep_pow2 reg_alloc 23
+    ; Pico.arm_forever $ List.concat_list
+      [ arm_gpio_out_xor reg_alloc 25 # toggle onboard LED
+      ; Pico.arm_for_decr reg_alloc 25 $ \r_y \reg_alloc
+        Pico.arm_for_decr reg_alloc 25 $ \r_x \reg_alloc
+        # set one LED with value at RAM address = RAM base + 4*(25*(y + counter) + x)
+        reg_alloc $ \r_rgb_ramaddr \reg_alloc
+        List.concat_list
+        [ Pico.set_single_bit r_rgb_ramaddr 29 # RAM base addr
+        ; reg_alloc $ \r_25 \reg_alloc
+          reg_alloc $ \r_temp \reg_alloc
+          List.concat_list
+          [ Pico.arm_movs r_25 25
+          ; Pico.arm_subs_reg r_temp r_25 r_y
+          ; Pico.arm_adds_reg_short r_temp r_counter
+          ; Pico.arm_muls r_temp r_25
+          ; Pico.arm_lsls r_temp r_temp 2
+          ; Pico.arm_adds_reg_short r_rgb_ramaddr r_temp # +4*(25*(y + counter))
+          ; Pico.arm_lsrs r_temp r_y 1
+          ; Pico.arm_if_then_carry_set # account for LED strip zig-zag wiring
+              (Pico.arm_subs_reg r_temp r_25 r_x)
+              (List.concat (Pico.arm_mov r_temp r_x) (Pico.arm_subs r_temp 1))
+          ; Pico.arm_lsls r_temp r_temp 2
+          ; Pico.arm_adds_reg_short r_rgb_ramaddr r_temp # +4*x
+          ]
+        ; let r_rgb_ramaddr $ \r_rgb # NOTE: reusing r_rgb_ramaddr as r_rgb!
+          List.concat_list
+          [ Pico.arm_ldr_offset r_rgb r_rgb_ramaddr 0 # <= reusing same register
+          ; Pico.arm_lsls r_rgb r_rgb 8
+          ; Pico.arm_for_decr reg_alloc 24 $ \r_bitctr \reg_alloc
+            List.concat_list
+            [ arm_gpio_out_clr reg_alloc 19 # data low
+            ; Pico.arm_lsls r_rgb r_rgb 1
+            ; Pico.arm_if_carry_set $
+              arm_gpio_out_set reg_alloc 19 # data high (if carry set)
+            ; # one clock cycle: __|^^|
+              List.concat_list
+              [ Pico.arm_sleep reg_alloc 10
+              ; arm_gpio_out_set reg_alloc 18 # clock pin
+              ; Pico.arm_sleep reg_alloc 10
+              ; arm_gpio_out_clr reg_alloc 18 # clock pin
+              ]
+            ]
+          ]
+        ]
+      ; Pico.arm_sleep_pow2 reg_alloc 20 # let strip latch data
+      ; Pico.arm_adds r_counter 1 # r_counter = (r_counter + 1) % 16
+      ; reg_alloc $ \r_mask \reg_alloc
+        List.concat_list
+        [ Pico.arm_movs r_mask 15
+        ; Pico.arm_ands r_counter r_mask
+        ]
+      ]
+    ]
+  ]
+gradient = \_ Asm.assemble Pico.firmware_base_address $ List.concat_list
+  [ Pico.boot (Nat.from_hex "20082000") "start"
+  ; Pico.label "start"
+  ; gradient_program _
+  ]
+
+# The image to flash:
+file "gradient.uf2" "application/octet-stream" $ Pico.uf2 $ gradient _
+# = gradient.uf2 sha256:5e01228c27be595f3654a23d8d5d2e94557b928d5f1caba10965c5442f780879

@@ -1,0 +1,63 @@
+# Helpers for writing shows the board runs well. The machine pays hundreds of
+# reductions for an addition on binary nats and a few dozen for each bit a table
+# lookup walks, so a show is written as tables (Pico.table, Pico.lookup): what
+# depends on neither frame nor pixel is made at build time, what depends on the
+# frame alone once a frame, on the row once a row, and the pixel only looks up.
+#
+# The board shows a frame per t, as fast as it can work one out and send it. A
+# program written with t in tenths of a second goes through [paced_show show fps
+# program], which reads the board's t as frames, fps being how many tenths of a
+# frame a second the board manages for the program.
+
+_paced = \fps \program \t program (Nat.div (Nat.mul 100 t) fps)
+paced_show = \show \fps \program show fps (_paced fps program)
+
+# The table of a list's first 2^k elements: the even ones make the half for a
+# low bit 0, the odd ones the other.
+_deal = List.foldr (\x \p Pair.match (\evens \odds △ (△ x odds) evens) p) (△ [] [])
+from_list = \k Fn.pow k (\inner \l Pair.match (\evens \odds △ (inner evens) (inner odds)) (_deal l)) (List.head_or 0)
+
+# Pseudo-random numbers for the tables the build makes, cheaply, as those are
+# made with every build: 256 bytes from a linear congruential generator, and a
+# hash that looks bytes up by bytes (Pearson's). [hash a b] is 16 bits, from
+# the low bytes of a and b; [rand n a b] is one of 0..n-1.
+_bytes = from_list 8 $ List.map (Nat.shr 8)
+  (List.foldl (\l \_ △ (Nat.canonicalize (List.take 16 (Nat.add (Nat.mul 25173 (List.head_or 1 l)) 13849))) l) [] (List.range 256))
+byte = Pico.lookup 8 _bytes
+hash = \a \b let (byte (Nat.add (byte a) b)) $ \h Nat.add (Nat.mul 256 h) (byte (Nat.add (byte (Nat.add h 89)) a))
+rand = \n \a \b Nat.shr 16 (Nat.mul n (hash a b))
+
+# ⌊√n⌋ for n below 2^18, a bit at a time from the top.
+isqrt = \n List.foldl (\r \b let (Nat.add r b) $ \c Bool.match r c (Nat.is_lte (Nat.mul c c) n)) 0
+  (List.map Nat.pow2 (List.reverse (List.range 9)))
+monus = \a \b Bool.match 0 (Nat.sub a b) (Nat.is_lte b a)     # a − b, or 0
+rdiv = \a \b Nat.div (Nat.add a (Nat.div b 2)) b
+# x^0, x^1, …, x^(n−1) for x in 2^-bths
+powers = \b \n \x let (Nat.pow2 b) $ \one
+  List.reverse (List.foldl (\l \_ △ (Nat.shr b (Nat.mul (List.head_or one l) x)) l) [one] (List.range (Nat.pred n)))
+
+# sin(2πk/n)·2^10 for k up to n/4, by its Taylor series to the 7th power: 10
+# bits are plenty for a 25-pixel matrix, and fewer bits are what keeps the
+# build's tables cheap.
+sin_q = \n \k
+  let (Nat.div (Nat.mul k 6434) n) $ \x       # 2π·2^10 = 6434
+  let (\a \b Nat.shr 10 (Nat.mul a b)) $ \fx
+  let (fx x x) $ \x2
+  let (fx x2 x) $ \x3
+  let (fx x3 x2) $ \x5
+  Nat.sub x (Nat.sub (Nat.div x3 6) (Nat.sub (Nat.div x5 120) (Nat.div (fx x5 x2) 5040)))
+# [waves b amp] holds amp·(1 + sin(2πk/n)), rounded, for every k below n = 2^b:
+# the series worked out for a quarter turn, the rest by symmetry. A quadrant is
+# k's top two bits, so the deepest two levels of the table: for
+# k = r + n/4·quadrant, sin r, cos r, −sin r, −cos r, where cos r = sin(n/4 − r).
+waves = \b \amp
+  let (Nat.sub b 2) $ \qb
+  let (Nat.pow2 qb) $ \q
+  let (Pico.table qb (\r Nat.shr 10 (Nat.add 512 (Nat.mul amp (sin_q (Nat.pow2 b) r))))) $ \quarter
+  Pico.table qb (\r
+    let (Pico.lookup qb quarter r) $ \sin
+    let (Bool.match (Pico.lookup qb quarter (Nat.sub q r)) amp (Nat.is_zero r)) $ \cos
+    △ (△ (Nat.add amp sin) (Nat.sub amp sin)) (△ (Nat.add amp cos) (Nat.sub amp cos)))
+
+List.join " " $ List.map (compose Nat.to_string (Pico.lookup 6 (waves 6 100))) [0; 8; 16; 24; 32; 48; 63]
+# = 100 171 200 171 100 0 90
