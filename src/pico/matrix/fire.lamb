@@ -1,0 +1,41 @@
+# Fire.
+#
+# Two octaves of value noise scroll upward, and subtracting height makes the
+# heat fade toward the top; a black → red → yellow → warm white palette turns
+# heat into fire — white without its blue, which next to the red tips reads as
+# cold. Both octaves scroll at the same speed in pixels, so they are one
+# texture, made here, 32 pixels wide and 64 high: a frame only says how far it
+# has scrolled, and a row which palette — the heat its height leaves — it uses.
+# noise of a lattice with cells 2^b wide, 0..255, by y then x: hashed corners, smoothstep between
+_lattice = \b \seed
+  let (Nat.pow2 b) $ \cell
+  let (Pico.table (Nat.sub 6 b) (\cy Pico.table (Nat.sub 5 b) (\cx Pico.Matrix.byte (Pico.Matrix.hash (Nat.add cy seed) cx)))) $ \corners
+  let (\f let (Nat.div (Nat.mul 256 f) cell) $ \f Nat.div (Nat.mul (Nat.mul f f) (Nat.sub 768 (Nat.double f))) 65536) $ \smooth
+  let (\a \c \u Nat.div (Nat.add (Nat.mul a (Nat.sub 256 u)) (Nat.mul c u)) 256) $ \mix
+  Pico.table 6 (\y let (Nat.shr b y) $ \cy let (smooth (Nat.mod y cell)) $ \v
+    let (Pico.lookup (Nat.sub 6 b) corners cy) $ \above let (Pico.lookup (Nat.sub 6 b) corners (Nat.succ cy)) $ \below
+    Pico.table 5 (\x let (Nat.shr b x) $ \cx let (\row \cx Pico.lookup (Nat.sub 5 b) row cx) $ \at
+      mix (mix (at above cx) (at above (Nat.succ cx)) (smooth (Nat.mod x cell))) (mix (at below cx) (at below (Nat.succ cx)) (smooth (Nat.mod x cell))) v))
+_noise = let (_lattice 2 1) $ \coarse let (_lattice 1 2) $ \fine
+  Pico.table 6 (\y Pico.table 5 (\x Nat.div (Nat.add (Nat.double (Pico.lookup 5 (Pico.lookup 6 coarse y) x)) (Pico.lookup 5 (Pico.lookup 6 fine y) x)) 24))   # 0..31
+_palette = Pico.table 5 (\y Pico.table 5 (\n
+  # heat·255 = n/31·1.35·255 − (24 − y)/25·1.25·255 + 0.2·255
+  let (Pico.Matrix.monus (Nat.add 51 (Nat.div (Nat.mul n 1111) 100)) (Nat.div (Nat.mul (Pico.Matrix.monus 24 y) 1275) 100)) $ \heat
+  let (\k \off Nat.min 255 (Pico.Matrix.monus (Nat.div (Nat.mul heat k) 10) off)) $ \channel
+  [channel 26 38; Nat.min 190 (channel 24 242); Nat.div (channel 30 587) 12]))   # at the hottest 255 190 21
+# The picture: the colour of row y, column x, t tenths of a second in.
+fire = \t
+  let (Nat.div (Nat.mul 29 t) 20) $ \scroll       # 14.5 pixels a second, a frame being a tenth
+  \y let (Pico.lookup 6 _noise (Nat.add y scroll)) $ \noise
+  let (Pico.lookup 5 _palette y) $ \palette
+  \x Pico.lookup 5 palette (Pico.lookup 5 noise x)
+
+# On the board: 21.1 frames a second.
+fire_show = Pico.Matrix.paced_show Pico.Matrix.show 211 fire
+
+# What it draws, 4.3 s of it:
+Pico.Matrix.svg "fire.svg" 90 fire_show
+# = fire.svg sha256:2c64cb573552704ed8df0a507f9484b8e3099fd34eba5add09c15626749bb5be
+# The image to flash:
+Pico.Matrix.flash "fire.uf2" [fire_show]
+# = fire.uf2 sha256:6f81a0a191f21b7688029723b290eea5d140d8b975349dbad8a3afa79c6f0390
