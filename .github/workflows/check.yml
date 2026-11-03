@@ -69,3 +69,10 @@ jobs:
             exit 1
           fi
           echo "OK: lambada's exports unchanged"
+
+      # The editor splits a document into statements itself, on every keystroke;
+      # the build splits by the compiler's own `statements`, which build.sh just
+      # exported. Where they differ the editor compiles text the build never
+      # does, so every source here has to split alike under both.
+      - name: Check the editor splits sources as the compiler does
+        run: node submodules/lambada/codemirror/scripts/statements-agree.mjs src

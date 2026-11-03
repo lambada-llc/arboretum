@@ -65,6 +65,12 @@ for symbol in $compilers prelude; do
   mv "$compiler/$symbol.dag.new" "$compiler/$symbol.dag"
 done
 
+# The compiler's statement splitting on its own. Nothing compiles with it, so
+# there is nothing to probe: lambada holds its editor's splitting to it, which
+# is what keeps an editor from compiling text the build never does — see the
+# check that runs codemirror/scripts/statements-agree.mjs over src/.
+$dag extract --symbol Lambada.statements src/.dag-bundle-linked > "$compiler/statements.dag"
+
 # The scopes lambada's codemirror demo offers, cut the same way. A root brings
 # along what it is built from, so each file is self-contained.
 >&2 echo "Exporting demo environments"
