@@ -1,0 +1,118 @@
+# The fixpoint combinator as a tree, in 37 nodes, every node coloured by the
+# part of the program it belongs to:
+#
+#   fix f = △ (△ knot) (△ (△ (△ (△ △ f)) (△ (△ knot))))
+#   knot  = △ △ (△ (△ △ △) (△ (△ id) △))
+#   id    = △ (△ (△ △)) △
+#
+# It is drawn level by level, two rows to a level — its 13 levels are the
+# matrix's 25 rows — at columns scaled from a drawing of the record tree.
+_unfold = 0
+_const = 1
+_triage = 2
+_dup = 3
+_id = 4
+_compose = 5
+_white = 6                          # the stem holding compose
+_f = 7                              # f itself, the functional: no △ of fix's own
+_n = \group \x \children △ (△ group x) children
+_fix_record =
+  _n _unfold 9
+    [ _n _unfold 3
+      [ _n _const 3
+        [ _n _const 0 [];
+        _n _triage 5
+          [ _n _triage 3
+            [ _n _triage 2 [];
+            _n _triage 4 [] ];
+          _n _dup 8
+            [ _n _dup 7
+              [ _n _id 7
+                [ _n _id 6
+                  [ _n _id 6
+                    [ _n _id 6 [] ] ];
+                _n _id 8 [] ] ];
+            _n _dup 9 [] ] ] ] ];
+    _n _white 15
+      [ _n _compose 15
+        [ _n _compose 12
+          [ _n _compose 12
+            [ _n _compose 11 [];
+            _n _f 13 [] ] ];
+        _n _unfold 17
+          [ _n _unfold 17
+            [ _n _const 17
+              [ _n _const 15 [];
+              _n _triage 20
+                [ _n _triage 17
+                  [ _n _triage 16 [];
+                  _n _triage 18 [] ];
+                _n _dup 23
+                  [ _n _dup 21
+                    [ _n _id 21
+                      [ _n _id 20
+                        [ _n _id 20
+                          [ _n _id 20 [] ] ];
+                      _n _id 22 [] ] ];
+                  _n _dup 24 [] ] ] ] ] ] ] ] ]
+
+# The record with its colours taken off is fix itself, f standing for f.
+_fix = \f
+  let (△ △ (△ (△ △ △) (△ (△ (△ (△ (△ △)) △)) △))) $ \knot
+  △ (△ knot) (△ (△ (△ (△ △ f)) (△ (△ knot))))
+_uncoloured = fix $ \self \node Pair.match (\head \children Pair.match (\group \_
+    Bool.match (List.foldl (\t \c t (self c)) △ children) "f" (equal group _f)) head) node
+_to_string = Bool.to_source
+equal (_uncoloured _fix_record) (_fix "f")
+# = true
+
+# Every node's pixel and, toward each child, the pixels of the edge between:
+# △ (△ x y) (△ group (△ edge depth)), the edge's taking the child's group and
+# depth. An edge spans one row, the inner points of a straight line. The
+# recursion takes the child first: [self (Nat.succ depth)] alone would go
+# active as soon as depth is bound, and recurse without end.
+_fix_round = \a \k \n Nat.div (Nat.add (Nat.mul 2 (Nat.mul a k)) n) (Nat.mul 2 n)   # a k / n, rounded
+_fix_edge = \px \py \cx
+  let (Nat.diff px cx) $ \dx
+  let (Bool.match 2 dx (Nat.is_lte 2 dx)) $ \n
+  List.map (\k △
+    (Bool.match (\o Nat.sub px o) (\o Nat.add px o) (Nat.is_lte px cx) (_fix_round dx k n))
+    (Nat.add py (_fix_round 2 k n))) (List.drop 1 (List.range n))
+_fix_pixels = fix $ \self \node \depth Pair.match (\head \children Pair.match (\group \x
+    let (Nat.mul 2 depth) $ \y
+    △ (△ (△ x y) (△ group (△ false depth)))
+      (List.concat_map (\child Pair.match (\head \_ Pair.match (\cgroup \cx
+          List.concat
+            (List.map (\p △ p (△ cgroup (△ true (Nat.succ depth)))) (_fix_edge x y cx))
+            (self child (Nat.succ depth))) head) child) children)) head) node
+# Nodes before edges, so that where one meets the other the node shows; then
+# per row and column the first drawn there, △ where nothing is.
+_fix_drawn = let (_fix_pixels _fix_record 0) $ \all
+  let (\edge List.filter (\p equal edge (Pair.fst (Pair.snd (Pair.snd p)))) all) $ \only
+  List.concat (only false) (only true)
+_fix_rows = Pico.table 5 (\y
+  let (List.filter (\p equal y (Pair.snd (Pair.fst p))) _fix_drawn) $ \row
+  Pico.table 5 (\x List.head_or △ (List.map Pair.snd (List.filter (\p equal x (Pair.fst (Pair.fst p))) row))))
+
+# Colours: the record's own, at half strength for the supply, edges at a third
+# of their node's.
+_fix_hues = [[242; 187; 46]; [255; 107; 112]; [47; 192; 207]; [160; 140; 245];
+             [239; 127; 196]; [90; 160; 255]; [255; 255; 255]; [120; 120; 120]]
+_fix_scaled = \d \c List.map (\v Nat.div v d) c
+_fix_colour = \cell triage [0; 0; 0] (\_ [0; 0; 0]) (\g \rest Pair.match (\edge \_
+    _fix_scaled (Bool.match 2 6 edge) (List.nth_or [0; 0; 0] g _fix_hues)) rest) cell
+
+# The picture, the same every frame: worked out here, at build time.
+_coords = List.range Pico.Matrix.side
+fix_tree = let (List.map (\y List.map (\x _fix_colour (Pico.lookup 5 (Pico.lookup 5 _fix_rows y) x)) _coords) _coords) $ \image
+  \t \y let (List.nth_or [] y image) $ \row \x List.nth_or [0; 0; 0] x row
+
+# On the board: a frame a second, though the picture never changes.
+fix_tree_show = Pico.Matrix.show 10 fix_tree
+
+# What it draws:
+Pico.Matrix.svg "fix_tree.svg" 1 fix_tree_show
+# = fix_tree.svg sha256:9102614bc14abd1e99cc27642b9f8610b4cd75631f4b3778c0ff69c88e8f3ee8
+# The image to flash:
+Pico.Matrix.flash "fix_tree.uf2" [fix_tree_show]
+# = fix_tree.uf2 sha256:2a596061df9349fb6710787a90ae2c91d0ab0ef6a62b1593e2460a4643064e97

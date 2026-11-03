@@ -1,0 +1,17 @@
+# An HTML5 document as a string over Xml: the head every page carries —
+# doctype, charset, viewport, [title], [style] — followed by the caller's
+# [elements], body content and scripts alike (HTML infers the body tag).
+# Like Xml, content is emitted verbatim; callers pass HTML-safe strings.
+
+page = \title \style \elements List.concat_list $ List.concat
+  ["<!doctype html>";
+   Xml.element "meta" [△ "charset" "utf-8"] [];
+   Xml.element "meta" [△ "name" "viewport"; △ "content" "width=device-width, initial-scale=1"] [];
+   Xml.element "title" [] [title];
+   Xml.element "style" [] [style]]
+  elements
+
+# Tests
+_to_string = id
+page "Hi" "body{margin:0}" [Xml.element "p" [] ["hello"]]
+# = <!doctype html><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Hi</title><style>body{margin:0}</style><p>hello</p>

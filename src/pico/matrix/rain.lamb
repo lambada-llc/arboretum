@@ -1,0 +1,39 @@
+# Matrix rain: green code falling, every column its own speed and trail.
+#
+# Every column hashes its speed (in 16ths of a row per tenth of a second), trail
+# length and phase; its head is at row (t·speed + phase) mod 64, and a pixel
+# only asks how far behind the head it is — a table by row and head, made here.
+# A few trail pixels glow brighter for a while: a hashed table entered at a row
+# that moves every 4 tenths. The heads fall 2 to 5 rows a second, a third as
+# fast as they could: a white head takes the board some 24 frames to fade into
+# its green trail, and the slower it falls, the fewer rows that leaves white.
+_cols = Pico.table 5 (\x △ (△ (Nat.add 3 (Pico.Matrix.rand 6 x 1)) (Pico.Matrix.rand 1024 x 4)) (Nat.add 6 (Pico.Matrix.rand 9 x 2)))
+_behind = Pico.table 5 (\y Pico.table 6 (\head Bool.match 15 (Nat.min 15 (Nat.sub head y)) (Nat.is_lte y head)))
+_shade = Pico.table 4 (\len Pico.table 4 (\behind Pico.table 1 (\glyph
+  let (Nat.div (Nat.mul 255 (Nat.sub len behind)) (Nat.max 1 len)) $ \k
+  let (Nat.div (Nat.mul k (Pico.Matrix.isqrt k)) 16) $ \k
+  let (Bool.match k (Nat.min 255 (Nat.div (Nat.mul k 7) 5)) (equal glyph 1)) $ \k
+  Bool.match
+    (Bool.match [Nat.div k 10; Nat.div (Nat.mul k 95) 100; Nat.div k 4] [0; 0; 0] (Nat.is_lt len behind))
+    [217; 255; 217]
+    (Nat.is_zero behind))))
+_glyphs = Pico.table 5 (\y Pico.table 5 (\x Bool.match 0 1 (Nat.is_lt (Pico.Matrix.rand 100 x (Nat.add y 32)) 8)))
+# The picture: the colour of row y, column x, t tenths of a second in.
+rain = \t
+  let (Pico.table 5 (\x Pair.match (Pair.match \speed \phase \len
+      △ (List.drop 4 (Nat.add (Nat.mul t speed) phase)) (Pico.lookup 4 _shade len))
+      (Pico.lookup 5 _cols x))) $ \heads
+  let (Nat.div t 4) $ \slot
+  \y let (Pico.lookup 5 _behind y) $ \behind
+  let (Pico.lookup 5 _glyphs (Nat.add y slot)) $ \glyphs
+  \x Pair.match (\head \shade Pico.lookup 1 (Pico.lookup 4 shade (Pico.lookup 6 behind head)) (Pico.lookup 5 glyphs x)) (Pico.lookup 5 heads x)
+
+# On the board: 11.9 frames a second.
+rain_show = Pico.Matrix.paced_show Pico.Matrix.show 119 rain
+
+# What it draws, 4.4 s of it:
+Pico.Matrix.svg "rain.svg" 52 rain_show
+# = rain.svg sha256:ff91dfe5b9db252d4d90a2f7bae5bca09a55df2db49a80cc0e7be1af5ea10990
+# The image to flash:
+Pico.Matrix.flash "rain.uf2" [rain_show]
+# = rain.uf2 sha256:d621b458833f1dc46842c550143c78f10564f2892034658aea98db83a88368cf

@@ -1,0 +1,16 @@
+# The plainest show: each LED's column, row and the frame number as its red,
+# green and blue, so that a wrong row, column or frame shows at a glance.
+
+# The picture:
+coords = \t \y \x [x; y; t]
+
+# On the board: 50.5 frames a second.
+coords_show = Pico.Matrix.show 505 coords
+
+# The image to flash:
+Pico.Matrix.flash "coords.uf2" [coords_show]
+# = coords.uf2 sha256:42ca29ab6400adeb5a4e60be36a09e5c9ef2d7ca778bcfe7bec4e8e7bc7188e8
+# Its first frames as the board sends them, fading in from black and gamma
+# corrected, to check a simulation of the board against:
+file "coords.txt" "text/plain" $ Pico.Matrix.frames coords_show 6
+# = coords.txt sha256:5ab82d72450356460c029ea6f6fbf33acbccdeae1df883f1adbaeff533693932

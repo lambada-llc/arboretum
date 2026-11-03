@@ -1,0 +1,554 @@
+# The Raspberry Pi Pico 2 (RP2350, a Cortex-M33) as a target: Thumb machine
+# code, UF2 packaging, and — written in that machine code — a tree calculus
+# machine, an evaluator with a garbage collector for firmware to build on.
+# matrix/ builds one that colours an LED matrix.
+#
+# It is one file because LambAda has no imports: the instruction vocabulary is
+# only readable unqualified within its own file, and elsewhere only by its full
+# names, Pico.arm_movs and so on.
+
+# ── Thumb instructions ───────────────────────────────────────────────────────
+# Thumb encodings (16-bit ones, BL and UDIV), each a list of Asm items so that code is
+# built by concatenation. Field layouts follow the ARM ARM's encoding diagrams.
+Reg \= R0 | R1 | R2 | R3 | R4 | R5 | R6 | R7 | R8 | R9 | R10 | R11 | R12 | SP | LR | PC
+reg_idx = \r r 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+_r = reg_idx
+
+_t16 = \h [Asm.Bytes (Asm.u16 h)]
+_op = \hex \fields _t16 $ Nat.sum (△ (Nat.from_hex hex) fields)
+_at = Nat.shl
+
+word = \n [Asm.Bytes (Asm.u32 n)]
+label = \l [Asm.Label l]
+_span = Asm.span 0
+
+arm_nop = _op "BF00" []
+arm_movs = \rd \imm8 _op "2000" [_at 8 (_r rd); imm8]
+arm_cmp_imm = \rn \imm8 _op "2800" [_at 8 (_r rn); imm8]
+arm_adds = \rdn \imm8 _op "3000" [_at 8 (_r rdn); imm8]
+arm_subs = \rdn \imm8 _op "3800" [_at 8 (_r rdn); imm8]
+arm_subs3 = \rd \rn \imm3 _op "1E00" [_at 6 imm3; _at 3 (_r rn); _r rd]   # SUBS Rd, Rn, #imm3
+arm_lsls = \rd \rm \imm5 _op "0000" [_at 6 imm5; _at 3 (_r rm); _r rd]
+arm_lsrs = \rd \rm \imm5 _op "0800" [_at 6 imm5; _at 3 (_r rm); _r rd]
+arm_adds_reg = \rd \rn \rm _op "1800" [_at 6 (_r rm); _at 3 (_r rn); _r rd]
+arm_subs_reg = \rd \rn \rm _op "1A00" [_at 6 (_r rm); _at 3 (_r rn); _r rd]
+
+# Data processing on low registers: Rdn = Rdn op Rm.
+_dp = \hex \rdn \rm _op hex [_at 3 (_r rm); _r rdn]
+arm_ands = _dp "4000"
+arm_eors = _dp "4040"
+arm_tst = _dp "4200"
+arm_cmp = _dp "4280"
+arm_orrs = _dp "4300"
+arm_muls = _dp "4340"
+arm_bics = _dp "4380"
+arm_negs = _dp "4240"   # Rd = 0 - Rm
+arm_lsrs_reg = _dp "40C0"
+arm_uxtb = _dp "B2C0"
+arm_udiv = \rd \rn \rm List.concat (_op "FBB0" [_r rn]) (_op "F0F0" [_at 8 (_r rd); _r rm])   # 0 if Rm is
+
+# Any registers, high ones included; neither touches the flags.
+_hi = \hex \rd \rm _op hex [_at 7 (Nat.div (_r rd) 8); _at 3 (_r rm); Nat.mod (_r rd) 8]
+arm_adds_reg_short = _hi "4400"   # ADD Rdn, Rm
+arm_mov = _hi "4600"
+arm_cmp_hi = _hi "4500"
+arm_bx = \rm _op "4700" [_at 3 (_r rm)]
+
+# Loads and stores at Rn + offset: words at multiples of 4 up to 124, bytes up to 31.
+_mem = \hex \scale \rt \rn \offset _op hex [_at 6 (Nat.div offset scale); _at 3 (_r rn); _r rt]
+arm_str_offset = _mem "6000" 4
+arm_ldr_offset = _mem "6800" 4
+arm_strb_offset = _mem "7000" 1
+arm_ldrb_offset = _mem "7800" 1
+arm_str_sp = \rt \offset _op "9000" [_at 8 (_r rt); Nat.div offset 4]   # STR Rt, [SP, #offset]
+arm_ldr_sp = \rt \offset _op "9800" [_at 8 (_r rt); Nat.div offset 4]
+arm_sub_sp = \n _op "B080" [Nat.div n 4]
+arm_str = \rt \rn arm_str_offset rt rn 0
+arm_ldr_indirect = \rt \rn arm_ldr_offset rt rn 0
+arm_str_reg = \rt \rn \rm _op "5000" [_at 6 (_r rm); _at 3 (_r rn); _r rt]   # STR Rt, [Rn, Rm]
+arm_ldr_reg = \rt \rn \rm _op "5800" [_at 6 (_r rm); _at 3 (_r rn); _r rt]   # LDR Rt, [Rn, Rm]
+arm_ldrb_reg = \rt \rn \rm _op "5C00" [_at 6 (_r rm); _at 3 (_r rn); _r rt]  # LDRB Rt, [Rn, Rm]
+arm_strb_reg = \rt \rn \rm _op "5400" [_at 6 (_r rm); _at 3 (_r rn); _r rt]  # STRB Rt, [Rn, Rm]
+
+# Register lists: R0..R7, and bit 8 for LR (PUSH) or PC (POP).
+_reglist = List.foldl (\acc \r Nat.add acc (Bool.match (_at (_r r) 1) 256 (Nat.is_lte 8 (_r r)))) 0
+arm_push = \regs _op "B400" [_reglist regs]
+arm_pop = \regs _op "BC00" [_reglist regs]
+arm_stmia = \rn \regs _op "C000" [_at 8 (_r rn); _reglist regs]   # STM Rn!, regs
+arm_ldmia = \rn \regs _op "C800" [_at 8 (_r rn); _reglist regs]
+
+# Branches by a byte distance, for code that knows how far it jumps: _up lands
+# [offset] bytes before the branch, _down skips the [offset] bytes after it.
+arm_bcond = \cc \imm8 _op "D000" [_at 8 cc; imm8]
+_up8 = \offset Nat.div2 (Nat.sub (Nat.sub 512 4) offset)
+_down = \offset Nat.div2 (Nat.sub offset 2)
+arm_bne = arm_bcond 1
+arm_bne_up = compose arm_bne _up8
+arm_bne_down = compose arm_bne _down
+arm_bcs = arm_bcond 2
+arm_bcs_up = compose arm_bcs _up8
+arm_bcs_down = compose arm_bcs _down
+arm_bcc = arm_bcond 3
+arm_bcc_up = compose arm_bcc _up8
+arm_bcc_down = compose arm_bcc _down
+arm_bhi_down = compose (arm_bcond 8) _down
+arm_bls_down = compose (arm_bcond 9) _down
+arm_b = \offset _op "E000" [Nat.mod (Nat.div2 offset) 2048]
+arm_b_up = \offset arm_b (Nat.sub (Nat.sub 4096 4) offset)
+arm_b_down = \offset arm_b (Nat.sub offset 2)
+# CBZ only branches forward, by up to 126 bytes.
+_cbz = \rn \d Nat.sum [Nat.from_hex "B100"; _at 9 (Nat.shr 6 d); _at 3 (Nat.mod (Nat.div2 d) 32); _r rn]
+arm_cbz_down = \rn \offset _t16 (_cbz rn (Nat.sub offset 2))
+
+# Branches and loads by label. Thumb counts a distance from the instruction's
+# address + 4; a branch encodes it wrapped to its field's width. One that cannot
+# reach assembles to UDF instead, so the board faults at that address rather
+# than jumping somewhere else.
+_udf = \n List.concat_list (List.repeat (Nat.div n 2) (Asm.u16 (Nat.from_hex "DE00")))
+_ref = \n \ok \enc \l [Asm.Ref n (\a \t Bool.match (_udf n) (enc a t) (ok a t)) l]
+_fits = \bits \a \t
+  let (Nat.add a 4) $ \pc
+  let (Nat.pow2 (Nat.pred bits)) $ \half
+  Bool.match (Nat.is_lte (Nat.sub pc t) half) (Nat.is_lte (Nat.succ (Nat.sub t pc)) half) (Nat.is_lte pc t)
+_halfwords = \bits \a \t Nat.div2 (Nat.mod (Nat.sub (Nat.add t (Nat.pow2 32)) (Nat.add a 4)) (Nat.pow2 bits))
+_branch = \n \bits \enc _ref n (_fits bits) (\a \t enc (_halfwords bits a t))
+arm_b_to = _branch 2 12 $ \imm Asm.u16 (Nat.add (Nat.from_hex "E000") imm)
+arm_bcond_to = \cc _branch 2 9 $ \imm Asm.u16 (Nat.sum [Nat.from_hex "D000"; _at 8 cc; imm])
+arm_beq_to = arm_bcond_to 0
+arm_bne_to = arm_bcond_to 1
+arm_bcs_to = arm_bcond_to 2
+arm_bcc_to = arm_bcond_to 3
+arm_bls_to = arm_bcond_to 9
+arm_bl = _branch 4 25 $ \imm
+  let (Nat.shr 23 imm) $ \s
+  let (\bit Nat.mod (Nat.sum [1; s; Nat.mod (Nat.shr bit imm) 2]) 2) $ \j
+  List.concat
+    (Asm.u16 (Nat.sum [Nat.from_hex "F000"; _at 10 s; Nat.mod (Nat.shr 11 imm) 1024]))
+    (Asm.u16 (Nat.sum [Nat.from_hex "D000"; _at 13 (j 22); _at 11 (j 21); Nat.mod imm 2048]))
+_forward = \max \a \t Bool.and (Nat.is_lte (Nat.add a 4) t) (Nat.is_lte t (Nat.add a (Nat.add 4 max)))
+arm_cbz_to = \rn _ref 2 (_forward 126) (\a \t Asm.u16 (_cbz rn (Nat.sub t (Nat.add a 4))))
+# LDR Rt, [PC, #imm] and ADR Rd: the word at label l, and its address, at most
+# 1020 bytes ahead of the instruction's address + 4 rounded down to a word —
+# which the machine's code all is of its pool.
+_pool_base = \a let (Nat.add a 4) $ \pc Nat.sub pc (Nat.mod pc 4)
+_pc_rel = \hex \rd _ref 2
+  (\a \t let (_pool_base a) $ \base Bool.and (Nat.is_zero (Nat.mod t 4)) (Bool.and (Nat.is_lte base t) (Nat.is_lte (Nat.sub t base) 1020)))
+  (\a \t Asm.u16 (Nat.sum [Nat.from_hex hex; _at 8 (_r rd); Nat.div (Nat.sub t (_pool_base a)) 4]))
+arm_ldr_to = _pc_rel "4800"
+arm_adr = _pc_rel "A000"
+# A word holding the address of l, and one holding it as a Thumb code address.
+word_of = \l [Asm.Ref 4 (\_ \t Asm.u32 t) l]
+_code_word_of = \l [Asm.Ref 4 (\_ \t Asm.u32 (Nat.succ t)) l]
+
+_to_string = id
+List.concat_map Nat.byte_to_hex $ Asm.assemble 0 $ List.concat_list [arm_b_to "x"; label "x"; arm_bne_to "x"; arm_bl "x"]
+# = FFE7FED1FFF7FDFF
+List.concat_map Nat.byte_to_hex $ Asm.assemble 0 $ List.concat_list [arm_ldr_to R3 "w"; [Asm.Align 4]; label "w"; word 7]
+# = 004B000007000000
+List.concat_map Nat.byte_to_hex $ Asm.assemble 0 $ List.concat_list [arm_b_to "far"; [Asm.Space 4096]; label "far"]
+# = 00DE
+
+# ── Images ───────────────────────────────────────────────────────────────────
+firmware_base_address = Nat.from_hex "10000000"
+
+# UF2, what the board's USB drive takes: 256-byte payloads in 512-byte blocks.
+uf2_block = \blocks_total \block_index \target_address \payload_256 List.concat_list
+  [ Asm.u32 $ Nat.from_hex "0A324655" # First magic number
+  ; Asm.u32 $ Nat.from_hex "9E5D5157" # Second magic number
+  ; Asm.u32 $ Nat.from_hex "00002000" # Flags (here: family ID present)
+  ; Asm.u32 target_address
+  ; Asm.u32 256 # Payload size
+  ; Asm.u32 block_index
+  ; Asm.u32 blocks_total
+  ; Asm.u32 $ Nat.from_hex "E48BFF59" # family ID (here: rp2350_arm_ns)
+  ; payload_256
+  ; List.repeat 220 0 # Padding (ignored)
+  ; Asm.u32 $ Nat.from_hex "0AB16F30" # Final magic number
+  ]
+uf2 = \firmware
+  let (List.map (\c List.concat c (List.repeat (Nat.sub 256 (List.length c)) 0)) (List.chunk 256 firmware)) $ \payload_chunks
+  let (List.length payload_chunks) $ \blocks_total
+  let (List.mapi (\payload_chunk \block_index uf2_block blocks_total block_index (Nat.add firmware_base_address (Nat.mul 256 block_index)) payload_chunk) payload_chunks) $ \blocks
+  List.concat_list blocks
+
+# The Cortex-M vector table as far as the boot ROM reads it — the initial SP and
+# the reset handler — and, within the first 4 KB where the boot ROM looks for
+# one, the smallest IMAGE_DEF block it accepts: start marker, an image type item
+# (an ARM executable), the last-item marker, a link back to itself, end marker.
+# Its words are where NMI's and HardFault's vectors would be: neither has
+# anything to do but stop, and a fault into a vector that is no Thumb address
+# stops the core in lockup.
+boot = \sp \reset List.concat_list
+  [ word sp
+  ; _code_word_of reset
+  ; List.concat_map (compose word Nat.from_hex) ["FFFFDED3"; "10210142"; "000001FF"; "00000000"; "AB123579"]
+  ]
+
+# ── Structured code ──────────────────────────────────────────────────────────
+# Control flow that knows its own extent, so it needs no labels. A body must not
+# contain Align: its size would depend on where it lands.
+set_single_bit = \rdest \bit List.concat_list
+  [ arm_movs rdest 1
+  ; arm_lsls rdest rdest bit
+  ]
+
+set_create = \initial initial
+set_take = \item \set
+  let (List.partition (equal item) set) $ Pair.match $ \result \set
+  List.match △ (\result \_ △ result set) result
+set_take_any = \set set
+
+reg_allocator = set_create [R7; R6; R5; R4; R3; R2; R1; R0]
+reg_alloc = \reg_allocator \f
+  let (set_take_any reg_allocator) $
+  triage (△ △) _ f
+reg_alloc = fix $ \self \reg_allocator \f
+  reg_alloc
+    reg_allocator
+    (\reg \reg_allocator f reg $ self reg_allocator)
+reg_alloc = reg_alloc reg_allocator
+
+arm_loop = \init \body \step \branch_instr List.concat_list
+  [ init
+  ; body
+  ; step
+  ; branch_instr $ Nat.add (_span body) (_span step)
+  ]
+arm_for_pow2_decr = \reg_alloc \init_exp \body
+  reg_alloc $ \reg_ctr \reg_alloc
+  arm_loop
+    (set_single_bit reg_ctr init_exp)
+    (body reg_ctr reg_alloc)
+    (arm_subs reg_ctr 1)
+    arm_bne_up
+arm_sleep_pow2 = \reg_alloc \sleep_exp arm_for_pow2_decr reg_alloc sleep_exp (\reg_ctr \reg_alloc [])
+arm_for_decr = \reg_alloc \init \body
+  reg_alloc $ \reg_ctr \reg_alloc
+  arm_loop
+    (arm_movs reg_ctr init)
+    (body reg_ctr reg_alloc)
+    (arm_subs reg_ctr 1)
+    arm_bne_up
+arm_sleep = \reg_alloc \sleep_steps arm_for_decr reg_alloc sleep_steps (\reg_ctr \reg_alloc [])
+arm_forever = \body arm_loop [] body [] arm_b_up
+
+arm_if_carry_set = \body
+  List.concat_list
+    [ arm_bcc_down $ _span body
+    ; body
+    ]
+
+arm_if_then_carry_set = \body_then \body_else
+  List.concat_list
+    [ arm_bcc_down $ Nat.add 2 $ _span body_then
+    ; body_then
+    ; arm_b_down $ _span body_else
+    ; body_else
+    ]
+
+arm_if_nonzero = \rn \body List.concat (arm_cbz_down rn (_span body)) body
+
+# ── A tree calculus machine ──────────────────────────────────────────────────
+# Routines in machine code for a firmware to assemble into its own program:
+# apply and apply_nat evaluate, gc and collect keep the heap, and boot, clocks
+# and the register helpers set the board up. They expect the program around them
+# to define these labels: state, the words a collection keeps (laid out as
+# matrix/matrix.lamb's pool lays them out); leaf, the leaf; =heap_end; the
+# peripherals' addresses =resets, =xosc, =xosc_ctrl, =pll_sys and =clocks0; and
+# button, which every collection calls and which may return at once.
+
+# SRAM: the stack takes the bottom 64 KB, so overflowing it leaves SRAM — a
+# fault, rather than a heap quietly overwritten. Then the machine itself and the
+# trees it runs, which a loader in flash copies there: raising clk_sys to 150 MHz
+# raises the flash clock too, by whatever divider the boot ROM left, and code
+# that no longer reads flash does not depend on it. Then the heap, up to
+# =heap_end.
+_sram = Nat.from_hex "20000000"
+stack_top = Nat.add _sram 65536
+machine_base = stack_top
+
+sio = \rd List.concat (arm_movs rd 208) (arm_lsls rd rd 24)   # 0xD0000000
+
+# Register helpers on a peripheral at rn + offset, through r1 and r2.
+_clear = \rn \offset \mask List.concat_list
+  [arm_ldr_offset R1 rn offset; arm_movs R2 mask; arm_bics R1 R2; arm_str_offset R1 rn offset]
+_until_any = \rn \offset \mask List.concat_list
+  [arm_movs R2 mask; arm_ldr_offset R1 rn offset; arm_tst R1 R2; arm_bcond 0 (_up8 4)]
+_until_bit31 = \rn \offset List.concat_list
+  [arm_ldr_offset R1 rn offset; arm_lsls R1 R1 1; arm_bcc_up 4]
+
+# Take the blocks in r2's mask out of reset, after [before] has had RESETS in r1,
+# and wait until they are done.
+unreset = \before List.concat_list
+  [ arm_ldr_to R0 "=resets"; arm_ldr_offset R1 R0 0; before
+  ; arm_bics R1 R2; arm_str_offset R1 R0 0
+  ; arm_ldr_offset R1 R0 8; arm_ands R1 R2; arm_cmp R1 R2; arm_bne_up 6   # RESET_DONE
+  ]
+
+# clk_sys at 150 MHz: the 12 MHz crystal through PLL_SYS, 12 MHz × 125 = 1500 MHz
+# for the VCO, divided by 5 and by 2. The steps are the SDK's: crystal on,
+# clk_sys and clk_ref off their aux muxes while the PLL changes, PLL from reset,
+# then clk_ref from the crystal and clk_sys from the PLL. The offsets are those
+# of CLOCKS (CLK_REF_CTRL 0x30, _DIV 0x34, _SELECTED 0x38, CLK_SYS_CTRL 0x3c,
+# _DIV 0x40, _SELECTED 0x44, CLK_SYS_RESUS_CTRL 0x84), XOSC (CTRL, STATUS 0x4,
+# STARTUP 0xc) and PLL (CS, PWR 0x4, FBDIV_INT 0x8, PRIM 0xc).
+# clk_sys from clk_ref, clk_ref from the ring oscillator, as at power-up: CLOCKS in r4.
+slow_clocks = List.concat_list
+  [ _clear R4 60 1; _until_any R4 68 1
+  ; _clear R4 48 3; _until_any R4 56 1
+  ]
+clocks = List.concat_list
+  [ arm_ldr_to R4 "=clocks0"                # no resus, which would switch clk_sys over on its own
+  ; arm_movs R1 0; arm_movs R2 132; arm_str_reg R1 R4 R2
+  ; arm_ldr_to R0 "=xosc"
+  ; arm_movs R1 141; arm_lsls R1 R1 1; arm_str_offset R1 R0 12    # STARTUP 282: the SDK's 6 ms
+  ; arm_ldr_to R1 "=xosc_ctrl"; arm_str_offset R1 R0 0            # enabled, FREQ_RANGE 1-15 MHz
+  ; _until_bit31 R0 4                       # STATUS.STABLE
+  ; slow_clocks
+  ; set_single_bit R2 14; unreset (List.concat (arm_orrs R1 R2) (arm_str_offset R1 R0 0))   # PLL_SYS, reset first
+  ; arm_ldr_to R0 "=pll_sys"
+  ; arm_movs R1 125; arm_str_offset R1 R0 8 # FBDIV 125, REFDIV being 1 out of reset
+  ; arm_movs R1 12; arm_str_offset R1 R0 4  # power up, PWR 0x2d less PD and VCOPD
+  ; _until_bit31 R0 0                       # CS.LOCK
+  ; arm_movs R1 82; arm_lsls R1 R1 12; arm_str_offset R1 R0 12    # POSTDIV1 5, POSTDIV2 2
+  ; arm_movs R1 4; arm_str_offset R1 R0 4   # and POSTDIVPD
+  ; set_single_bit R1 16; arm_str_offset R1 R4 52; arm_str_offset R1 R4 64   # clk_ref and clk_sys divided by 1
+  ; arm_movs R1 2; arm_str_offset R1 R4 48; _until_any R4 56 4  # clk_ref from the crystal, its aux mux unused
+  ; arm_movs R1 0; arm_str_offset R1 R4 60  # clk_sys's aux mux to PLL_SYS while unused,
+  ; arm_movs R1 1; arm_str_offset R1 R4 60; _until_any R4 68 2  # then clk_sys from it
+  ]
+
+# apply(r0 = a, r1 = b) -> r0, all values. r7 is the allocation pointer, r11
+# where the heap ends less the reserve; r0-r3 and r12 are clobbered,
+# r4-r6 kept. The calls in tail position are branches.
+apply = List.concat_list
+  [ label "apply"
+  ; arm_ldmia R0 [R2; R3]           # u, v
+  ; arm_cbz_to R2 "apply_leaf"
+  ; arm_cbz_to R3 "apply_stem"
+  ; arm_ldmia R2 [R0; R2]           # a = fork(u, y), y in r3: u's children
+  ; arm_cbz_to R0 "rule_k"
+  ; arm_cbz_to R2 "rule_s"
+  ; arm_mov R12 R2                  # u = fork(w, x): triage on b, w in r0, x in r12
+  ; arm_ldmia R1 [R1; R2]           # b's children p, q
+  ; arm_cbz_to R1 "apply_return"    # b = leaf: w
+  ; arm_cbz_to R2 "triage_stem"
+  ; arm_push [LR]                   # b = fork(p, q): y p q
+  ; arm_mov R0 R3
+  ; arm_b_to "apply_then"
+  ; label "rule_s"                  # u = stem(x): (x b) (y b)
+  ; arm_push [R0; R1; LR]
+  ; arm_mov R0 R3
+  ; arm_bl "apply"                  # y b
+  ; arm_mov R2 R0
+  ; arm_pop [R0; R1]                # x, b
+  ; label "apply_then"              # (r0 r1) r2, returning where the pushed lr says
+  ; arm_push [R2]
+  ; arm_bl "apply"
+  ; arm_pop [R1; R2]
+  ; arm_mov LR R2
+  ; arm_b_to "apply"
+  ; label "triage_stem"             # b = stem(p): x p
+  ; arm_mov R0 R12
+  ; arm_b_to "apply"
+  ; label "rule_k"                  # u = leaf: y
+  ; arm_mov R0 R3
+  ; label "apply_return"
+  ; arm_bx LR
+  ; label "apply_stem"              # stem(u) becomes fork(u, b): [u][b]
+  ; arm_mov R3 R1
+  ; arm_mov R1 R2
+  ; label "apply_leaf"              # a leaf becomes stem(b): [b][0], its v being 0
+  ; arm_cmp_hi R7 R11               # the new cell [r1][r3], collecting first if the space is full
+  ; arm_bcs_to "gc"
+  ; label "apply_room"
+  ; arm_mov R0 R7
+  ; arm_stmia R7 [R1; R3]
+  ; arm_bx LR
+  ]
+
+# A collector that slides what is live down to the heap's base, in place.
+# Branched to by apply when the heap is full, and back to where apply makes its
+# cell. Roots are r1 and r3 (that cell) and every word on the stack, up to r8
+# its top, that points into the heap: the stack holds nothing but trees, return
+# addresses and small numbers, so a word that points there is a tree.
+# No cell changes once made, and cells are made at the heap's top, out of
+# cells made before them: every cell points only further down. Sliding keeps
+# the order, so it stays that way, and it is what lets the collector work
+# without room of its own, in two sweeps (Jonkers's threading). Cells are at
+# multiples of 8 and words at multiples of 4, so no value has bit 0 set, and a
+# word with it set is a link to the word at that address less 1.
+#  - Down from the top: a cell is live once something live points at it. Each
+#    word that points at a cell is threaded onto it: the cell's u becomes a
+#    link to that word, and the word takes what u held, so that following the
+#    links from u ends at a word holding u's value. Of the live cell's own
+#    fields, that last word stands in for u when threading them on. A dead
+#    cell is given the address of the next live one above it. A map, a byte
+#    for each 512 bytes of the heap, in the room above its top, says which hold a
+#    cell something was threaded onto: one that holds none is passed over
+#    whole, its bottom cell alone being given that address.
+#  - Up from the base: each live cell's place is the next one free. Every word
+#    threaded onto it gets that place, the last of them giving back u's value,
+#    and it moves there; what it points at lies lower and has moved already, so
+#    its fields already say where those cells went. A dead cell is jumped over,
+#    along with every dead one above it.
+# A cell pointing at one not lower than itself breaks what this stands on: UDF.
+# Both marks move to where the slide ends: going back there keeps everything
+# that was live. A heap still full afterwards is out of memory: UDF.
+# Most cells die young, and one that has lived through a collection mostly
+# lives on (in a large program's setup, about 1% of either): so a collection slides
+# only the cells made since the last one ended, taking every cell below as
+# live — nothing there points at a newer one — unless fewer than 64 KB were
+# made since, or the last one's end lies above the top (the frame's trees let
+# go). A heap that leaves still full gets a whole collection.
+_card = 9                           # 2^9 bytes a map byte: 1 KB of map for the 512 KB the heap is at most
+_gc_reserve = 1280                  # the 256 bytes nat may take beyond the limit unchecked, then the map's
+# The word at r1 points at the cell at r0: threaded onto it, and marked on the
+# map at r5 (with r1, now a link, so odd). r1, r2 clobbered.
+_thread = List.concat_list
+  [ arm_ldr_offset R2 R0 0; arm_str_offset R2 R1 0
+  ; arm_adds R1 1; arm_str_offset R1 R0 0
+  ; arm_subs_reg R2 R0 R4; arm_lsrs R2 R2 _card; arm_strb_reg R1 R5 R2
+  ]
+# The same for what the cell at r6 points at, unless that is below the heap.
+_thread_down = \skip List.concat_list
+  [ arm_cmp R0 R4; arm_bcc_to skip
+  ; arm_cmp R0 R6; arm_bcc_down 2
+  ; [Asm.Bytes (_udf 2)]            # not lower than the cell pointing at it
+  ; _thread
+  ]
+gc = List.concat_list
+  [ label "gc"
+  ; arm_mov R12 LR; arm_bl "button"; arm_mov LR R12   # often enough to switch on, even mid-frame
+  ; arm_push [R1; R3; R4; R5; R6]
+  ; arm_adr R3 "state"; arm_ldr_offset R4 R3 0        # the heap, from its base
+  ; arm_ldr_offset R0 R3 28; arm_cmp R4 R0; arm_bcs_to "gc_whole"   # or from where the last one ended
+  ; arm_subs_reg R1 R7 R0; arm_bls_to "gc_whole"
+  ; arm_lsrs R1 R1 16; arm_beq_to "gc_whole"
+  ; arm_mov R4 R0
+  ; label "gc_whole"
+  ; arm_mov R5 R7                                       # to its top
+  ; set_single_bit R1 (Nat.sub 19 _card); arm_movs R0 0   # the map, cleared
+  ; label "gc_clear"; arm_subs R1 4; arm_str_reg R0 R5 R1; arm_bne_to "gc_clear"
+  ; arm_mov R6 SP
+  ; label "gc_root"                 # the stack's words that point into the heap
+  ; arm_cmp_hi R6 R8; arm_beq_to "gc_rooted"
+  ; arm_ldr_offset R0 R6 0; arm_mov R1 R6; arm_adds R6 4
+  ; arm_cmp R0 R4; arm_bcc_to "gc_root"
+  ; arm_cmp R0 R5; arm_bcs_to "gc_root"
+  ; _thread
+  ; arm_b_to "gc_root"
+  ; label "gc_rooted"
+  ; arm_mov R6 R5; arm_mov R3 R5    # r3: the lowest live cell so far
+  ; label "gc_card"                 # the 512 bytes below r6, swept unless the map has nothing there
+  ; arm_cmp R6 R4; arm_beq_to "gc_slide"
+  ; arm_subs_reg R0 R6 R4; arm_subs R0 8; arm_lsrs R0 R0 _card
+  ; arm_ldrb_reg R1 R5 R0
+  ; arm_lsls R0 R0 _card; arm_adds_reg R0 R4 R0; arm_mov R12 R0   # r12: where they start
+  ; arm_cmp_imm R1 0; arm_bne_to "gc_down"
+  ; arm_mov R6 R0
+  ; label "gc_dead"
+  ; arm_str_offset R3 R6 0
+  ; label "gc_down"                 # each cell from the top down
+  ; arm_cmp_hi R6 R12; arm_beq_to "gc_card"
+  ; arm_subs R6 8
+  ; arm_ldr_offset R0 R6 0
+  ; arm_lsrs R1 R0 1; arm_bcc_to "gc_dead"             # no link: dead
+  ; arm_mov R3 R6
+  ; label "gc_last"                 # the last word threaded onto it, holding u's value
+  ; arm_subs3 R1 R0 1; arm_ldr_offset R0 R1 0
+  ; arm_lsrs R2 R0 1; arm_bcs_to "gc_last"
+  ; _thread_down "gc_v"
+  ; label "gc_v"
+  ; arm_ldr_offset R0 R6 4; arm_mov R1 R6; arm_adds R1 4
+  ; _thread_down "gc_down"
+  ; arm_b_to "gc_down"
+  ; label "gc_slide"
+  ; arm_mov R7 R4                   # each live cell from the base up, to the next place free
+  ; label "gc_up"
+  ; arm_cmp R6 R5; arm_beq_to "gc_done"
+  ; arm_ldr_offset R0 R6 0
+  ; arm_lsrs R1 R0 1; arm_bcs_to "gc_unthread"
+  ; arm_mov R6 R0; arm_b_to "gc_up"
+  ; label "gc_unthread"             # every word threaded onto it gets its place, the last one's value is u
+  ; arm_subs3 R0 R0 1; arm_ldr_offset R1 R0 0; arm_str_offset R7 R0 0
+  ; arm_lsrs R2 R1 1; arm_bcc_to "gc_unthreaded"
+  ; arm_mov R0 R1; arm_b_to "gc_unthread"
+  ; label "gc_unthreaded"
+  ; arm_ldr_offset R2 R6 4
+  ; arm_stmia R7 [R1; R2]
+  ; arm_adds R6 8; arm_b_to "gc_up"
+  ; label "gc_done"
+  ; arm_adr R3 "state"; arm_str_offset R7 R3 8; arm_str_offset R7 R3 12   # the marks
+  ; arm_str_offset R7 R3 28
+  ; arm_ldr_to R0 "=heap_end"
+  ; arm_movs R1 (Nat.div _gc_reserve 256); arm_lsls R1 R1 8; arm_subs_reg R0 R0 R1
+  ; arm_mov R11 R0                  # the limit
+  ; arm_cmp_hi R7 R11; arm_bcc_to "gc_room"
+  ; arm_ldr_offset R0 R3 0; arm_cmp R4 R0
+  ; arm_bne_down 2
+  ; [Asm.Bytes (_udf 2)]            # out of memory
+  ; arm_movs R0 0; arm_str_offset R0 R3 28
+  ; arm_pop [R1; R3; R4; R5; R6]
+  ; arm_b_to "gc"
+  ; label "gc_room"
+  ; arm_pop [R1; R3; R4; R5; R6]
+  ; arm_b_to "apply_room"
+  ]
+
+# apply_nat(r0, r1): apply(r0, nat(r1)), nat(n) being a list of n's bits,
+# least significant first, built as cells on the heap without a collection
+# (the reserve): from the top bit down, so that each cell's tail is one made
+# before it. r2, r3 and r12 are clobbered on the way.
+apply_nat = List.concat_list
+  [ label "apply_nat"
+  ; arm_mov R12 R0
+  ; arm_adr R3 "leaf"               # zero is the empty list,
+  ; arm_cbz_to R1 "nat_done"
+  ; arm_movs R0 1; arm_lsls R0 R0 31
+  ; label "nat_top"                 # anything else from its top bit
+  ; arm_tst R1 R0; arm_bne_to "nat_bit"
+  ; arm_lsrs R0 R0 1; arm_b_to "nat_top"
+  ; label "nat_bit"                 # down: [bit][the list of the bits above]
+  ; arm_adr R2 "leaf"               # false
+  ; arm_tst R1 R0; arm_beq_to "nat_false"
+  ; arm_adds R2 8                   # true, the cell after the leaf
+  ; label "nat_false"
+  ; arm_stmia R7 [R2; R3]
+  ; arm_mov R3 R7; arm_subs R3 8
+  ; arm_lsrs R0 R0 1; arm_bne_to "nat_bit"
+  ; label "nat_done"
+  ; arm_mov R1 R3
+  ; arm_mov R0 R12
+  ; arm_b_to "apply"
+  ]
+
+# collect: a whole collection now. Clobbers r0-r3 and sets the limit.
+collect = List.concat_list
+  [ label "collect"
+  ; arm_push [LR]
+  ; arm_movs R0 0; arm_mov R11 R0
+  ; arm_adr R1 "state"; arm_str_offset R0 R1 28
+  ; arm_adr R0 "leaf"; arm_mov R1 R0; arm_bl "apply"   # a cell, no room for which collects
+  ; arm_pop [PC]
+  ]
+
+# ── Tables ───────────────────────────────────────────────────────────────────
+# The machine pays for arithmetic on binary nats in hundreds of reductions per
+# operation, so a program it runs again and again should do next to none: what
+# it would work out every time is best a table, made at build time and indexed
+# by the bits of its arguments themselves.
+#
+# [table k g] holds g n for every n below 2^k as a trie on n's bits, least
+# significant first; [lookup k table n] walks it, reading a nat with fewer bits
+# as padded with zeros and ignoring any beyond the k-th. It triages by hand:
+# through List.match and Bool.match a lookup costs twice the reductions.
+table = \k Fn.pow k (\inner \g △ (inner (\m g (Nat.double m))) (inner (\m g (Nat.succ (Nat.double m))))) (\g g 0)
+lookup = \k Fn.pow k (\inner \table \bits triage
+  (\table inner (Pair.fst table) △)
+  _
+  (\b \rest \table inner (triage Pair.fst (\_ Pair.snd) _ b table) rest)
+  bits table) (\table \_ table)
+
+Nat.to_string $ lookup 5 (table 5 (Nat.mul 3)) 21
+# = 63

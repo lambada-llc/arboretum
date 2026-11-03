@@ -1,0 +1,55 @@
+# Ripples: raindrops on a dark pond.
+#
+# Drop k falls at frame 11k, a frame being a tenth of a second, at a hashed
+# place; a pixel sums the wave packets of the two most recent, each read off a
+# table by the drop's age and the pixel's distance from it — by the time a
+# third would count, its packet has all but died away. A packet is in eighths,
+# 0..16 for −1..1, and so is their sum, clamped. Only crests light up, deep
+# blue at the foot through cyan to white at the top; the pond is dark.
+
+# |x − c|, by c then x
+_offsets = Pico.table 5 (\c Pico.table 5 (Nat.diff c))
+_drops = Pico.table 5 (\k △ (Nat.add 2 (Pico.Matrix.rand 21 k 1)) (Nat.add 2 (Pico.Matrix.rand 21 k 2)))
+_distance = Pico.table 5 (\dy Pico.table 5 (\dx Nat.min 31 (Pico.Matrix.rdiv (Pico.Matrix.isqrt (Nat.mul 256 (Nat.add (Nat.mul dx dx) (Nat.mul dy dy)))) 16)))
+# 8·(1 + sin((r − front)·1.6)·e^(−(r − front)²/6)·e^(−0.7·age)·2.6/(1 + 0.12·r)), the
+# front 0.7·age out: in tenths of a pixel, sevenths for the exponent, 2^-16 for
+# the rest.
+_sine = Pico.Matrix.waves 6 65536
+_decay = Pico.Matrix.from_list 6 (Pico.Matrix.powers 16 64 56812)   # e^(−k/7): e^(−1/7) = 56812/2^16
+_packets = Pico.table 6 (\age Pico.table 5 (\r
+  let (Nat.mul 10 r) $ \r10
+  let (Nat.mul 7 age) $ \front10
+  let (Nat.diff r10 front10) $ \off10
+  let (Nat.add (Nat.mul 7 (Nat.mul off10 off10)) (Nat.mul 294 age)) $ \y4200      # y7·600
+  Bool.match (\_ 8) (\y4200
+      let (Pico.Matrix.rdiv y4200 600) $ \y7
+      let (Pico.lookup 6 _sine (Pico.Matrix.rdiv (Nat.mul off10 163) 100)) $ \s   # 1 + sin(off·1.6): 1.6 rad = 16.3 64ths
+      let (Bool.match (Nat.sub 131072 s) s (Nat.is_lte front10 r10)) $ \s
+      let (Nat.div (Nat.mul 260 (Pico.lookup 6 _decay y7)) (Nat.add 100 (Nat.div (Nat.mul 12 r10) 10))) $ \amp
+      let (Nat.shr 29 (Nat.mul amp (Nat.diff s 65536))) $ \m      # ·8/2^32
+      Nat.min 16 (Bool.match (Pico.Matrix.monus 8 m) (Nat.add 8 m) (Nat.is_lte 65536 s)))
+    (Nat.is_lt y4200 37800) y4200))
+# by how far the two packets' sum stands above flat, in eighths
+_shades = [[0; 0; 0]; [0; 70; 210]; [0; 170; 255]; [60; 230; 255]; [170; 255; 255]]
+_colors = Pico.table 5 (\a Pico.table 5 (\b List.nth_or [0; 0; 0] (Nat.min 4 (Pico.Matrix.monus (Nat.min 16 (Pico.Matrix.monus (Nat.add a b) 8)) 8)) _shades))
+# drop j back from the newest: |x − its x| by x, its row, its packets by distance
+_drop = \newest \age \j Pair.match (\x \y △ (Pico.lookup 5 _offsets x) (△ y (Pico.lookup 6 _packets (Nat.add age (Nat.mul 11 j)))))
+  (Pico.lookup 5 _drops (Nat.sub (Nat.add newest 32) j))
+# The picture: the colour of row y, column x, t tenths of a second in.
+ripples = \t
+  let (_drop (Nat.div t 11) (Nat.mod t 11)) $ \drop
+  Pair.match (\xs0 Pair.match \y0 \packets0 Pair.match (\xs1 Pair.match \y1 \packets1
+    \y let (Pico.lookup 5 _distance (Nat.diff y y0)) $ \d0
+    let (Pico.lookup 5 _distance (Nat.diff y y1)) $ \d1
+    \x Pico.lookup 5 (Pico.lookup 5 _colors (Pico.lookup 5 packets0 (Pico.lookup 5 d0 (Pico.lookup 5 xs0 x)))) (Pico.lookup 5 packets1 (Pico.lookup 5 d1 (Pico.lookup 5 xs1 x))))
+    (drop 1)) (drop 0)
+
+# On the board: 10.6 frames a second, fading by 64 a frame.
+ripples_show = Pico.Matrix.paced_show (Pico.Matrix.show_slewing 64) 106 ripples
+
+# What it draws, 4.5 s of it:
+Pico.Matrix.svg "ripples.svg" 48 ripples_show
+# = ripples.svg sha256:d47a297d20900598c3e0b9614594e37d9611fc6e1a4485f3aa034ff063997273
+# The image to flash:
+Pico.Matrix.flash "ripples.uf2" [ripples_show]
+# = ripples.uf2 sha256:851fc986be680dd8c3a403dcea73f60d3339f5120bd0fa6020e583a9272b3114
