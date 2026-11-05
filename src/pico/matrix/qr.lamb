@@ -18,7 +18,7 @@ qr_show = Pico.Matrix.show_settled 1 qr
 
 # What it draws, each code shown for 10 s:
 Pico.Matrix.svg "qr.svg" 4 qr_show
-# = qr.svg sha256:5984964f716b8334a6458337829f7f9cf6b7c65dccbb87cd99a2f31d476ce068
+# = qr.svg image/svg+xml 51426 bytes sha256:5984964f716b8334a6458337829f7f9cf6b7c65dccbb87cd99a2f31d476ce068
 # The image to flash:
 Pico.Matrix.flash "qr.uf2" [qr_show]
-# = qr.uf2 sha256:5e834e12cf9a36038bcaf49ed2cb89fe966fd1df8d1e7614b35ef768c04dfa97
+# = qr.uf2 application/octet-stream 44032 bytes sha256:5e834e12cf9a36038bcaf49ed2cb89fe966fd1df8d1e7614b35ef768c04dfa97

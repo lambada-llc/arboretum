@@ -142,13 +142,13 @@ comments are left alone. Multi-line results wrap onto the continuation lines.
 An expression that evaluates to a
 [file](https://github.com/lambada-llc/tree-calculus/tree/main/conventions#files)
 — `△ (△ <name> <media type>) <bytes>` — is written into a sibling
-`expect-test-out/` directory instead, and the comment identifies it by name and
-content hash:
+`expect-test-out/` directory instead, and the comment says what it is — name,
+media type, size and content hash:
 
 ```lamb
 # src/expect_test.lamb
 △ (△ "hello.txt" "text/plain") "Hello, LambAda!"
-# = hello.txt sha256:169f0107cf1f…
+# = hello.txt text/plain 15 bytes sha256:169f0107cf1f…
 ```
 
 The test signal is the git diff, not the exit code of `./build.sh`, which

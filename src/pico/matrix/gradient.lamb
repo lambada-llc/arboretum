@@ -182,4 +182,4 @@ gradient = \_ Asm.assemble Pico.firmware_base_address $ List.concat_list
 
 # The image to flash:
 file "gradient.uf2" "application/octet-stream" $ Pico.uf2 $ gradient _
-# = gradient.uf2 sha256:5e01228c27be595f3654a23d8d5d2e94557b928d5f1caba10965c5442f780879
+# = gradient.uf2 application/octet-stream 1024 bytes sha256:5e01228c27be595f3654a23d8d5d2e94557b928d5f1caba10965c5442f780879

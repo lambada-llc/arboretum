@@ -112,7 +112,7 @@ fix_tree_show = Pico.Matrix.show 10 fix_tree
 
 # What it draws:
 Pico.Matrix.svg "fix_tree.svg" 1 fix_tree_show
-# = fix_tree.svg sha256:9102614bc14abd1e99cc27642b9f8610b4cd75631f4b3778c0ff69c88e8f3ee8
+# = fix_tree.svg image/svg+xml 30214 bytes sha256:9102614bc14abd1e99cc27642b9f8610b4cd75631f4b3778c0ff69c88e8f3ee8
 # The image to flash:
 Pico.Matrix.flash "fix_tree.uf2" [fix_tree_show]
-# = fix_tree.uf2 sha256:2a596061df9349fb6710787a90ae2c91d0ab0ef6a62b1593e2460a4643064e97
+# = fix_tree.uf2 application/octet-stream 14848 bytes sha256:2a596061df9349fb6710787a90ae2c91d0ab0ef6a62b1593e2460a4643064e97

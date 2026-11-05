@@ -35,7 +35,7 @@ fire_show = Pico.Matrix.paced_show Pico.Matrix.show 211 fire
 
 # What it draws, 4.3 s of it:
 Pico.Matrix.svg "fire.svg" 90 fire_show
-# = fire.svg sha256:2c64cb573552704ed8df0a507f9484b8e3099fd34eba5add09c15626749bb5be
+# = fire.svg image/svg+xml 358078 bytes sha256:2c64cb573552704ed8df0a507f9484b8e3099fd34eba5add09c15626749bb5be
 # The image to flash:
 Pico.Matrix.flash "fire.uf2" [fire_show]
-# = fire.uf2 sha256:6f81a0a191f21b7688029723b290eea5d140d8b975349dbad8a3afa79c6f0390
+# = fire.uf2 application/octet-stream 55296 bytes sha256:6f81a0a191f21b7688029723b290eea5d140d8b975349dbad8a3afa79c6f0390
