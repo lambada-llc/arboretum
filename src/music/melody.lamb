@@ -69,4 +69,4 @@ to_string _lambada
 #   ♪A4♪C5♪B4♪A4♪G4♪A4♪E4♪D4
 #   𝅗𝅥E4
 file "lambada.wav" "audio/wav" $ Audio.encode _sr (to_samples Audio.triangle _sr 120 _lambada)
-# = lambada.wav sha256:a98bb566ec9be1fc8abea8d2ed7b36bc4214b362a394e50745d726ec18f7844c
+# = lambada.wav audio/wav 44044 bytes sha256:a98bb566ec9be1fc8abea8d2ed7b36bc4214b362a394e50745d726ec18f7844c

@@ -49,7 +49,7 @@ ripples_show = Pico.Matrix.paced_show (Pico.Matrix.show_slewing 64) 106 ripples
 
 # What it draws, 4.5 s of it:
 Pico.Matrix.svg "ripples.svg" 48 ripples_show
-# = ripples.svg sha256:d47a297d20900598c3e0b9614594e37d9611fc6e1a4485f3aa034ff063997273
+# = ripples.svg image/svg+xml 206296 bytes sha256:d47a297d20900598c3e0b9614594e37d9611fc6e1a4485f3aa034ff063997273
 # The image to flash:
 Pico.Matrix.flash "ripples.uf2" [ripples_show]
-# = ripples.uf2 sha256:851fc986be680dd8c3a403dcea73f60d3339f5120bd0fa6020e583a9272b3114
+# = ripples.uf2 application/octet-stream 37376 bytes sha256:851fc986be680dd8c3a403dcea73f60d3339f5120bd0fa6020e583a9272b3114

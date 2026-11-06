@@ -61,4 +61,4 @@ of_stdin_stdout = \program List.concat_list ["#!/bin/bash
 
 # The identity program is cat.
 △ (△ "cat.sh" "text/x-shellscript") $ of_stdin_stdout id
-# = cat.sh sha256:88ce82de015a94b6ae6569ffde21ab61fb5ad8c2351f2aa5b8a83e8572f00e0d
+# = cat.sh text/x-shellscript 1406 bytes sha256:88ce82de015a94b6ae6569ffde21ab61fb5ad8c2351f2aa5b8a83e8572f00e0d

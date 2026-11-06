@@ -56,4 +56,4 @@ to_array id
 
 # The identity program is cat.
 △ (△ "cat.js" "text/javascript") $ of_string_string id
-# = cat.js sha256:89553a6861ffce81c15d43384178b17f6bb68cbb22bad3f0908dd668ce55ab1c
+# = cat.js text/javascript 1354 bytes sha256:89553a6861ffce81c15d43384178b17f6bb68cbb22bad3f0908dd668ce55ab1c

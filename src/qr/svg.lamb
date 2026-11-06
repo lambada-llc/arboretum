@@ -29,6 +29,6 @@ to_svg = \grid
 
 _to_string = id
 file "hi.svg" "image/svg+xml" $ to_svg $ Qr.create "Hi"
-# = hi.svg sha256:ae6a5a6872623a539dd0cbd115c699a35cc13f3ad18e13c9010c17d6a2b45e04
+# = hi.svg image/svg+xml 12595 bytes sha256:ae6a5a6872623a539dd0cbd115c699a35cc13f3ad18e13c9010c17d6a2b45e04
 file "url.svg" "image/svg+xml" $ to_svg $ Qr.create "https://treecalcul.us/"
-# = url.svg sha256:47c0b59f0dc022487df421fc6f603a4b782e9d5da329d575044b770eb650b24e
+# = url.svg image/svg+xml 19204 bytes sha256:47c0b59f0dc022487df421fc6f603a4b782e9d5da329d575044b770eb650b24e

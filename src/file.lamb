@@ -5,4 +5,4 @@
 file = \name \media_type \content △ (△ name media_type) content
 
 file "greeting.txt" "text/plain" "Hello, LambAda!"
-# = greeting.txt sha256:169f0107cf1f04ef1f514fe755abf1d909456d69ce8d507adeea8a20eb65dbb7
+# = greeting.txt text/plain 15 bytes sha256:169f0107cf1f04ef1f514fe755abf1d909456d69ce8d507adeea8a20eb65dbb7
