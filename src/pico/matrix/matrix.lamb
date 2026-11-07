@@ -436,22 +436,26 @@ _pv_key = \n \k let (Nat.to_string (Nat.div (Nat.mul k 10000) n)) $ \d       # k
 _pv_changes = \cs List.reverse $ List.foldl (\l \kc
     triage [kc] _ (\last \_ Bool.match (△ kc l) l (equal (Pair.snd last) (Pair.snd kc))) l)
   [] (List.zip_with △ (List.range (List.length cs)) cs)
-_pv_led = \n \dur \yx \cs
-  let (_pv_changes cs) $ \changes
+_pv_led = \keys \dur \yx \cs
+  let (List.map (Pair.match (\k \c △ k (_pv_hex c))) (_pv_changes cs)) $ \changes
   let (\v Nat.to_string (Nat.add 5 (Nat.mul 10 v))) $ \at
   Pair.match (\y \x Xml.element "circle" [△ "cx" (at x); △ "cy" (at y); △ "r" "4"; △ "fill" (Pair.snd (List.head_or △ changes))]
     (triage (\_ []) _ (\_ \_ \changes [Xml.element "animate"
         [△ "attributeName" "fill"; △ "calcMode" "discrete"; △ "dur" dur; △ "repeatCount" "indefinite";
-         △ "keyTimes" (List.join ";" (List.map (compose (_pv_key n) Pair.fst) changes));
+         △ "keyTimes" (List.join ";" (List.map (\kc List.nth_or "" (Pair.fst kc) keys) changes));
          △ "values" (List.join ";" (List.map Pair.snd changes))] []])
       (List.drop 1 changes) changes)) yx
+# There are n key times, worked out once; an LED's colours are compared as
+# bytes and written out only where they change. Per LED per frame, that work
+# was most of what an SVG took.
 preview = \show \n
   let (Pair.snd show) $ \paced
   let (Pair.snd paced 0) $ \program
-  let (List.map (\t List.concat_map (List.map _pv_hex) (_image program t)) (List.range n)) $ \frames
+  let (List.map (_pv_key n) (List.range n)) $ \keys
+  let (List.map (\t List.concat_list (_image program t)) (List.range n)) $ \frames
   let (List.concat_list [Nat.to_string (Nat.div (Nat.mul n 10000) (Pair.fst paced)); "ms"]) $ \dur
   Svg.root (Nat.mul 10 side) (Nat.mul 10 side) 1 []
-    (△ (Svg.background "#000") (List.zip_with (\yx \cs List.concat_list ["\n"; _pv_led n dur yx cs])
+    (△ (Svg.background "#000") (List.zip_with (\yx \cs List.concat_list ["\n"; _pv_led keys dur yx cs])
       (List.concat_map (\y List.map (△ y) _coords) _coords)
       (List.foldr (List.zip_with △) (List.repeat (Nat.mul side side) []) frames)))
 List.join " " $ List.map (_pv_key 7) [0; 1; 6]
