@@ -36,4 +36,4 @@ Pico.Matrix.svg "rain.svg" 52 rain_show
 # = rain.svg image/svg+xml 81845 bytes sha256:ff91dfe5b9db252d4d90a2f7bae5bca09a55df2db49a80cc0e7be1af5ea10990
 # The image to flash:
 Pico.Matrix.flash "rain.uf2" [rain_show]
-# = rain.uf2 application/octet-stream 36352 bytes sha256:d621b458833f1dc46842c550143c78f10564f2892034658aea98db83a88368cf
+# = rain.uf2 application/octet-stream 36352 bytes sha256:162a422d3c709dc26fd0fbc17b7e768042c69181ed1d17e219552979393f9321

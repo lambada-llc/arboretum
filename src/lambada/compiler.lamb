@@ -824,7 +824,10 @@ _krr2 = triage (\_rc \_recs2 \_self false) _
     (\c2 \r2 \rc \recs2 \self triage _krr_no (\_ _krr_go) _ (rc c2) r2 recs2 self)
 _krrE = triage (\name \_self triage true _ (\_h \_t false) name) _
     (\rc \recs2 \name \self _krr2 name rc recs2 self)
-_klkW = triage _ _ (\g \d △ (△ false g) d)
+# A name no binder in scope binds is closed, as a closed term written in its
+# place is: it stays [] rather than gaining a false per binder it was looked
+# up past, which would route it through the per-level rules instead.
+_klkW = triage _ _ (\g \d △ (triage [] _ (\_ \_ △ false g) g) d)
 _klkMiss = \es \name \self _klkW (self es name self)
 _klkE = triage (\name \_self △ [] (_kdleaf name)) _
     (\recs \es \name \self triage _klkMiss (\_ (\_es \_name \_self _kvar0)) _ (_krrE recs name _krrE) es name self)
@@ -1282,7 +1285,7 @@ compile_to_dag_bench "Foo = Foo x x4 x1 | Bar x0 x1 x2 x4"
 compile_to_dag_bench "\\d \\a \\i i d (\\x \\x a) a a a a"
 # = Tokenize: 5135
 #   Parse:    6216
-#   Lower:    16738
+#   Lower:    16442
 #   Emit:     17673
 
 # Literal size. A string literal is linear in both directions: a fixed ~75
