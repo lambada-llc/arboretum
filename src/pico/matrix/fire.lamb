@@ -29,6 +29,7 @@ fire = \t
   \y let (Pico.lookup 6 _noise (Nat.add y scroll)) $ \noise
   let (Pico.lookup 5 _palette y) $ \palette
   \x Pico.lookup 5 palette (Pico.lookup 5 noise x)
+
 _to_string = List.to_source Nat.to_source
 fire 0 13 13
 # = [76; 0; 0]
