@@ -52,4 +52,4 @@ Pico.Matrix.svg "ripples.svg" 48 ripples_show
 # = ripples.svg image/svg+xml 206296 bytes sha256:d47a297d20900598c3e0b9614594e37d9611fc6e1a4485f3aa034ff063997273
 # The image to flash:
 Pico.Matrix.flash "ripples.uf2" [ripples_show]
-# = ripples.uf2 application/octet-stream 37376 bytes sha256:851fc986be680dd8c3a403dcea73f60d3339f5120bd0fa6020e583a9272b3114
+# = ripples.uf2 application/octet-stream 37376 bytes sha256:3802e774854ce667997d59739afef3bb951a1afddd18ed40d418392785a1a9a9
