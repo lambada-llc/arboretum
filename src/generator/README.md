@@ -2,13 +2,10 @@
 
 `Generator.compress p` is a tree `G` that acts as the compiled program `p`:
 `G x` is `p x`, for any `x`. For a large program it is much smaller than `p`.
-The selfie's program takes the selfie as its first argument, so `fix G` is a
-selfie too: [selfie_program.lamb](../pico/selfie_program.lamb) defines
-`Pico.selfie_gen` so, and its tests keep the sizes and check that the decoder
-gives back the program exactly. That selfie is the one the Pico shows.
-
 It sees only the tree. It is a definition like any other, evaluated by the
 build with the rest of the library.
+[selfie_program.lamb](../pico/selfie_program.lamb) uses it, and its tests keep
+the sizes.
 
 ## How
 
@@ -33,7 +30,7 @@ build with the rest of the library.
 - **Decoder.** Decodes the data and compiles it the way LambAda does, so that
   the result, evaluated, is the tree. It recognises a variable by its compiled
   form being `I`; a program with another term compiling to `I` where the η
-  rules look decodes to another tree, and the selfie has none.
+  rules look decodes to another tree, which `compress`'s check catches.
 - **Bootstrap.** A closure compiler for a small λ-language with variables in
   binary; it runs the decoder, which is written in that language — in
   LambAda's own syntax, as a term under construction (the comment above
@@ -43,21 +40,17 @@ build with the rest of the library.
 
 `Generator.compress` checks that the data decodes to `p`, and is `p` itself
 where it does not; `Generator.data` and `Generator.assemble` are its two
-halves, for a caller that keeps the check as a test, as the selfie does. The
-check decodes as `G` does when applied, which is most of what `compress`
-costs: 5.7M reductions for the selfie, against 1.4M for its data.
+halves, for a caller that keeps the check as a test. The check decodes as `G`
+does when applied, which is most of what `compress` costs.
 
 ## Cost
 
 Reading is a function of the tree and of little else, and the build's
-evaluator remembers every application, so a tree met again costs nothing:
-the selfie's program, 50,835 nodes of which 3,668 are distinct, takes 1.4M
-reductions to turn into its data. Evaluation is eager, which shapes the code:
-see the comment at the top of [generator.lamb](generator.lamb).
+evaluator remembers every application, so a tree met again costs nothing.
+Evaluation is eager, which shapes the code: see the comment at the top of
+[generator.lamb](generator.lamb).
 
 `G` does its own work when it is applied, on a machine that may remember
-nothing, as the Pico's does: there, unpacking the selfie's program, decoding
-and compiling all of it, takes 23M reductions, a quarter of what the board does
-before the selfie's first frame. What it costs grows with how far out
-the variables each part uses are bound, which is why the selfie's program
-binds what its inner code uses close to it.
+nothing: it decodes and compiles all of the program first. What that costs
+grows with how far out the variables each part uses are bound, so a program
+meant to be compressed binds what its inner code uses close to it.

@@ -1,6 +1,5 @@
 # A generator for a compiled program p: a tree G that acts as p, G x = p x,
-# and is much smaller when p is large. A selfie's program takes the selfie as
-# its first argument, so fix G is a selfie too. It works from p's tree alone;
+# and is much smaller when p is large. It works from p's tree alone;
 # README.md says how:
 #
 #   G = λu. (λf. bootstrap f decoder △ f (data p) u) fix
@@ -243,7 +242,7 @@ _enc_head = △ (△ △ (△ △ △))
 _enc_fix = △ (△ △ (△ △ (△ △)))
 _smaller = \a \b Bool.match a b (Nat.is_lt (size b) (size a))
 # λ over e: one more on e's chain of λs, if it is one: e is △ (△ a n), a not
-# △ and n unary. A λ's body is never △.
+# △ and n unary.
 _one = \e △ (△ e △)
 _more = \a \n \e triage
     (\a \n \e △ (△ a (△ n)))
@@ -288,7 +287,7 @@ _pm = \ey \ex triage △
         n))
     (\_ \_ △)
     ey
-# N in bijective binary: △ is 0, △ c is 2N(c)+1, △ △ c is 2N(c)+2
+# c + 1, c in bijective binary as N above
 _csucc = fix $ \s triage (△ △) (\c △ △ c) (\_ \c △ (s c))
 _usize = fix $ \us \t \k triage (\k △ k) (\x \k △ (us x k)) (\x \y \k △ (us x (us y k))) t k
 _ult = fix $ \lt \a \b triage (\b triage false (\_ true) _ b) (\p \b triage false (\q lt p q) _ b) _ a b
