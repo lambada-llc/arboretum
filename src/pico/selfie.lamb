@@ -338,25 +338,21 @@ selfie_program = \self
   (_b1 iter)) _iter) (_le inc dec church)) _dec) _inc) _nl) _church
 
 # ── The generated selfie ─────────────────────────────────────────────────────
-# The generator makes, from the tree selfie_program compiles to and nothing
-# else, a smaller tree that acts as selfie_program, applied to anything. So fix
-# makes a selfie of it as it does of selfie_program.
-_selfie_data = Generator.data selfie_program
-selfie_gen = Generator.assemble _selfie_data
-_to_string = Bool.to_source
-equal (Generator.decode _selfie_data) selfie_program
-# = true
-
+# The generator packs the tree selfie_program compiles to, from that tree and
+# nothing else, into a much smaller one that gives it back, given fix;
+# expanded, that acts as selfie_program, applied to anything. So fix makes a
+# selfie of it as it does of selfie_program.
+_packed = Generator.compress selfie_program
+selfie_gen = Generator.expand _packed
 _selfie_gen = fix selfie_gen
 # The show: on the board, slewing by 128 since the view moves with it, at 9.8
 # frames a second, what the board manages.
 _fps = 98
 selfie_show = Pico.Matrix.show_staged 128 _fps _selfie_gen
-# The program; the generator, and of it the data, the decoder, the bootstrap
-# and fix; the selfie.
+# The program; packed, and expanded; the selfie.
 _to_string = \l List.join " " $ List.map Nat.to_string l
-[size selfie_program; size selfie_gen; size _selfie_data; size Generator.decoder; size Generator.bootstrap; size fix; size _selfie_gen]
-# = 50835 9405 7318 1658 340 57 9442
+[size selfie_program; size _packed; size selfie_gen; size _selfie_gen]
+# = 50835 9336 9405 9442
 
 # What it draws, 6.1 s of it:
 Pico.Matrix.svg "selfie.svg" 60 selfie_show
