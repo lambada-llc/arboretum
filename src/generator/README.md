@@ -1,15 +1,18 @@
 # generator
 
-`Generator.compress p` is a tree `G` that acts as the compiled program `p`:
-`G x` is `p x`, for any `x`. For a large program it is much smaller than `p`.
-It sees only the tree. It is a definition like any other, evaluated by the
-build with the rest of the library.
-[selfie.lamb](../pico/selfie.lamb) uses it, and its tests keep
-the sizes.
+`Generator.compress t` is the smallest tree `g` it finds with `g fix = t`. For
+a large compiled program `t` that is much smaller than `t`; `Generator.expand g`
+is then a tree that acts as `t`, applied to anything. It sees only the tree. It
+is a definition like any other, evaluated by the build with the rest of the
+library. [selfie.lamb](../pico/selfie.lamb) uses it, and its tests keep the
+sizes.
+
+`g` is given `fix` rather than nothing because evaluation is eager: a `g` that
+ignored its argument would be worked out, into `t`, before it was applied.
 
 ## How
 
-`G = λu. (λf. bootstrap f decoder △ f (data p) u) fix`
+`g = λf. bootstrap f decoder △ f (data t)`
 
 - **Read.** LambAda compiles by Kiselyov's algorithm, and evaluation leaves
   only the `△` shapes of the combinators it emits, so a closed tree is read as
@@ -34,15 +37,13 @@ the sizes.
 - **Bootstrap.** A closure compiler for a small λ-language with variables in
   binary; it runs the decoder, which is written in that language — in
   LambAda's own syntax, as a term under construction (the comment above
-  `_mk`). `fix` is given last, from outside: nothing is worked out before `G`
-  is applied, and the one copy serves the bootstrap, the decoder and the
+  `_mk`). The `fix` `g` is given serves the bootstrap, the decoder and the
   program.
 
-`Generator.compress` checks that the data decodes to `p`, and is `p` itself
-where it does not, or where `G` would be no smaller; `Generator.data` and
-`Generator.assemble` are its two halves, for a caller that keeps the check as a
-test. The check decodes as `G` does when applied, which is most of what
-`compress` costs.
+`compress` takes a candidate only if it gives `t` back, so the check is the
+whole contract: the tree above is one candidate, and `K t`, which gives `t` back
+for any argument and is two nodes more than `t`, is the other. Any other way of
+making `g` only has to join them. The check is most of what `compress` costs.
 
 ## Cost
 
@@ -51,7 +52,7 @@ evaluator remembers every application, so a tree met again costs nothing.
 Evaluation is eager, which shapes the code: see the comment at the top of
 [generator.lamb](generator.lamb).
 
-`G` does its own work when it is applied, on a machine that may remember
-nothing: it decodes and compiles all of the program first. What that costs
+`g` does its own work when it is given `fix`, on a machine that may remember
+nothing: it decodes and compiles all of `t` first. What that costs
 grows with how far out the variables each part uses are bound, so a program
 meant to be compressed binds what its inner code uses close to it.

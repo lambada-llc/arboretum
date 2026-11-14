@@ -1,8 +1,11 @@
-# A generator for a compiled program p: a tree G that acts as p, G x = p x,
-# and is much smaller when p is large. It works from p's tree alone;
-# README.md says how:
+# A generator for a tree t: a tree g with g fix = t, much smaller than t when
+# t is a large compiled program. It works from t's tree alone; README.md says
+# how:
 #
-#   G = λu. (λf. bootstrap f decoder △ f (data p) u) fix
+#   g = λf. bootstrap f decoder △ f (data t)
+#
+# g waits for fix because evaluation is eager (below): given an argument it did
+# not use, it would be worked out, into t, before it was ever applied.
 #
 # Evaluation is eager, and every application is remembered: the same function
 # on the same argument is worked out once. So each pass here is a function of
@@ -349,8 +352,8 @@ _enc_body = \self \t triage
         _
         (_pmkind f) f a self env mode))
     t self
-# [data v]: the program v as the decoder's data. The whole is written as its term.
-data = \v _enc_body _enc_body (△ (△ v) (_read v)) _env0 (△ △)
+# [_data v]: the program v as the decoder's data. The whole is written as its term.
+_data = \v _enc_body _enc_body (△ (△ v) (_read v)) _env0 (△ △)
 
 # ── The bootstrap's language ─────────────────────────────────────────────────
 # The decoder is written in LambAda's own syntax, as a term of the bootstrap's
@@ -392,7 +395,7 @@ _let = \e \f _l f e
 # cases for g2 get d2, which bf is applied to where g2 is △. eta p a b h is a h
 # where p is I and h is △, b h otherwise: it picks before it applies, and
 # looks at h before p.
-decoder = (_l \fix _l \prog
+_decoder = (_l \fix _l \prog
   let (_t _t) $ \kk
   let (_t (_t (_t _t)) _t) $ \ii
   _let (_t (_t (_t _t _t)) _t) $ \ss
@@ -424,7 +427,7 @@ decoder = (_l \fix _l \prog
   dec (_t _t _t) prog (_l \g _l \p p)) △ △
 
 # ── The bootstrap ────────────────────────────────────────────────────────────
-# A closure compiler for the language above: [bootstrap fix t △] is the value
+# A closure compiler for the language above: [_bootstrap fix t △] is the value
 # of the closed term t. A term compiles to a function of its environment, △
 # env x for x the innermost variable: [_fst] takes x, [_rst] env, and
 # [fix _drop c] is _rst composed 1+N(c) times. [_body n b] is what the first
@@ -435,30 +438,33 @@ _comp = \f \g △ (△ (△ △ f)) g
 _sq = \t _comp t t
 _drop = \drop (\d △ (△ _rst d) (△ △ (_comp (_comp _rst) d))) (_comp _sq drop)
 _body = △ (△ id (_comp (_comp △) △)) △
-bootstrap = \fix fix (\c △
+_bootstrap = \fix fix (\c △
     (△ (△ △ △) (△ (△ _fst (_comp (_comp _fst) (fix _drop))) (_comp (_comp (_comp (\cb \env _comp cb (△ env)) c)) _body)))
     (\f \a △ (△ (c f)) (c a)))
 
 # ── The generator ────────────────────────────────────────────────────────────
-# [decode d]: the tree of the program whose data is d, as G works it out.
-decode = \d bootstrap fix decoder △ fix d
-# [assemble d]: the generator for the program whose data is d. Nothing in it
-# is worked out before it is applied: fix, given last, is what all of it waits
-# for, and the one copy serves the bootstrap, the decoder and the program.
-assemble = \d \u (\f bootstrap f decoder △ f d u) fix
-# [compress p]: a tree G that acts as the tree p, G x = p x, and is never
-# larger: the generator of p's data, if that decodes to p and is smaller, and
-# p itself otherwise.
-compress = \p (\d _smaller p (Bool.match p (assemble d) (equal (decode d) p))) (data p)
+# [_pack t]: t's data and the decoder the bootstrap runs on it: given fix, which
+# then serves the bootstrap, the decoder and t, it works out t.
+_pack = \t \f _bootstrap f _decoder △ f (_data t)
+# [compress t]: the smallest tree g found with g fix = t. A candidate counts
+# only if it gives t back, which K t always does; that is all compress
+# promises, so any other way of making g can join the candidates.
+compress = \t (\k (\g _smaller k (Bool.match k g (equal (g fix) t))) (_pack t)) (△ △ t)
+# [expand g]: a tree that acts as t, where g fix = t: given u, it works out
+# g fix and applies that to u. Nothing is worked out before u comes, and the
+# one fix in it is the one g is given.
+expand = \g \u (\f g f u) fix
 
 _to_string = Bool.to_source
-equal (compress List.map Nat.succ [1; 2]) [2; 3]
+equal (compress List.map fix) List.map
 # = true
-# For a tree this small the generator would be larger, the decoder and the
-# bootstrap being most of it, so compress gives the tree itself.
+equal (expand (compress List.map) Nat.succ [1; 2]) [2; 3]
+# = true
+# For a tree this small the pack would be larger, the decoder and the bootstrap
+# being most of it, so compress gives K t, two nodes more than t.
 _to_string = \l List.join " " $ List.map Nat.to_string l
-[size List.map; size (compress List.map); size decoder; size bootstrap]
-# = 130 130 1658 340
+[size List.map; size (compress List.map); size _decoder; size _bootstrap]
+# = 130 132 1658 340
 # A larger program, the generator itself:
 [size compress; size (compress compress)]
-# = 794301 547756
+# = 782488 537468
