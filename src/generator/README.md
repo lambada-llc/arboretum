@@ -4,7 +4,7 @@
 `G x` is `p x`, for any `x`. For a large program it is much smaller than `p`.
 It sees only the tree. It is a definition like any other, evaluated by the
 build with the rest of the library.
-[selfie_program.lamb](../pico/selfie_program.lamb) uses it, and its tests keep
+[selfie.lamb](../pico/selfie.lamb) uses it, and its tests keep
 the sizes.
 
 ## How
