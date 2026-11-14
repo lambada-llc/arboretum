@@ -39,9 +39,10 @@ the sizes.
   program.
 
 `Generator.compress` checks that the data decodes to `p`, and is `p` itself
-where it does not; `Generator.data` and `Generator.assemble` are its two
-halves, for a caller that keeps the check as a test. The check decodes as `G`
-does when applied, which is most of what `compress` costs.
+where it does not, or where `G` would be no smaller; `Generator.data` and
+`Generator.assemble` are its two halves, for a caller that keeps the check as a
+test. The check decodes as `G` does when applied, which is most of what
+`compress` costs.
 
 ## Cost
 

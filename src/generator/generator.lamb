@@ -446,14 +446,19 @@ decode = \d bootstrap fix decoder △ fix d
 # is worked out before it is applied: fix, given last, is what all of it waits
 # for, and the one copy serves the bootstrap, the decoder and the program.
 assemble = \d \u (\f bootstrap f decoder △ f d u) fix
-# [compress p]: a tree G that acts as the tree p, G x = p x: the generator of
-# p's data, if that decodes to p, and p itself otherwise.
-compress = \p (\d Bool.match p (assemble d) (equal (decode d) p)) (data p)
+# [compress p]: a tree G that acts as the tree p, G x = p x, and is never
+# larger: the generator of p's data, if that decodes to p and is smaller, and
+# p itself otherwise.
+compress = \p (\d _smaller p (Bool.match p (assemble d) (equal (decode d) p))) (data p)
 
 _to_string = Bool.to_source
 equal (compress List.map Nat.succ [1; 2]) [2; 3]
 # = true
-# For a tree this small G is larger: the decoder and the bootstrap are most of it.
+# For a tree this small the generator would be larger, the decoder and the
+# bootstrap being most of it, so compress gives the tree itself.
 _to_string = \l List.join " " $ List.map Nat.to_string l
 [size List.map; size (compress List.map); size decoder; size bootstrap]
-# = 130 2123 1658 340
+# = 130 130 1658 340
+# A larger program, the generator itself:
+[size compress; size (compress compress)]
+# = 794301 547756
