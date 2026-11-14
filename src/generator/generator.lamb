@@ -1,0 +1,460 @@
+# A generator for a compiled program p: a tree G that acts as p, G x = p x,
+# and is much smaller when p is large. A selfie's program takes the selfie as
+# its first argument, so fix G is a selfie too. It works from p's tree alone;
+# README.md says how:
+#
+#   G = λu. (λf. bootstrap f decoder △ f (data p) u) fix
+#
+# Evaluation is eager, and every application is remembered: the same function
+# on the same argument is worked out once. So each pass here is a function of
+# the tree it is given and of little else, and a tree met again costs nothing.
+# Eager means that whatever part of a λ's body does not use its variable is
+# worked out as soon as the λ is. So a branch takes the variables it works on,
+# passed after the match, in the order they stand in (which the compiler then
+# passes on for free), and a function that recurses is passed to itself, into
+# each branch that calls it.
+
+# ── Reading ──────────────────────────────────────────────────────────────────
+_K = △ △
+_I = △ (△ (△ △)) △
+_S = △ (△ (△ △ △)) △
+_C = △ (△ (△ (△ (△ △ _S)) (△ (△ (△ △ _K)) _S))) (△ △ _K)
+_head = △ (△ △ △)
+_is_leaf = triage true (\_ false) (\_ \_ false)
+_is_K = equal_const _K
+_is_I = equal_const _I
+_is_S = equal_const _S
+_is_C = equal_const _C
+_is_csh = equal_const (△ (△ (△ △ _S)) (△ (△ (△ △ _K)) _S))
+_is_fix = equal_const fix
+_is_head = equal_const _head
+_is_KL = equal_const (△ △ △)
+# fix f is △ (△ knot) (△ (compose f (△ (△ knot))))
+_knot = const (triage △ △ (\q q (△ q)))
+_is_knot = equal_const _knot
+_is_tail = equal_const (△ (△ _knot))
+
+# Symbolic values: △ l the variable at level l, △ △ v the closed tree v,
+# △ (△ f a) w the application of f to a, with w, what it does given more
+# arguments: △ nothing, or △ need (△ tag args) — the combinator tag with the
+# arguments it has (△ none, one itself, two as △ p q). need: △ if the next
+# argument makes it step, △ n if n+1 more come first, and △ △ △ for R without
+# arguments, which takes a closed one first.
+_tK = △
+_tI = △ △
+_tB = △ (△ △)
+_tS = △ △ △
+_tC = △ △ (△ △)
+_tR = △ (△ △) △
+_closed = triage false (\_ false) (\x \_ triage true (\_ false) (\_ \_ false) x)
+# w with one more argument, as written: △ once it has all it takes, and also
+# where the step would not be one the compiler made the combinator for: B's
+# part is not the variable alone (λx. X x is written X, and what is that alone
+# is I), and C X Y has a Y with variables of its own unless X is closed too
+# (for a closed Y the compiler writes R Y X, which evaluates to C X Y once X is
+# closed). R Y is made for a closed Y; with any other it is C applied to C and Y.
+_add = \st \a triage a (\_ △ st a) (\_ \_ △ st a) st
+_is_clo_I = triage false (\_ false) (\x \v triage (_is_I v) (\_ false) (\_ \_ false) x)
+_last = \tag \st \a triage
+    (\tag \st \a △ △ (△ tag a))
+    (\_ \tag \st \a Bool.match (△ △ (△ tag (△ st a))) △ (_is_clo_I a))
+    (\l \r \tag \st \a triage
+      (\r \tag \st \a triage
+        (\tag \st \a △ △ (△ tag (△ st a)))
+        (\_ \tag \st \a Bool.match (△ △ (△ tag (△ st a))) △ (Bool.match false (_closed a) (Bool.not (_closed st))))
+        _ r tag st a)
+      (\_ \r \tag \st \a △ △ (△ tag (△ st a)))
+      _ l r tag st a)
+    tag tag st a
+_after = triage
+    (\a △)
+    _
+    (triage
+      (\ts \a △)
+      (\n \ts \a triage _ _ (\tag \st \n \a triage (\tag \st \a _last tag st a) (\m \tag \st \a △ (△ m) (△ tag (_add st a))) _ n tag st a) ts n a)
+      (\_ \_ \ts \a Bool.match (△ △ (△ _tC (△ (△ △ _C) a))) (△ (△ △) (△ _tR a)) (_closed a)))
+# What the closed tree v is: △ data, △ w a combinator, △ △ f fix applied to f.
+_short = \tag \a △ (△ (△ △) (△ tag (△ △ a)))
+_ready = \tag \a \b △ (△ △ (△ tag (△ (△ △ a) (△ △ b))))
+_readyB = \a \q Bool.match (_ready _tB a q) △ (_is_I q)
+_wK0 = △ (△ (△ △) (△ _tK △))
+_wI0 = △ (△ △ (△ _tI △))
+_wS0 = △ (△ (△ (△ △)) (△ _tS △))
+_wB0 = △ (△ (△ (△ △)) (△ _tB △))
+_wC0 = △ (△ (△ (△ △)) (△ _tC △))
+_wR0 = △ (△ (△ △ △) (△ _tR △))
+# △ (△ (△ △ a)) q
+_shape_b = \v \a \q triage
+    (\v \a \q triage (\a \q _wS0) (\_ \a \q _readyB a q) (\_ \_ \a \q _readyB a q) a a q)
+    (\t \v \a \q triage
+      (\v \a \q triage
+        (\a \q _readyB a q)
+        (\c \a \q triage (\a \q _readyB a q) (\c \a \q Bool.match (_short _tC c) _wR0 (_is_C c)) (\_ \_ \a \q _readyB a q) c a q)
+        (\_ \_ \a \q Bool.match (_readyB a q) _wB0 (_is_S a))
+        a a q)
+      (\_ \v \a \q _readyB a q)
+      (\l \t \v \a \q triage
+        (\t \v \a \q _readyB a q)
+        (\kf \t \v \a \q triage
+          (\t \v \a \q _readyB a q)
+          (\_ \t \v \a \q _readyB a q)
+          (\z \f \t \v \a \q Bool.match (_readyB a q) (△ △ f) (Bool.and (_is_leaf z) (Bool.and (_is_tail t) (_is_knot (△ △ a)))))
+          kf t v a q)
+        (\_ \_ \t \v \a \q _readyB a q)
+        l t v a q)
+      t v a q)
+    (\_ \_ \v \a \q Bool.match (_readyB a q) △ (_is_fix v))
+    q v a q
+# △ (△ p) q, p not △ △ a
+_shape_s = \p \q triage
+    (\p \q Bool.match (_ready _tS p q) _wI0 (_is_K p))
+    (\_ \p \q _ready _tS p q)
+    (\l \b \p \q triage
+      (\b \p \q Bool.match (Bool.match (_ready _tC p b) (_short _tR b) (_is_C p)) _wC0 (Bool.and (_is_K b) (_is_csh p)))
+      (\_ \b \p \q _ready _tS p q)
+      (\_ \_ \b \p \q _ready _tS p q)
+      l b p q)
+    q p q
+_shape = \v triage
+    △
+    (\x triage
+      _wK0
+      (\y triage (_short _tS y) (\_ _short _tS y) (\l \a triage (_short _tB a) (\_ _short _tS y) (\_ \_ _short _tS y) l) y)
+      (\_ \_ △)
+      x)
+    (\x \q triage
+      (\q △ (△ △ (△ _tK (△ △ q))))
+      (\p \q triage
+        (\p \q _shape_s p q)
+        (\_ \p \q _shape_s p q)
+        (\l \a \p \q triage (\a \p \q _shape_b v a q) (\_ \a \p \q _shape_s p q) (\_ \_ \a \p \q _shape_s p q) l a p q)
+        p p q)
+      (\_ \_ \q △)
+      x q)
+    v
+_what = \v triage △ (\w w) (\_ \_ △) (_shape v)
+_wof = triage △ (\_ △) (triage _what _ (\_ \_ \w w))
+_sapp = \f \a △ (△ f a) (_after (_wof f) a)
+# What e does with one more argument: △ nothing, △ △ it is short of more,
+# △ tag args it steps.
+_state = \e triage △ _ (triage (\ts ts) (\_ \_ △ △) (\_ \_ \_ △ △)) (_wof e)
+# e given the variable x, as a part of what is given x: its step — each the
+# application the compiler made that combinator for: S X Y x is (X x) (Y x),
+# B X Y x is X (Y x), C X Y x is (X x) Y, R Y X x the same — or e applied to x
+# as it is: a part must use the variable, and K's step would be without it.
+# (x comes first: one function for each variable, which the steps below it
+# then share.)
+_push_body = \x \self \e triage
+    (\e \self _sapp e x)
+    (\_ \e \self _sapp e x)
+    (triage
+      (\st \e \self _sapp e x)
+      (triage (\st \e \self x) (\_ triage _ _ (\p \q \e \self _sapp p (self self q))) _)
+      (triage
+        (triage (triage _ _ (\p \q \e \self _sapp (self self p) (self self q))) (\_ triage _ _ (\p \q \e \self _sapp (self self p) q)) _)
+        (\_ \_ triage _ _ (\q \p \e \self _sapp (self self p) q))
+        _))
+    (_state e) e self
+_push = \x \e (\b b b e) (_push_body x)
+
+# ── Terms ────────────────────────────────────────────────────────────────────
+# A λ-term with de Bruijn indices, unary: △ i the variable i, △ △ b λ over b,
+# △ (△ f a) △ f applied to a, △ (△ v) t the closed tree v, read as t.
+_sub = fix $ \sub \a \b triage (\a a) (\q \a triage △ (\p sub p q) _ a) _ b a
+_is_head_clo = triage false (\_ false) (\x \v triage (_is_head v) (\_ false) (\_ \_ false) x)
+# f applied to a, both read under d binders, as written: the head of a pair
+# match, applied to its function and to something more, stays as it is.
+_plain = \f \a \self \d △ (△ (self self f d) (self self a d)) △
+_written = \f \a \self \d triage
+    _
+    (\_ _plain)
+    (triage
+      (\_ _plain)
+      _
+      (\g \y \_ \f \a \self \d Bool.match
+        (\y \g \f \a \self \d _plain f a self d)
+        (\y \g \f \a \self \d △ (△ (△ (△ (self self g d) (self self y d)) △) (self self a d)) △)
+        (_is_head_clo g) y g f a self d))
+    f f a self d
+# data is read as △ applied to its parts: △ x y as △ x applied to y
+_kids = \self \v triage _
+    (\x \self △ (△ (self self (△ △ △) △) (self self (△ △ x) △)) △)
+    (\x \y \self △ (△ (self self (△ △ (△ x)) △) (self self (△ △ y) △)) △)
+    v self
+# [readv self v]: the closed tree v as a term; self is fin. A combinator
+# short of arguments is given the first variable.
+_lam1 = \self \r △ △ (self self r (△ △))
+_readv = \self \v Bool.match
+    (\v triage
+      (\self \v _kids self v)
+      (\_ \self \v triage
+        (\self \v _kids self v)
+        (\_ \self \v _lam1 self (_sapp (△ △ v) (△ △)))
+        (triage
+          (\p \self \v _lam1 self p)
+          (\_ \_ \self \v _lam1 self (_push (△ △) (△ △ v)))
+          (\_ \_ \_ \self \v _lam1 self (_push (△ △) (△ △ v))))
+        (_state (△ △ v)) self v)
+      (\_ \f \self \v △ (△ (self self (△ △ fix) △) (self self (△ △ f) △)) △)
+      (_shape v) self v)
+    (\_ △ △)
+    (Bool.match (_is_fix v) true (_is_leaf v)) v
+# [fin e d]: e under d binders as a term. A combinator short of arguments is
+# given the next variable.
+_fin_body = \self \e triage
+    _
+    (\l \self \d △ (_sub d (△ l)))
+    (triage
+      (\v \self \d △ (△ v) (_readv self v))
+      _
+      (\f \a \w \self \d triage
+        (\f \a \w \self \d _written f a self d)
+        (\_ \f \a \w \self \d △ △ (self self (_sapp (△ (△ f a) w) (△ d)) (△ d)))
+        (triage
+          (\p \f \a \w \self \d △ △ (self self p (△ d)))
+          (\_ \_ \f \a \w \self \d △ △ (self self (_push (△ d) (△ (△ f a) w)) (△ d)))
+          (\_ \_ \_ \f \a \w \self \d △ △ (self self (_push (△ d) (△ (△ f a) w)) (△ d))))
+        (_state (△ (△ f a) w)) f a w self d))
+    e self
+_read = \v _readv _fin_body v
+
+# ── The data ─────────────────────────────────────────────────────────────────
+# The term as the decoder's data:
+#
+#   △                         the constant △          △ f a        f applied to a
+#   △ △                       variable 0              △ (△ c)      variable 1+N(c)
+#   △ (△ △ △)                 the binder at level 1   △ (△ △ (△ c)) the binder at level 2+N(c)
+#   △ (△ △ (△ △ △))           △ (△ △ △), the head     △ (△ △ (△ △ (△ x)))  fix
+#   △ (△ △ (△ (△ x) v))       the value v
+#   △ (△ b n)                 1+|n| λs over b, n unary △ (△ b (△ p △))  △ (△ △ △) (λλ b) p
+#   △ (△ a (△ b (△ c)))       △ (△ a b) c             △ (△ a (△ b (△ c d)))  △ (△ a b) c d
+#   △ (△ b (△ (△ n e)))       the head (e △) or fix (e △ △) applied to the λs △ (△ b n)
+#
+# N is bijective binary: △ is 0, △ c is 2N(c)+1, △ △ c is 2N(c)+2. A variable
+# counts binders from the inside, a level from the outside, the outermost
+# being level 0; each reference is written the shorter way. A λ's body is never
+# △, which is what tells the level forms from it. The head applied to λλ b and
+# a pair is how LambAda's programs take a pair apart, and nearly every pair
+# taken apart is written so; △ (△ a b) c is how they take any tree apart, by
+# its three cases; and fix is applied to the λs of whatever recurs.
+_val = \v △ (△ △ (△ (△ △) v))
+_is_val = triage false (triage false (\_ false) (\a \b triage (triage false (\_ false) (\c \_ triage false (\_ true) (\_ \_ false) c) b) (\_ false) (\_ \_ false) a)) (\_ \_ false)
+_enc_head = △ (△ △ (△ △ △))
+_enc_fix = △ (△ △ (△ △ (△ △)))
+_smaller = \a \b Bool.match a b (Nat.is_lt (size b) (size a))
+# λ over e: one more on e's chain of λs, if it is one: e is △ (△ a n), a not
+# △ and n unary. A λ's body is never △.
+_one = \e △ (△ e △)
+_more = \a \n \e triage
+    (\a \n \e △ (△ a (△ n)))
+    (\y \a \n \e triage (△ (△ a (△ n))) (\_ △ (△ a (△ n))) (\_ \_ _one e) y)
+    (\_ \_ \a \n \e _one e)
+    n a n e
+_lam = \e triage
+    (\e _one (_val △))
+    (\x \e triage
+      (\x \e _one e)
+      (\_ \x \e _one e)
+      (\a \n \x \e triage (\a \n \e _one e) (\_ _more) (\_ \_ _more) a a n e)
+      x x e)
+    (\_ \_ \e _one e)
+    e e
+# The chain of λs ex is, as △ b n; △ if it is none.
+_lams = triage △ (triage △ (\_ △) (\b \n (\ok Bool.match (triage ok (triage ok (\_ ok) (\_ \_ △)) (\_ \_ △) n) △ (_is_leaf b)) (△ b n))) (\_ \_ △)
+# [_app ef ex]: ef applied to ex. The triage fork △ (△ a b) c, which is the
+# constant △ applied to △ a b and c, is written in its form, and so is the
+# fork applied (a is not written △, where the forms for levels and values
+# are); and so are the head and fix, △ (△ △ (△ △ e)), applied to a chain of λs.
+_app_tri = \a \b Bool.match (\_ \ex △ (△ a (△ b (△ ex)))) △ (_is_leaf a)
+_app_tri_more = \a triage △ (\_ △) (\b \r triage △ (\c \_ \ex △ (△ a (△ b (△ c ex)))) (\_ \_ △) r)
+_app_const = \e \ef \ex triage (△ ef ex) _ (\b \n △ (△ b (△ (△ n e)))) (_lams ex)
+_app_const_of = triage △ (\_ △) (\b \e triage (triage (_app_const e) (\_ _app_const e) (\_ \_ △) e) (\_ △) (\_ \_ △) b)
+_app = \ef triage
+    △
+    (triage △ (\_ △) (\a triage _app_const_of (\_ _app_tri_more a) (\_ \_ _app_tri_more a) a))
+    (\l \r triage
+      (triage △ (\_ △) (\g \b triage △ (\_ △) (\l2 \a triage (_app_tri a b) (\_ △) (\_ \_ △) l2) g))
+      (\_ \_ △)
+      (\_ \_ \_ △)
+      l r)
+    ef ef
+# the head applied to ey and ex, as a pair match: △ unless ey is λλ b, else △ of it
+_pm = \ey \ex triage △
+    (triage △ (\_ △)
+      (\a \n triage
+        △
+        (\m Bool.match (triage (△ (△ (△ a (△ ex △)))) (\m2 △ (△ (△ (△ (△ a m2)) (△ ex △)))) (\_ \_ △) m) △ (_is_leaf a))
+        (\_ \_ △)
+        n))
+    (\_ \_ △)
+    ey
+# N in bijective binary: △ is 0, △ c is 2N(c)+1, △ △ c is 2N(c)+2
+_csucc = fix $ \s triage (△ △) (\c △ △ c) (\_ \c △ (s c))
+_usize = fix $ \us \t \k triage (\k △ k) (\x \k △ (us x k)) (\x \y \k △ (us x (us y k))) t k
+_ult = fix $ \lt \a \b triage (\b triage false (\_ true) _ b) (\p \b triage false (\q lt p q) _ b) _ a b
+# The binders in scope: △ refs next. refs: for each, innermost first, its
+# reference by level (△ for the outermost, which has none); next: the level of
+# the binder to come, △ the outermost, △ △ the one below it, △ △ c the one N(c)
+# below that.
+_env0 = △ △ △
+_bind = Pair.match $ \refs \next △
+    (△ (triage △ (\_ △ (△ △ △)) (\_ \c △ (△ △ (△ c))) next) refs)
+    (triage (△ △) (\_ △ △ △) (\_ \c △ △ (_csucc c)) next)
+# a reference to the binder i up: by index, or by level where that is shorter
+_pick = \ix \lv triage (\ix ix) (\_ \ix Bool.match ix lv (_ult (_usize lv △) (_usize ix △))) (\_ \_ \ix ix) lv ix
+_var = \i \env triage
+    (\refs △ △)
+    (\j \refs (fix $ \go \j \refs \c triage
+        (\refs \c _pick (△ (△ c)) (Pair.fst refs))
+        (\j \refs \c go j (Pair.snd refs) (_csucc c))
+        _ j refs c) j (Pair.snd refs) △)
+    _ i (Pair.fst env)
+_is_head_part = triage false (\_ false) (\x \_ triage false _is_head (\_ \_ false) x)
+# What the function f of an application is to a pair match: △ nothing, △ y the
+# head applied to y (itself or the part it is).
+_headed = triage △ (\_ △) (\g \_ triage △ (\_ △) (\h \y Bool.match △ (△ y) (_is_head_part h)) g)
+_pmkind = triage △ (\_ △) (\p \q triage
+    (\q △)
+    (\_ _headed)
+    (\h \y \_ Bool.match △ (△ y) (_is_head_part h))
+    p q)
+# plain or the pair match pm: pm, unless a part written as its value (a or b)
+# made plain the smaller
+_choose = \plain \pm \a \b Bool.match (\plain \pm pm) (\plain \pm _smaller plain pm) (Bool.match (_is_val b) true (_is_val a)) plain pm
+# [enc t env mode]: t as data, under the binders env; mode: △ as it is, △ △ as
+# its term, also where it is a part. A closed part is written as its term or as
+# its value, whichever is smaller there, and a pair match in its own form
+# wherever one is seen, through the part it is.
+_enc_part = \v \u \self \env \mode (\e triage (\e \v _smaller e (_val v)) (\_ \e \v e) _ mode e v) (self self u env △)
+_enc_pm = \y \f \a \self \env (\ex (\ef (\plain triage
+        (\plain \ef plain)
+        (\pm \plain \ef _choose plain pm ef (triage ef (\_ ef) (\_ \ey ey) ef))
+        _
+        (_pm (self self y env (△ △)) ex) plain ef)
+      (△ ef ex))
+    (self self f env △))
+  (self self a env △)
+_enc_body = \self \t triage
+    _
+    (\i \self \env \mode _var i env)
+    (triage
+      (\b \self \env \mode _lam (self self b (_bind env) △))
+      (\v triage
+        (\u \self \env \mode △)
+        (\c \u \self \env \mode Bool.match (\u \self \env \mode _enc_part (△ c) u self env mode) (\_ \_ \_ \_ _enc_head) (_is_KL c) u self env mode)
+        (\c \d \u \self \env \mode Bool.match (\u \self \env \mode _enc_part (△ c d) u self env mode) (\_ \_ \_ \_ _enc_fix) (_is_fix (△ c d)) u self env mode)
+        v)
+      (\f \a \_ \self \env \mode triage
+        (\f \a \self \env \mode _app (self self f env △) (self self a env △))
+        (\y \f \a \self \env \mode _enc_pm y f a self env)
+        _
+        (_pmkind f) f a self env mode))
+    t self
+# [data v]: the program v as the decoder's data. The whole is written as its term.
+data = \v _enc_body _enc_body (△ (△ v) (_read v)) _env0 (△ △)
+
+# ── The bootstrap's language ─────────────────────────────────────────────────
+# The decoder is written in LambAda's own syntax, as a term of the bootstrap's
+# language under construction: such a term is a function that, applied to
+# another, is the application of the two, and applied to △ gives its tree,
+# given the number of binders around it. So juxtaposition is application, as
+# in LambAda; [_t] is △, [_l \x b] is λx. b, and [_let e \x b] is (λx. b) e.
+# The language: △ the constant △ | △ f a | △ △ variable 0 | △ (△ c) variable
+# 1+N(c) | △ (△ n b) 1+|n| λs over b, n unary.
+# λ over b: one more on b's chain of λs, if it is one
+_abs = \b (\one triage one (triage one (\_ one) (\n \a △ (△ (△ n) a))) (\_ \_ one) b) (△ (△ △ b))
+_mk = fix $ \mk \e \q triage e (\_ mk (\d △ (e d) (q △ d))) (\_ \_ mk (\d △ (e d) (q △ d))) q
+_t = _mk (\d △)
+_ncode = fix $ \nc triage △ (\j _csucc (nc j)) _
+_v = \l _mk (\d triage (△ △) (\j △ (△ (_ncode j))) _ (_sub d (△ l)))
+_l = \f _mk (\d _abs (f (_v d) △ (△ d)))
+_let = \e \f _l f e
+# The decoder: the program's data to the tree LambAda compiles of it, by
+# LambAda's own algorithm (Kiselyov's, with its η rules), so that the result,
+# evaluated, is the tree the build made. A definition bound with [let] is
+# written out wherever it is used, one bound with [_let] is bound in the term:
+# whichever made the term smaller.
+#
+# dec fs t k decodes t and calls k g d: d the compiled tree, g which binders it
+# uses, innermost first — △ none, △ h not this one then h, △ h △ this one then
+# h. fs is the g of a binder outside all those in scope, which turns a level
+# into a variable with tl alone; a constant is closed, so its g is △. A bare
+# variable compiles to I and nothing else that reaches an η check does, so I is
+# how one is recognised, by its shape.
+# comb d1 d2 g1 g2 is d1 applied to d2 under the binders, Kiselyov's combine;
+# abl decodes λ chains, and the forms of an application — fix or the head
+# applied to λs, a pair match, a triage fork — which it writes back as
+# applications and decodes again.
+#
+# The language is eager too: an argument is worked out before it is passed,
+# and so is a triage's case for △, which no λ guards. So a case that costs
+# gets what it works on after the triage has picked it: comb's cases for g1
+# get fc, which the two where d1 does not use this binder share, and fc's
+# cases for g2 get d2, which bf is applied to where g2 is △. eta p a b h is a h
+# where p is I and h is △, b h otherwise: it picks before it applies, and
+# looks at h before p.
+decoder = (_l \fix _l \prog
+  let (_t _t) $ \kk
+  let (_t (_t (_t _t)) _t) $ \ii
+  _let (_t (_t (_t _t _t)) _t) $ \ss
+  let (_t (_t (_t _t ss)) kk) $ \bb
+  _let (_t (_t (_t (_t (_t _t ss)) (_t (_t (_t _t kk)) ss))) (_t _t kk)) $ \cc
+  _let (cc ii) $ \tt
+  let (cc cc) $ \rr
+  let (_l \x _t (_t x (_l \_ x))) $ \uf
+  _let (_l \ll _l \x _t (_t ll (_l \_ x)) (_l \_ _l \_ x)) $ \nl
+  _let (_t (_t _t (_l \k k)) (_l \k _l \_ k)) $ \tl
+  _let (_l \p _l \a _l \b _l \h _t (_t a (_l \_ b)) _t (_t (_t (uf kk (_l \l _l \r nl (_t (_t kk (_l \x _t (_t kk (nl _t kk)) (_l \_ _l \_ kk) x)) (_l \_ _l \_ kk) l) kk r)) (_l \_ _l \_ kk)) (_l \_ _l \_ _l \_ kk) h p) h) $ \eta
+  _let (fix (_l \comb _l \p1 _l \p2 _l \g1 _l \g2
+      (_l \nx _t (_t (_l \fc fc _t p1) (_l \h1 _l \fc fc h1 (_l \q comb p1 q h1 _t))) (_l \h1 _l \_ _l \_ _t (_t (eta p1 (kk (tt p2)) (comb (rr p2) p1 _t) h1) (_l \h2 eta p1 (_l \_ comb tt p2 _t h2) (_l \h1 nx cc h1 h2) h1)) (_l \h2 _l \_ nx ss h1 h2) g2) g1
+        (_l \h1 _l \bf _t (_t bf (_l \h2 _l \p2 comb p1 p2 h1 h2)) (_l \h2 _l \_ _l \p2 eta p2 (kk p1) (_l \h2 nx bb h1 h2) h2) g2 p2))
+      (_l \x _l \h1 comb (comb x p1 _t h1) p2 h1))) $ \comb
+  let (fix (_l \or _l \a _l \b _t (_t b (_l \h _t (_t a (_l \k _t (or h k))) (_l \k _l \_ _t (or h k) _t) b)) (_l \h _l \_ _t (or h (tl b)) _t) a)) $ \or
+  let (_l \k _l \g _l \p k (tl g) (_t (_t (kk p) (comb kk p _t)) (_l \_ _l \_ p) g)) $ \kabs
+  let (_l \k _l \g1 _l \p1 _l \g2 _l \p2 k (or g1 g2) (comb p1 p2 g1 g2)) $ \kapp
+  _let (fix (_l \d _t (_t _t (_l \x nl _t (_t _t (d x)) x)) (_l \_ _t))) $ \decr
+  let (_t (_t _t (_t _t _t))) $ \vpmh
+  let (_l \dec _l \fs _l \a _l \b _let (_l \k dec (_t fs) (_t (_t a (_l \m _t (_t a m))) _t b) (kabs k)) $ \x
+      _t (_t x (_t (_t x (_l \_ x)) (_l \n _l \e dec fs (_t (_t (_t _t (_t _t e))) (_t (_t a n))))))
+      (_l \q _l \r _let (_t (_t _t (_t (_t _t a) q))) $ \s dec fs (_t (_t (_t (_t vpmh (_t (_t a (_t _t)))) q) s) (_t (_t (_t _t _t)) s) r)) b) $ \abl
+  let (fix (_l \dec _l \fs _t
+      (_t (_l \k k _t _t)
+        (_t (_t (_l \k k (_t _t _t) ii) (_l \y _l \k dec fs (nl (_t _t) (_t (_t (decr y))) y) (_l \g k (_t g))))
+          (_l \a _l \b nl (_t (_t (_l \k k (tl (tl fs)) ii) (_l \ll _l \k dec fs (_t (_t _t (nl _t (_t (decr ll)) ll))) (_l \g k (tl g)))) (_l \c _l \e _l \k k _t (nl (nl (_t (_t _t _t)) fix e) e c)) b) (abl dec fs a b) a)))
+      (_l \f _l \a _l \k dec fs f (_l \g1 _l \p1 dec fs a (kapp k g1 p1))))) $ \dec
+  dec (_t _t _t) prog (_l \g _l \p p)) △ △
+
+# ── The bootstrap ────────────────────────────────────────────────────────────
+# A closure compiler for the language above: [bootstrap fix t △] is the value
+# of the closed term t. A term compiles to a function of its environment, △
+# env x for x the innermost variable: [_fst] takes x, [_rst] env, and
+# [fix _drop c] is _rst composed 1+N(c) times. [_body n b] is what the first
+# of the 1+|n| λs of △ (△ n b) is over: b, or the other |n| over b.
+_fst = △ (△ △ △) (△ △ (△ (△ (△ △)) △))
+_rst = △ (△ △ △) (△ △)
+_comp = \f \g △ (△ (△ △ f)) g
+_sq = \t _comp t t
+_drop = \drop (\d △ (△ _rst d) (△ △ (_comp (_comp _rst) d))) (_comp _sq drop)
+_body = △ (△ id (_comp (_comp △) △)) △
+bootstrap = \fix fix (\c △
+    (△ (△ △ △) (△ (△ _fst (_comp (_comp _fst) (fix _drop))) (_comp (_comp (_comp (\cb \env _comp cb (△ env)) c)) _body)))
+    (\f \a △ (△ (c f)) (c a)))
+
+# ── The generator ────────────────────────────────────────────────────────────
+# [decode d]: the tree of the program whose data is d, as G works it out.
+decode = \d bootstrap fix decoder △ fix d
+# [assemble d]: the generator for the program whose data is d. Nothing in it
+# is worked out before it is applied: fix, given last, is what all of it waits
+# for, and the one copy serves the bootstrap, the decoder and the program.
+assemble = \d \u (\f bootstrap f decoder △ f d u) fix
+# [compress p]: a tree G that acts as the tree p, G x = p x: the generator of
+# p's data, if that decodes to p, and p itself otherwise.
+compress = \p (\d Bool.match p (assemble d) (equal (decode d) p)) (data p)
+
+_to_string = Bool.to_source
+equal (compress List.map Nat.succ [1; 2]) [2; 3]
+# = true
+# For a tree this small G is larger: the decoder and the bootstrap are most of it.
+_to_string = \l List.join " " $ List.map Nat.to_string l
+[size List.map; size (compress List.map); size decoder; size bootstrap]
+# = 130 2123 1658 340
