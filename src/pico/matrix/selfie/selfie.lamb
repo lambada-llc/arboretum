@@ -5,10 +5,10 @@
 # program draws self, the tree it is given: on the stage it lays self out and
 # plans the window's way over it (layout.lamb, tour.lamb), and each frame it
 # draws what the window shows (window.lamb), counting with num.lamb and
-# columns.lamb. The board runs the generated selfie, a much smaller tree the
-# generator makes of program that acts as it, given itself by fix: the tree it
-# draws is the one running. Below: the show, its picture, the image to flash,
-# and a page of its way (page.lamb).
+# columns.lamb. The board runs program shrunk by the generator, a much smaller
+# tree that acts as it, given itself by fix: the tree it draws is the one
+# running. Below: the show, its picture, the image to flash, and a page of its
+# way (page.lamb).
 #
 # The larger helpers used throughout are bound once, by program, and passed to
 # what uses them, the most used last: a name used in many definitions would be
@@ -41,18 +41,17 @@ program = \self
     Pico.Matrix.Selfie.nl)
   Pico.Matrix.Selfie.church
 
-# ── The generated selfie ─────────────────────────────────────────────────────
-_packed = Generator.compress program
-generated = Generator.expand _packed
-_selfie = fix generated
+# ── The selfie ───────────────────────────────────────────────────────────────
+# Shrunk, the program is rebuilt only once applied: on the board, on its stage.
+_selfie = fix (Generator.shrink program)
 # The show: on the board, slewing by 128 since the view moves with it, at 9.8
 # frames a second, what the board manages.
 _fps = 98
 show = Pico.Matrix.show_staged 128 _fps _selfie
-# The program; packed, and expanded; the selfie.
+# The program, and the selfie.
 _to_string = \l List.join " " $ List.map Nat.to_string l
-[size program; size _packed; size generated; size _selfie]
-# = 50835 9336 9405 9442
+[size program; size _selfie]
+# = 50835 9442
 
 # What it draws, 6.1 s of it:
 Pico.Matrix.svg "selfie.svg" 60 show

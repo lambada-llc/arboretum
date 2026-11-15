@@ -450,21 +450,25 @@ _pack = \t \f _bootstrap f _decoder △ f (_data t)
 # only if it gives t back, which K t always does; that is all compress
 # promises, so any other way of making g can join the candidates.
 compress = \t (\k (\g _smaller k (Bool.match k g (equal (g fix) t))) (_pack t)) (△ △ t)
-# [expand g]: a tree that acts as t, where g fix = t: given u, it works out
+# [_expand g]: a tree that acts as t, where g fix = t: given u, it works out
 # g fix and applies that to u. Nothing is worked out before u comes, and the
 # one fix in it is the one g is given.
-expand = \g \u (\f g f u) fix
+_expand = \g \u (\f g f u) fix
+# [shrink t]: a tree that acts as t, applied to anything, and is never larger:
+# compress t expanded, or t itself if that is smaller.
+shrink = \t _smaller t (_expand (compress t))
 
 _to_string = Bool.to_source
 equal (compress List.map fix) List.map
 # = true
-equal (expand (compress List.map) Nat.succ [1; 2]) [2; 3]
+equal (_expand (compress List.map) Nat.succ [1; 2]) [2; 3]
 # = true
 # For a tree this small the pack would be larger, the decoder and the bootstrap
-# being most of it, so compress gives K t, two nodes more than t.
+# being most of it, so compress gives K t, two nodes more than t, and shrink t
+# itself.
 _to_string = \l List.join " " $ List.map Nat.to_string l
-[size List.map; size (compress List.map); size _decoder; size _bootstrap]
-# = 130 132 1658 340
+[size List.map; size (compress List.map); size (shrink List.map); size _decoder; size _bootstrap]
+# = 130 132 130 1658 340
 # A larger program, the generator itself:
-[size compress; size (compress compress)]
-# = 782488 537468
+[size compress; size (compress compress); size (shrink compress)]
+# = 782488 537468 537537

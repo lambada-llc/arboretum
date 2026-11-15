@@ -1,9 +1,10 @@
 # generator
 
-`Generator.compress t` is the smallest tree `g` it finds with `g fix = t`. For
-a large compiled program `t` that is much smaller than `t`; `Generator.expand g`
-is then a tree that acts as `t`, applied to anything. It sees only the tree. It
-is a definition like any other, evaluated by the build with the rest of the
+`Generator.shrink t` is a tree that acts as `t`, applied to anything, and is
+never larger; for a large compiled program it is much smaller. It is
+`Generator.compress t`, the smallest tree `g` it finds with `g fix = t`, wrapped
+so that it works out `g fix` only once applied. It sees only the tree. It is a
+definition like any other, evaluated by the build with the rest of the
 library. [selfie.lamb](../pico/matrix/selfie/selfie.lamb) uses it, and its tests
 keep the sizes.
 
