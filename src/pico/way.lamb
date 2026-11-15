@@ -1,0 +1,262 @@
+# A selfie's way as a page of its own: the tree it draws, a pixel a node —
+# leaves red, stems green, forks blue, edges in two greys by row — the
+# window's path over it, and what the board's 25 × 25 shows each frame, played,
+# scrubbed, or picked by clicking the tree.
+#
+# [way title lede fps church lay root bands legs tree]: that page for the way a
+# selfie's program takes over tree, from the parts of that program: church, how
+# it counts in unary; lay, a tree to its forks and outline; root, a tree and
+# its forks to the row its bands start from; bands, those rows to the bands;
+# legs, the bands, the way the first goes and its first column to the
+# segments. fps is the frames a second the board shows, in tenths; title and
+# lede are HTML.
+#
+# The page gets the tree in preorder and each frame's move, and draws them
+# itself: _kinds and _moves say how.
+
+# t in preorder, laid out as a says, before acc: 0 a leaf, 1 a stem, k + 1 a
+# fork whose children are k rows down and k columns to either side. n is a
+# unary number as a nat.
+_kinds = \n fix $ \g \t \a \acc triage (\a List.cons 0 acc) (\c \a List.cons 1 (g c a acc))
+  (\l \r \a Pair.match (\lr \k Pair.match (\al \ar List.cons (Nat.succ (n k)) (g l al (g r ar acc))) lr) a) t a
+# Each of places, △ x y, as a move from the one before, at x y: r, l or d a
+# column right or left or a row down, s none, j a jump; and the places jumped
+# to, x then y.
+_move = \x \y \x2 \y2 Bool.if (equal y y2)
+  (Bool.if (equal x x2) (Option.some 's') (Bool.if (equal x2 (Nat.succ x)) (Option.some 'r') (Bool.if (equal x (Nat.succ x2)) (Option.some 'l') Option.none)))
+  (Bool.if (Bool.and (equal x x2) (equal y2 (Nat.succ y))) (Option.some 'd') Option.none)
+_moves = fix $ \r \x \y List.match (Pair.create "" []) (\p \rest Pair.match (\x2 \y2 Pair.match (\ms \js
+    triage (Pair.create (List.cons 'j' ms) (List.cons x2 (List.cons y2 js))) (\m Pair.create (List.cons m ms) js) _ (_move x y x2 y2))
+  (r x2 y2 rest)) p)
+_numbers = \l List.join "," (List.map Nat.to_string l)
+
+_style = "
+  :root{color-scheme:dark;--bg:#0c0e11;--panel:#14171c;--line:#262b33;--fg:#e3e7ec;--muted:#8d97a4;--accent:#f0b43c;--leaf:#ff5a52;--stem:#46d17a;--fork:#5f8dff;--edge:#8e949c;--edge2:#474b51;--off:#1a1e24;--mono:ui-monospace,Menlo,Consolas,monospace}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,sans-serif}
+  main{max-width:1120px;margin:0 auto;display:grid;gap:32px;padding:32px 16px 56px}
+  header{display:grid;gap:14px}
+  h1{margin:0;font-size:34px;line-height:1.15;font-weight:600}
+  p{margin:0;max-width:66ch}
+  .hint{font-size:13px;color:var(--muted)}
+  .stats{display:flex;flex-wrap:wrap;gap:10px 28px;margin:6px 0 0}
+  .stats div{display:grid;gap:2px}
+  dt{font:500 11px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .stats dd{margin:0;font:500 20px/1.2 var(--mono);font-variant-numeric:tabular-nums}
+  .stats small{font-size:13px;color:var(--muted)}
+  .viewer{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:28px;align-items:start}
+  figure{margin:0;display:grid;gap:10px;min-width:0}
+  .stack{position:relative;background:#000;border:1px solid var(--line);border-radius:6px;overflow:hidden;cursor:crosshair}
+  .stack canvas{display:block;width:100%;height:auto}
+  .stack canvas+canvas{position:absolute;inset:0}
+  figcaption{display:flex;flex-wrap:wrap;gap:6px 16px;font:12px/1.4 var(--mono);color:var(--muted)}
+  figcaption span{display:inline-flex;align-items:center;gap:6px}
+  figcaption i{width:9px;height:9px;border-radius:50%;display:inline-block}
+  figcaption i.line{border-radius:0;height:2px;width:14px;background:var(--accent)}
+  figcaption i.box{border-radius:1px;border:2px solid var(--accent);width:10px;height:10px}
+  aside{position:sticky;top:16px;display:grid;gap:16px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px}
+  .leds{width:100%;max-width:300px;justify-self:center;aspect-ratio:1;height:auto;background:#050608;border-radius:6px}
+  .readout{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0;font:13px/1.4 var(--mono);font-variant-numeric:tabular-nums}
+  .readout dt{font:inherit;letter-spacing:0;text-transform:none}
+  .readout dd{margin:0;text-align:right}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  button{font:500 13px/1 var(--mono);color:var(--fg);background:var(--off);border:1px solid var(--line);border-radius:5px;padding:9px 12px;cursor:pointer}
+  button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .play{min-width:76px;background:var(--accent);color:#17130a;border-color:var(--accent)}
+  .speeds{display:inline-flex;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+  .speeds button{border:0;border-radius:0;padding:9px 10px;background:transparent;color:var(--muted)}
+  .speeds button+button{border-left:1px solid var(--line)}
+  .speeds button[aria-pressed=true]{background:var(--off);color:var(--fg)}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  @media (max-width:820px){.viewer{grid-template-columns:minmax(0,1fr)}aside{position:static;order:-1}h1{font-size:28px}}"
+
+_body = \title \lede List.concat_list ["
+  <main>
+  <header>
+    <h1>"; title; "</h1>
+    <p>"; lede; "</p>
+    <p class='hint'>Strips alternate rightward and leftward, with a drop where tree shows at both ends of it, and the window jumps only between views that show nothing. Edges alternate between two greys by row, so that moving along one shows which way the window goes.</p>
+    <dl class='stats'>
+      <div><dt>Nodes</dt><dd id='s-nodes'></dd></div>
+      <div><dt>Strips</dt><dd id='s-strips'></dd></div>
+      <div><dt>Frames</dt><dd id='s-frames'></dd></div>
+      <div><dt>One pass</dt><dd id='s-pass'></dd></div>
+      <div><dt>Frames showing no tree</dt><dd id='s-empty'></dd></div>
+      <div><dt>Frames held still</dt><dd id='s-held'></dd></div>
+    </dl>
+  </header>
+  <section class='viewer' aria-label='The path over the tree'>
+    <figure>
+      <div class='stack' id='stack' aria-label='The whole tree. Click to move the window there.'><canvas id='base'></canvas><canvas id='over'></canvas></div>
+      <figcaption><span><i style='background:var(--leaf)'></i>leaf</span><span><i style='background:var(--stem)'></i>stem</span><span><i style='background:var(--fork)'></i>fork</span><span><i style='background:var(--edge)'></i>edge</span><span><i class='line'></i>path so far (gaps: jumped over)</span><span><i class='box'></i>window</span></figcaption>
+    </figure>
+    <aside aria-label='The board'>
+      <canvas class='leds' id='leds' width='300' height='300' aria-label='What the 25 by 25 LEDs show at this frame'></canvas>
+      <dl class='readout'>
+        <dt>Frame</dt><dd id='r-frame'></dd>
+        <dt>Strip</dt><dd id='r-strip'></dd>
+        <dt>Moving</dt><dd id='r-dir'></dd>
+        <dt>On the board</dt><dd id='r-time'></dd>
+        <dt>Tree pixels in view</dt><dd id='r-lit'></dd>
+      </dl>
+      <div class='row'>
+        <button class='play' id='play' type='button'>Play</button>
+        <div class='speeds' role='group' aria-label='Playback speed'><button type='button' data-speed='1' aria-pressed='false'>1&times;</button><button type='button' data-speed='10' aria-pressed='true'>10&times;</button><button type='button' data-speed='100' aria-pressed='false'>100&times;</button><button type='button' data-speed='1000' aria-pressed='false'>1000&times;</button></div>
+      </div>
+      <input id='scrub' type='range' min='0' max='1' value='0' step='1' aria-label='Frame'>
+      <p class='hint' id='hint'></p>
+    </aside>
+  </section>
+  </main>"]
+
+_script = "
+  const S = 2;
+  const el = id => document.getElementById(id);
+  const css = getComputedStyle(document.documentElement), tok = n => css.getPropertyValue(n).trim();
+  const fmt = n => n.toLocaleString('en-US');
+  const clock = s => { s = Math.floor(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+  // The tree's pixels, as the program draws it: a node at its place; under a
+  // stem, its child; under a fork, k rows down and k columns to either side,
+  // its children, with the edges to them between.
+  const px = [], py = [], pk = [], todo = [[0, 0]];
+  for (const v of kinds) {
+    const [x, y] = todo.pop(), k = v - 1;
+    px.push(x); py.push(y); pk.push(v > 1 ? 'F' : v ? 'S' : 'L');
+    if (v === 1) todo.push([x, y + 1]);
+    for (let e = 1; e < k; e++) { px.push(x - e, x + e); py.push(y + e, y + e); pk.push('E', 'E'); }
+    if (v > 1) todo.push([x + k, y + k], [x - k, y + k]);
+  }
+  // The window's place each frame: its left column, the root's being 0, and
+  // its top row.
+  const N = steps.length + 1, fx = new Int32Array(N), fy = new Int32Array(N);
+  fx[0] = start[0] - 2048; fy[0] = start[1];
+  for (let i = 1, j = 0; i < N; i++) {
+    const s = steps[i - 1];
+    if (s === 'j') { fx[i] = jumps[j++] - 2048; fy[i] = jumps[j++]; }
+    else { fx[i] = fx[i - 1] + (s === 'r') - (s === 'l'); fy[i] = fy[i - 1] + (s === 'd'); }
+  }
+  // All of it shifted so that the leftmost column, the tree's or the window's, is 0.
+  let X0 = 0, X1 = 0, H = 0;
+  for (let i = 0; i < px.length; i++) { X0 = Math.min(X0, px[i]); X1 = Math.max(X1, px[i]); H = Math.max(H, py[i] + 1); }
+  for (let i = 0; i < N; i++) { X0 = Math.min(X0, fx[i]); X1 = Math.max(X1, fx[i] + 24); H = Math.max(H, fy[i] + 25); }
+  for (let i = 0; i < px.length; i++) px[i] -= X0;
+  for (let i = 0; i < N; i++) fx[i] -= X0;
+  const W = X1 - X0 + 1, rows = Array.from({ length: H }, () => []);
+  px.forEach((x, i) => rows[py[i]].push([x, pk[i]]));
+  rows.forEach(r => r.sort((a, b) => a[0] - b[0]));
+  const lower = (r, x) => { let lo = 0, hi = r.length; while (lo < hi) { const m = (lo + hi) >> 1; if (r[m][0] < x) lo = m + 1; else hi = m; } return lo; };
+  const lit = i => { let n = 0; for (let y = fy[i]; y < fy[i] + 25 && y < H; y++) n += lower(rows[y], fx[i] + 25) - lower(rows[y], fx[i]); return n; };
+  let empty = 0;
+  for (let i = 0; i < N; i++) if (!lit(i)) empty++;
+  const held = steps.split('s').length - 1, strips = Math.floor(fy.reduce((m, y) => Math.max(m, y), 0) / 25) + 1;
+  el('s-nodes').textContent = fmt(kinds.length);
+  el('s-strips').textContent = strips;
+  el('s-frames').textContent = fmt(N);
+  el('s-pass').innerHTML = Math.round(N / fps / 60) + ' min <small>at ' + fps + ' frames a second</small>';
+  el('s-empty').textContent = Math.round(100 * empty / N) + '% / ' + fmt(empty);
+  el('s-held').innerHTML = fmt(held) + ' <small>' + clock(held / fps) + '</small>';
+  el('hint').textContent = '1x is the board pace, ' + fps + ' frames a second. Click the tree to move the window there; space plays, arrows step.';
+  // The tree, and over it the path so far and the window.
+  const base = el('base'), over = el('over'), b = base.getContext('2d'), o = over.getContext('2d');
+  for (const c of [base, over]) { c.width = W * S; c.height = H * S; }
+  b.setTransform(S, 0, 0, S, 0, 0); o.setTransform(S, 0, 0, S, 0, 0);
+  const colour = { L: '--leaf', S: '--stem', F: '--fork', E: '--edge' };
+  const fill = (k, y) => tok(k === 'E' && y % 2 ? '--edge2' : colour[k]);
+  const trace = (c, upto) => {
+    c.beginPath(); c.moveTo(fx[0] + 12.5, fy[0] + 12.5);
+    for (let i = 1; i <= upto; i++) { const s = steps[i - 1]; if (s !== 's') c[s === 'j' ? 'moveTo' : 'lineTo'](fx[i] + 12.5, fy[i] + 12.5); }
+    c.stroke();
+  };
+  b.fillStyle = '#000'; b.fillRect(0, 0, W, H);
+  for (const k of 'ESLF') {
+    b.globalAlpha = k === 'E' ? 0.55 : 1;
+    px.forEach((x, i) => { if (pk[i] === k) { b.fillStyle = fill(k, py[i]); b.fillRect(x - 0.5, py[i] - 0.5, 2, 2); } });
+  }
+  b.globalAlpha = 0.28; b.strokeStyle = tok('--accent'); b.lineWidth = 1.2; trace(b, N - 1); b.globalAlpha = 1;
+  // The board, 25 by 25 LEDs.
+  const leds = el('leds').getContext('2d'), P = 12;
+  const board = i => {
+    leds.fillStyle = '#050608'; leds.fillRect(0, 0, 300, 300);
+    const on = new Map();
+    for (let y = 0; y < 25; y++) {
+      const r = rows[fy[i] + y] || [];
+      for (let j = lower(r, fx[i]); j < r.length && r[j][0] < fx[i] + 25; j++) on.set(y * 25 + r[j][0] - fx[i], r[j][1]);
+    }
+    for (let y = 0; y < 25; y++) for (let x = 0; x < 25; x++) {
+      const k = on.get(y * 25 + x);
+      leds.fillStyle = k ? fill(k, fy[i] + y) : tok('--off');
+      leds.beginPath(); leds.arc(x * P + P / 2, y * P + P / 2, k ? 4.6 : 3.4, 0, 2 * Math.PI); leds.fill();
+    }
+    return on.size;
+  };
+  const scrub = el('scrub');
+  scrub.max = N - 1;
+  let frame = -1;
+  const show = i => {
+    i = Math.max(0, Math.min(N - 1, i));
+    if (i === frame) return;
+    frame = i;
+    o.clearRect(0, 0, W, H);
+    o.strokeStyle = tok('--accent'); o.lineWidth = 2; trace(o, i);
+    o.fillStyle = 'rgba(240, 180, 60, 0.12)'; o.fillRect(fx[i], fy[i], 25, 25);
+    o.lineWidth = 2.5; o.strokeRect(fx[i] - 1, fy[i] - 1, 27, 27);
+    const s = steps[i] || steps[i - 1];
+    el('r-frame').textContent = fmt(i + 1) + ' of ' + fmt(N);
+    el('r-strip').textContent = (Math.floor(fy[i] / 25) + 1) + ' of ' + strips;
+    el('r-dir').textContent = { r: 'right', l: 'left', d: 'down', s: 'holding', j: 'jumping' }[s];
+    el('r-time').textContent = clock(i / fps) + ' of ' + clock(N / fps);
+    el('r-lit').textContent = fmt(board(i));
+    scrub.value = i;
+  };
+  // Playing, at a multiple of the pace.
+  let speed = 10, playing = false, last = 0, at = 0;
+  const play = el('play');
+  const tick = now => {
+    if (!playing) return;
+    at += (now - last) / 1000 * fps * speed; last = now;
+    if (at >= N) at = 0;
+    show(Math.floor(at));
+    requestAnimationFrame(tick);
+  };
+  const setPlaying = p => { playing = p; play.textContent = p ? 'Pause' : 'Play'; if (p) { last = performance.now(); at = frame; requestAnimationFrame(tick); } };
+  const go = i => { at = i; show(i); };
+  play.addEventListener('click', () => setPlaying(!playing));
+  document.querySelectorAll('.speeds button').forEach(btn => btn.addEventListener('click', () => {
+    speed = +btn.dataset.speed; at = frame;
+    document.querySelectorAll('.speeds button').forEach(x => x.setAttribute('aria-pressed', x === btn));
+  }));
+  scrub.addEventListener('input', () => go(+scrub.value));
+  // Clicking the tree: the first frame whose window holds that point, else the nearest window.
+  el('stack').addEventListener('click', e => {
+    const r = el('stack').getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < N; i++) {
+      if (x >= fx[i] && x < fx[i] + 25 && y >= fy[i] && y < fy[i] + 25) { best = i; break; }
+      const d = (fx[i] + 12.5 - x) ** 2 + (fy[i] + 12.5 - y) ** 2;
+      if (d < bd) { bd = d; best = i; }
+    }
+    go(best);
+  });
+  document.addEventListener('keydown', e => {
+    if (e.target.closest('input, button')) return;
+    if (e.key === ' ') { e.preventDefault(); setPlaying(!playing); }
+    if (e.key === 'ArrowRight') go(frame + 1);
+    if (e.key === 'ArrowLeft') go(frame - 1);
+  });
+  show(0);
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) setPlaying(true);"
+
+way = \title \lede \fps \church \lay \root \bands \legs \tree
+  let (\u church u Nat.succ Nat.succ 0) $ \n
+  let (Pair.match $ \h \uo church h (Nat.add 32) (\m Nat.sub m 32) (Nat.add 2048 (n (Pair.snd uo)))) $ \xn
+  let (Pair.fst (lay tree)) $ \ann
+  let (bands (root tree ann) △) $ \bands
+  let (legs (List.mapi (\b \i Pair.match (\lv \s △ (△ lv i) s) b) bands) const (Pair.fst (Pair.fst (Pair.snd (Pair.fst bands))))) $ \segs
+  let (List.concat_map (\sg Pair.match (\rn \kpl Pair.match (\k \pl Pair.match (\pos \lvd Pair.match (\lvi \d Pair.match (\lv \i
+      Pair.match (\t \o List.map (\m Pair.match (\c \s Pair.create (xn c) (Nat.add (Nat.mul 25 i) (n s))) (k m pos))
+        (List.range (Nat.add (Nat.mul 32 (n t)) (n o)))) (rn △)) lvi) lvd) pl) kpl) sg) segs) $ \places
+  Pair.match (\first \rest Pair.match (\x \y Pair.match (\steps \jumps
+      Html.page title _style [_body title lede; Xml.element "script" [] [List.concat_list [
+        "
+  const kinds = ["; _numbers (_kinds n tree ann []); "], start = ["; _numbers [x; y]; "], steps = '"; steps; "', jumps = ["; _numbers jumps;
+        "], fps = "; Nat.to_string fps; " / 10;"; _script]]])
+    (_moves x y rest)) first) places

@@ -1,7 +1,8 @@
 # The selfie's program as plain LambAda. The build compiles it to a tree, and
 # its generator turns that tree into a smaller one that gives it back: the
 # generated selfie, which is what the board runs — at the end of this file, as
-# a show, with its picture and the image to flash.
+# a show, with its picture, the image to flash, and a page that plays its way
+# over its own tree.
 #
 #   triage a b c x         a if x is △, b y if x is △ y, c y z if x is △ y z
 #   △ (△ a b) c x          the same, where a or b uses a variable bound around
@@ -360,3 +361,18 @@ Pico.Matrix.svg "selfie.svg" 60 selfie_show
 # The image to flash:
 Pico.Matrix.flash "selfie.uf2" [selfie_show]
 # = selfie.uf2 application/octet-stream 39936 bytes sha256:744169a0a030015deddd7b27cb4cf4f5dde6ceb4593379bf8e24681a1ed7d9ad
+
+# Its way over its own tree, as a page (see way.lamb).
+_way = \tree
+  let (_dec (_b1 _iter)) $ \n31
+  let (_n25 _iter) $ \n25
+  let (_le _inc _dec _church) $ \le
+  let (_cinc n31 _inc) $ \cinc
+  let (_cdec n31 _dec) $ \cdec
+  let (_nz n31 _dec _church) $ \nz
+  Pico.way "Selfie path"
+    "The selfie show draws its own tree and slides the board's 25 &times; 25 window over it, one pixel a frame, a strip of 25 rows at a time from the top down. Its tree is the one the build generates from selfie.lamb, a smaller tree that gives the program back. Below: its path over that tree, frame by frame."
+    _fps _church (_lay _iter _inc _dec _church) (\t \a [Pair.create (_x0 n31) (Pair.create 0 (Pair.create Pair.fst (Pair.create t a)))])
+    (_bands nz cdec cinc _nl le n31 n25 List.foldr _iter _inc _dec _church) (_legs nz cdec cinc le n25 _iter _inc _dec _church) tree
+file "selfie.html" "text/html" $ _way _selfie_gen
+# = selfie.html text/html 48209 bytes sha256:8e54a2bd1a1bed4cc40b950f76144fe41e638ac0c557a535764fb40737aa90bf
