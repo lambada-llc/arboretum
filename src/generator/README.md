@@ -4,8 +4,8 @@
 a large compiled program `t` that is much smaller than `t`; `Generator.expand g`
 is then a tree that acts as `t`, applied to anything. It sees only the tree. It
 is a definition like any other, evaluated by the build with the rest of the
-library. [selfie.lamb](../pico/matrix/selfie.lamb) uses it, and its tests keep
-the sizes.
+library. [selfie.lamb](../pico/matrix/selfie/selfie.lamb) uses it, and its tests
+keep the sizes.
 
 `g` is given `fix` rather than nothing because evaluation is eager: a `g` that
 ignored its argument would be worked out, into `t`, before it was applied.

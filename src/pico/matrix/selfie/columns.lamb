@@ -1,0 +1,16 @@
+# The selfie's columns. Across the whole tree, a column is △ h (△ u o): o
+# columns into the 32-column tile h, u = 31 − o, so that a step either way is a
+# step of each. n25, b1 and b2 are 25, a tile's 32 columns, and 64.
+n25 = \iter iter 0 25 Snat.succ
+b1 = \iter iter 0 32 Snat.succ
+b2 = \b1 \church church b1 Snat.succ _ b1
+cinc = \n31 \inc Pair.match $ \h Pair.match $ \u \o △ (△ (\h Pair.create (inc h) (Pair.create n31 0)) (\u \h Pair.create h (Pair.create u (Snat.succ o)))) _ u h
+cdec = \n31 \dec Pair.match $ \h Pair.match $ \u △ (△ (Pair.create (dec h) (Pair.create 0 n31)) (\o Pair.create h (Pair.create (Snat.succ u) o))) _
+x0 = \n31 Pair.create 0 (Pair.create n31 0)
+# A column with u and o parts of n31, so that columns kept share them.
+nz = \n31 \dec \church Pair.match $ \h Pair.match $ \u \o Pair.create h (Pair.create (church o dec _ n31) (church u dec _ n31))
+# x if column a is not right of column b, else y.
+le = \inc \dec \church (\diff \a \b \x \y Pair.match (\ha \uoa Pair.match (\hb
+    △ (△ (\uob △ (△ x (\_ y)) (\_ \_ x) (diff (Pair.snd uob) (Pair.snd uoa))) (\_ \_ y)) (\_ \_ \_ x)
+      (diff hb ha))
+  b) a) (\m \n church m dec inc n)
