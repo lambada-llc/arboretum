@@ -1,38 +1,22 @@
-# The selfie's program as plain LambAda. The build compiles it to a tree, and
-# its generator turns that tree into a smaller one that gives it back: the
-# generated selfie, which is what the board runs — at the end of this file, as
-# a show, with its picture, the image to flash, and a page that plays its way
-# over its own tree.
+# Selfie: a show that draws its own tree — a leaf red, a stem green, a fork
+# blue, edges grey — and slides the board's 25 × 25 window over all of it, a
+# pixel a frame, a strip of 25 rows at a time from the top down.
 #
-#   triage a b c x         a if x is △, b y if x is △ y, c y z if x is △ y z
-#   △ (△ a b) c x          the same, where a or b uses a variable bound around
-#                          it: triage would compile to another tree there
-#   Pair.create a b        a pair, △ a b; Pair.match f (Pair.create a b) is f a b
-#   _                      a value nothing reads
-#   (\x body) e            body with e for x
+# selfie_program draws self, the tree it is given. The board runs the
+# generated selfie, a much smaller tree the generator makes of selfie_program
+# that acts as it, given itself by fix: the tree it draws is the one running.
+# At the end: the show, its picture, the image to flash, and a page of its way.
 #
-# selfie_program binds the helpers that are used everywhere once, and what
-# uses them takes them as its first arguments, the one it uses most last:
-# naming them instead would put a copy of each in every definition that does.
-# The small ones are named all the same, as a copy costs less than passing it,
-# but a definition that uses one twice binds it once (binc in _bin, ud in
-# _nm).
-# The generated selfie compiles this program on the board before it starts, and
-# a variable costs more there the further out it is bound from where it is
-# used; that is why the most used come last, why a definition whose inner code
-# applies helpers to such arguments binds those applications at its top (turn
-# and seg in _legs, say), and why _window and _tour bind some that only they
-# use themselves (bsub, bin) or work them out where they are used (b2, tadd).
-# The order selfie_program binds them in, and _window's and _tour's, are the
-# ones that made the generated selfie smallest and quickest to start.
+# The larger helpers used throughout are bound once, by selfie_program, and
+# passed to what uses them, the most used last: a name used in many
+# definitions would be copied into each. The generated selfie unpacks this
+# program on the board before it starts, and a variable costs more there the
+# further out it is bound; the orders here are the ones that made it smallest
+# and quickest to start.
 #
 # Evaluation is eager: a part that uses none of a λ's variables is worked out
-# before the λ is applied. A branch that would go on with the rest of the way
-# is therefore given what it goes on with after it is chosen (nx in _turn, fin
-# in _runs, an item's st and ta in _nl), not before, or the board would work
-# out every branch's rest; and the sums of differences in _nm take where they
-# start before the moves they make (j m2k inc dec), or every row would work out
-# all of them.
+# before the λ is applied. So a branch is given what it goes on with only once
+# it is chosen, or the board would work out the rest of every branch.
 
 # ── Basics ───────────────────────────────────────────────────────────────────
 _p2 = \_ \g g
@@ -110,8 +94,7 @@ _lay = \iter \inc \dec \church
 
 # ── Columns ──────────────────────────────────────────────────────────────────
 # Across the whole tree, a column is △ h (△ u o): o columns into the 32-column
-# tile h, u = 31 − o, so that a step either way is a step of each. n31, 31,
-# is dec b1.
+# tile h, u = 31 − o, so that a step either way is a step of each.
 _n25 = \iter iter 0 25 Snat.succ
 _b1 = \iter iter 0 32 Snat.succ
 _b2 = \b1 \church church b1 Snat.succ _ b1
@@ -339,10 +322,6 @@ selfie_program = \self
   (_b1 iter)) _iter) (_le inc dec church)) _dec) _inc) _nl) _church
 
 # ── The generated selfie ─────────────────────────────────────────────────────
-# The generator packs the tree selfie_program compiles to, from that tree and
-# nothing else, into a much smaller one that gives it back, given fix;
-# expanded, that acts as selfie_program, applied to anything. So fix makes a
-# selfie of it as it does of selfie_program.
 _packed = Generator.compress selfie_program
 selfie_gen = Generator.expand _packed
 _selfie_gen = fix selfie_gen
