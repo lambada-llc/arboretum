@@ -1,0 +1,68 @@
+# The selfie's window t frames on: where its way puts it, and the 25 × 25
+# pixels of the tree it shows there.
+#
+# A row of pixels is a list of items, left to right, each △ x (△ r (△ st (△ t a))):
+# a pixel at column x, the edge toward subtree t r pixels long yet (unseen if
+# negative), st Pair.fst or Pair.snd as it steps left or right, a t's forks. fs
+# is the step left and the step right, △ cdec cinc or △ dec inc. [nl fs lv] is the
+# row below lv: each item a step further, and one whose edge reaches node t
+# what _arrive makes of it. There a leaf ends it, and a stem's child goes on
+# right below it; a fork's children go on from the columns next to it, k long.
+_split = \fs \x \acc \a \tl \tr Pair.match (\lr \k Pair.match (\al \ar
+    △ (△ _ (\k (\child child Pair.fst tl al (child Pair.snd tr ar acc)) (\st \t \a List.cons (Pair.create (st fs x) (Pair.create k (Pair.create st (Pair.create t a)))))))
+      _ k)
+  lr) a
+_arrive = \fs \x \st \ta \acc Pair.match (\t \a
+    △ (△ acc (\t List.cons (Pair.create x (Pair.create 0 (Pair.create st (Pair.create t a)))) acc)) (_split fs x acc a) t)
+  ta
+nl = \fs fix $ \r Pair.match (\it \rest
+  (\acc Pair.match (\x Pair.match (\n (\move
+      △ (△ (Pair.match (\st \ta _arrive fs x st ta acc)) move) (\_ move) n)
+    (\m \sa List.cons (Pair.create (Pair.fst sa fs x) (Pair.create m sa)) acc))) it)
+  (r rest))
+# An item's colour in a row q, const in an even row and p2 in an odd one. An edge
+# is on a diagonal, a row a pixel, and its two greys take turns along it, so
+# that it shows which way it moves.
+_flip = \q q Pico.Matrix.Selfie.p2 const
+_grey = \v [v; v; v]
+_colour = \q Pair.match $ \_ Pair.match $ \r Pair.match $ \_ Pair.match $ \t \_
+  △ (△ ((\c △ (△ c (\_ List.cons 0 c)) (\_ \_ List.cons 0 (List.cons 0 c)) t) [255]) (\_ (\g q (g 112) (g 56)) _grey)) (\_ \_ []) r
+# l with c at position p.
+_set = fix $ \r △ (△ (\l \c Pair.match (\_ List.cons c) l) (\p \l \c Pair.match (\h \tl List.cons h (r p tl c)) l)) (\_ \_ const)
+_blank = \b1 \n25 \church church (church b1 Snat.succ _ n25) (List.cons []) _ []
+# The window's 25 rows, from row lv down, each a list of colours from column uo.
+_rows = \nl \b1 \n25 \foldr \inc \dec \church \uo (\from \blank \next fix $ \r \n \lv \q
+  △ (△ [] (\n
+      List.cons (from (foldr (\it \d _set (Pair.fst it) d (_colour q it)) blank lv))
+        (r n (next lv) (_flip q))))
+    _ n) (church (Pair.snd uo) Pair.snd Pair.snd) (_blank b1 n25 church) (nl (Pair.create dec inc))
+# k of the columns from tile's first to tile h's, if h is from two tiles before
+# tile to three after it; acc if not.
+_near_tile = \b2 \b1 \inc \dec \church \tile \acc \h
+  △ (△ (\k k 0) (△ (△ (\k k b1) (△ (△ (\k k b2) (△ (△ (\k k (church b1 Snat.succ _ b2)) (\_ \_ acc)) _)) _)) _))
+    (\_l △ (△ (\k k (church b1 dec dec 0)) _) (\_l △ (△ (\k k (church b2 dec dec 0)) _) (\_ \_ \_ acc)))
+    (church tile dec inc h)
+# The items of lv near tile, columns counted from its first: those in the
+# tiles from two before it to three after, all that can reach the window
+# within 49 rows.
+_near = \foldr \inc \church \nt \lv \tile foldr (\it \acc Pair.match (\x \e Pair.match (\h \o
+    nt tile acc h (\b List.cons (Pair.create (church o inc inc b) e) acc))
+  x) it) [] (Pair.fst lv)
+# The item of l, each △ n x, n frames in bits, that frame t falls in, and t
+# frames into it: △ x t.
+_find = \bsub fix $ \f \l \t Pair.match (\h \rest Pair.match (\n \x △ (△ (Pair.create x) (\d \_ f rest d)) _ (bsub false t n) t) h) l
+# The window's place t frames into a segment.
+_place = Pair.match $ \kpl \t Pair.match (\k \pl Pair.create (Pair.snd pl) (k t (Pair.fst pl))) kpl
+# The colour at column x of row y.
+_pixel = \iter \rows \y (\at at (at rows y)) (\l \n Pair.fst (iter l n Pair.snd))
+# [window gs n t]: t frames on, the window, t mod the way's frames n, found
+# eight segments at a time.
+window = \nl \iter \b1 \n25 \foldr \inc \dec \church (\bsub (\find \pixel \rows \next \near \bmod \gs \n \t
+  Pair.match (\lv Pair.match (\col \skip Pair.match (\tile \uo
+      pixel
+      (rows uo n25 (church skip next next (near lv tile)) (church skip _flip _flip (Pair.snd lv))))
+    col))
+  (Pair.match (\segs \t _place (find segs t)) (find gs (bmod n t))))
+  (_find bsub) (_pixel iter) (_rows nl b1 n25 foldr inc dec church) (nl (Pair.create dec inc))
+  (_near foldr inc church (_near_tile (Pico.Matrix.Selfie.b2 b1 church) b1 inc dec church)) (Pico.Matrix.Selfie.bmod bsub foldr))
+  (Pico.Matrix.Selfie.bsub inc dec church)

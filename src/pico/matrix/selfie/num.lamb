@@ -1,0 +1,31 @@
+# The selfie's numbers. Unary ones: 0 is △, Snat.succ x one more than x, and
+# _less x one less than x; [iter x n f] is f applied n times to x, n a binary
+# nat. p2 picks the second of two, as const does the first.
+p2 = \_ \g g
+_less = △ △
+inc = triage Snat.one (\p Snat.succ (Snat.succ p)) p2
+dec = triage (_less 0) id (\_ \m _less (_less m))
+iter = fix $ \r \x \bits triage const _ (\b \rest \x \f r (△ (△ id (\_ f)) _ b x) rest (\y f (f y))) bits x
+# l's first n items; the last of h and l's items.
+take = fix $ \r \l △ (△ [] (\n Pair.match (\b \rest List.cons b (r rest n)) l)) _
+last = fix $ \r \h △ (△ h _) r
+# u − n as Option.some (u − n), or Option.none if n is larger.
+sub = fix $ \d \n \u △ (△ (Option.some u) (\n △ (△ Option.none (d n)) _ u)) _ n
+# [church n f g s]: s with f applied n times, or g −n times if n is below 0;
+# zero is church 0.
+zero = \_ \_ \s s
+church = fix $ \r △ (△ zero (\p \f \g \s f (r p f g s))) (\_ \m \f \g \s g (r m f g s))
+# Binary ones, least significant bit first: n + 1; a − b − c as Option.some
+# (its bits), or Option.none if that is below 0, c a bit; 32 t + o frames, from
+# △ t o; such counts added; t mod n.
+_binc = fix $ \r triage [true] _ (△ (△ (List.cons true) (\_ \rest List.cons false (r rest))) _)
+_bit = triage (Pair.create false false) (\_ Pair.create true false) (\_l triage (Pair.create true true) _ (\_ \_ Pair.create false true))
+bsub = \inc \dec \church (\diff fix $ \s \c \a \b
+  (\step (\na △ (△ (\b △ (△ (\_l triage (Option.some []) (\_ Option.none) _ c) _) na b b) _) na a b) (\_ \_ step a))
+  (\a \b Pair.match (\d \c △ (△ Option.none (\x Option.some (List.cons d x))) _ (s c (Pair.snd a) (Pair.snd b)))
+    (_bit (diff (Pair.fst b) (diff c (Pair.fst a)))))) (\m \n church m dec inc n)
+bin = \iter \church Pair.match $ \t \o (\binc church o binc _ (church (iter 0 5 Snat.succ) (List.cons false) _ (church t binc _ 0))) _binc
+tadd = \b1 \church \a \b Pair.match (\t \o Pair.match (\t2 \o2
+    (\t3 \o △ (△ (Pair.create t3) (\x \_o Pair.create (Snat.succ t3) x)) _ (sub b1 o) o) (church t Snat.succ _ t2) (church o Snat.succ _ o2))
+  b) a
+bmod = \bsub \foldr \n \t foldr (\b \k (\k △ (△ k id) _ (bsub false k n)) (List.cons b k)) 0 t

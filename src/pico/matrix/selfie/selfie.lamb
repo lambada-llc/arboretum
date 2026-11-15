@@ -1,0 +1,66 @@
+# Selfie: a show that draws its own tree — a leaf red, a stem green, a fork
+# blue, edges grey — and slides the board's 25 × 25 window over all of it, a
+# pixel a frame, a strip of 25 rows at a time from the top down.
+#
+# program draws self, the tree it is given: on the stage it lays self out and
+# plans the window's way over it (layout.lamb, tour.lamb), and each frame it
+# draws what the window shows (window.lamb), counting with num.lamb and
+# columns.lamb. The board runs the generated selfie, a much smaller tree the
+# generator makes of program that acts as it, given itself by fix: the tree it
+# draws is the one running. Below: the show, its picture, the image to flash,
+# and a page of its way (page.lamb).
+#
+# The larger helpers used throughout are bound once, by program, and passed to
+# what uses them, the most used last: a name used in many definitions would be
+# copied into each. The generated selfie unpacks the program on the board
+# before it starts, and a variable costs more there the further out it is
+# bound; the orders throughout are the ones that made it smallest and quickest
+# to start.
+#
+# Evaluation is eager: a part that uses none of a λ's variables is worked out
+# before the λ is applied. So a branch is given what it goes on with only once
+# it is chosen, or the board would work out the rest of every branch.
+
+# [program self i]: the stage, the tour; then the window. The helpers follow
+# the body, the last bound first.
+program = \self
+  (\church (\nl (\inc (\dec (\le (\iter (\b1 (\n31 (\cdec (\cinc (\n25 (\foldr (\nz
+    \_ Pair.match (Pico.Matrix.Selfie.window nl iter b1 n25 foldr inc dec church)
+      (Pico.Matrix.Selfie.tour self nz b1 cdec cinc nl le n31 n25 foldr iter inc dec church))
+    (Pico.Matrix.Selfie.nz n31 dec church))
+    List.foldr)
+    (Pico.Matrix.Selfie.n25 iter))
+    (Pico.Matrix.Selfie.cinc n31 inc))
+    (Pico.Matrix.Selfie.cdec n31 dec))
+    (dec b1))
+    (Pico.Matrix.Selfie.b1 iter))
+    Pico.Matrix.Selfie.iter)
+    (Pico.Matrix.Selfie.le inc dec church))
+    Pico.Matrix.Selfie.dec)
+    Pico.Matrix.Selfie.inc)
+    Pico.Matrix.Selfie.nl)
+  Pico.Matrix.Selfie.church
+
+# ── The generated selfie ─────────────────────────────────────────────────────
+_packed = Generator.compress program
+generated = Generator.expand _packed
+_selfie = fix generated
+# The show: on the board, slewing by 128 since the view moves with it, at 9.8
+# frames a second, what the board manages.
+_fps = 98
+show = Pico.Matrix.show_staged 128 _fps _selfie
+# The program; packed, and expanded; the selfie.
+_to_string = \l List.join " " $ List.map Nat.to_string l
+[size program; size _packed; size generated; size _selfie]
+# = 50835 9336 9405 9442
+
+# What it draws, 6.1 s of it:
+Pico.Matrix.svg "selfie.svg" 60 show
+# = selfie.svg image/svg+xml 187394 bytes sha256:3bf8119e3752000ecbbaf2e9c55c28b842b702969f80ba48c951265d43da0dcc
+# The image to flash:
+Pico.Matrix.flash "selfie.uf2" [show]
+# = selfie.uf2 application/octet-stream 39936 bytes sha256:744169a0a030015deddd7b27cb4cf4f5dde6ceb4593379bf8e24681a1ed7d9ad
+
+# Its way over its own tree, as a page:
+file "selfie.html" "text/html" $ Pico.Matrix.Selfie.page _fps _selfie
+# = selfie.html text/html 48209 bytes sha256:8e54a2bd1a1bed4cc40b950f76144fe41e638ac0c557a535764fb40737aa90bf

@@ -1,15 +1,7 @@
-# A selfie's way as a page of its own: the tree it draws, a pixel a node —
+# The selfie's way as a page of its own: the tree it draws, a pixel a node —
 # leaves red, stems green, forks blue, edges in two greys by row — the
 # window's path over it, and what the board's 25 × 25 shows each frame, played,
 # scrubbed, or picked by clicking the tree.
-#
-# [way title lede fps church lay root bands legs tree]: that page for the way a
-# selfie's program takes over tree, from the parts of that program: church, how
-# it counts in unary; lay, a tree to its forks and outline; root, a tree and
-# its forks to the row its bands start from; bands, those rows to the bands;
-# legs, the bands, the way the first goes and its first column to the
-# segments. fps is the frames a second the board shows, in tenths; title and
-# lede are HTML.
 #
 # The page gets the tree in preorder and each frame's move, and draws them
 # itself: _kinds and _moves say how.
@@ -245,17 +237,33 @@ _script = "
   show(0);
   if (!matchMedia('(prefers-reduced-motion: reduce)').matches) setPlaying(true);"
 
-way = \title \lede \fps \church \lay \root \bands \legs \tree
+_title = "Selfie path"
+_lede = "The selfie show draws its own tree and slides the board's 25 &times; 25 window over it, one pixel a frame, a strip of 25 rows at a time from the top down. Its tree is the one the build generates from selfie.lamb, a smaller tree that gives the program back. Below: its path over that tree, frame by frame."
+# [page fps tree]: the page for the selfie's way over tree, fps the frames a
+# second the board shows, in tenths.
+page = \fps \tree
+  let Pico.Matrix.Selfie.iter $ \iter
+  let Pico.Matrix.Selfie.inc $ \inc
+  let Pico.Matrix.Selfie.dec $ \dec
+  let Pico.Matrix.Selfie.church $ \church
+  let (dec (Pico.Matrix.Selfie.b1 iter)) $ \n31
+  let (Pico.Matrix.Selfie.n25 iter) $ \n25
+  let (Pico.Matrix.Selfie.le inc dec church) $ \le
+  let (Pico.Matrix.Selfie.cinc n31 inc) $ \cinc
+  let (Pico.Matrix.Selfie.cdec n31 dec) $ \cdec
+  let (Pico.Matrix.Selfie.nz n31 dec church) $ \nz
+  let (Pico.Matrix.Selfie.legs nz cdec cinc le n25 iter inc dec church) $ \legs
   let (\u church u Nat.succ Nat.succ 0) $ \n
   let (Pair.match $ \h \uo church h (Nat.add 32) (\m Nat.sub m 32) (Nat.add 2048 (n (Pair.snd uo)))) $ \xn
-  let (Pair.fst (lay tree)) $ \ann
-  let (bands (root tree ann) △) $ \bands
+  let (Pair.fst (Pico.Matrix.Selfie.lay iter inc dec church tree)) $ \ann
+  let (Pico.Matrix.Selfie.bands nz cdec cinc Pico.Matrix.Selfie.nl le n31 n25 List.foldr iter inc dec church
+      [Pair.create (Pico.Matrix.Selfie.x0 n31) (Pair.create 0 (Pair.create Pair.fst (Pair.create tree ann)))] △) $ \bands
   let (legs (List.mapi (\b \i Pair.match (\lv \s △ (△ lv i) s) b) bands) const (Pair.fst (Pair.fst (Pair.snd (Pair.fst bands))))) $ \segs
   let (List.concat_map (\sg Pair.match (\rn \kpl Pair.match (\k \pl Pair.match (\pos \lvd Pair.match (\lvi \d Pair.match (\lv \i
       Pair.match (\t \o List.map (\m Pair.match (\c \s Pair.create (xn c) (Nat.add (Nat.mul 25 i) (n s))) (k m pos))
         (List.range (Nat.add (Nat.mul 32 (n t)) (n o)))) (rn △)) lvi) lvd) pl) kpl) sg) segs) $ \places
   Pair.match (\first \rest Pair.match (\x \y Pair.match (\steps \jumps
-      Html.page title _style [_body title lede; Xml.element "script" [] [List.concat_list [
+      Html.page _title _style [_body _title _lede; Xml.element "script" [] [List.concat_list [
         "
   const kinds = ["; _numbers (_kinds n tree ann []); "], start = ["; _numbers [x; y]; "], steps = '"; steps; "', jumps = ["; _numbers jumps;
         "], fps = "; Nat.to_string fps; " / 10;"; _script]]])
