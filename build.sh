@@ -12,6 +12,10 @@ cd "$(dirname "$0")"
 # and per-term results the expect tests are answered from.
 export LAMBADA_TREE_CALCULUS="$PWD/submodules/tree-calculus"
 export TREE_CALCULUS_RUNNER=eager
+# A request that would grow its runner past this fails, naming the test, rather
+# than take the machine with it: two thirds of the 3 GB the build tool grants
+# each thread.
+export RUNNER_RSS_LIMIT_MB=${RUNNER_RSS_LIMIT_MB:-2048}
 lambada="node submodules/lambada/bin/lambada.js"
 dag="node submodules/tree-calculus/bin/dag.js"
 
