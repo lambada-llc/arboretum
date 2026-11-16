@@ -140,7 +140,7 @@ _agree "\\x x" [△; 5]
 # library code. The code of [unfold] itself is a fixed cost on top:
 _to_string = Nat.to_string
 size Lambada.unfold
-# = 2493
+# = 2233
 _to_string = id
 _sizes = \src List.concat_list
     [ "compiled: "; Nat.to_string (size (_compiled src))
