@@ -1,15 +1,14 @@
-# XML building blocks: attributes and elements as strings.
+# XML building blocks: elements as strings.
 # Values are emitted verbatim — callers must pass XML-safe content.
-attr = Pair.match $ \k \v List.concat_list [" "; k; "=\""; v; "\""]
-attrs = compose List.concat_list (List.map attr)
-element = \tag \as \children List.concat_list
-  ["<"; tag; attrs as;
-   List.match "/>" (\_ \_ List.concat_list [">"; List.concat_list children; "</"; tag; ">"]) children]
+# An element is its pieces, joined once: joined level by level instead, each
+# attribute's characters would be copied once for every level.
+_attr = Pair.match $ \k \v [" "; k; "=\""; v; "\""]
+element = \tag \as \children List.concat_list $ List.concat_list
+  [["<"; tag]; List.concat_map _attr as;
+   List.match ["/>"] (\_ \_ List.concat_list [[">"]; children; ["</"; tag; ">"]]) children]
 
 # Tests
 _to_string = id
-attr (△ "fill" "white")
-# =  fill="white"
 element "br" [] []
 # = <br/>
 element "rect" [△ "width" "100%"; △ "fill" "white"] []
