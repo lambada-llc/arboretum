@@ -64,6 +64,9 @@ done
 for symbol in $compilers prelude; do
   mv "$compiler/$symbol.dag.new" "$compiler/$symbol.dag"
 done
+# And the runtime they were built and probed with, which lambada downloads for
+# itself when it is given no checkout: the two travel together.
+git -C submodules/tree-calculus rev-parse HEAD > "$compiler/tree-calculus-revision"
 
 # The compiler's statement splitting on its own. Nothing compiles with it, so
 # there is nothing to probe: lambada holds its editor's splitting to it, which
