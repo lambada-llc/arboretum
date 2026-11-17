@@ -1,28 +1,37 @@
-# Selfie: a show that draws its own tree — a leaf red, a stem green, a fork
-# blue, edges grey — and slides the board's 25 × 25 window over all of it, a
-# pixel a frame, a strip of 25 rows at a time from the top down.
+# Selfie: a show that draws its own tree.
 #
-# program draws self, the tree it is given: on the stage it lays self out and
-# plans the window's way over it (layout.lamb, tour.lamb), and each frame it
-# draws what the window shows (window.lamb), counting with num.lamb and
-# columns.lamb. The board runs program shrunk by the generator, a much smaller
-# tree that acts as it, given itself by fix: the tree it draws is the one
-# running. Below: the show, its picture, the image to flash, and a page of its
-# way (page.lamb).
+# Each node of the tree is a pixel: a leaf red, a stem green, a fork blue. A
+# stem's child is right below it, a fork's two children further down, at the
+# ends of grey diagonal edges. The board's 25 × 25 window slides over this
+# picture a pixel a frame: across the top 25 rows, back across the next 25,
+# and so on down, skipping stretches with nothing to show.
 #
-# The larger helpers used throughout are bound once, by program, and passed to
-# what uses them, the most used last: a name used in many definitions would be
-# copied into each. The generated selfie unpacks the program on the board
-# before it starts, and a variable costs more there the further out it is
-# bound; the orders throughout are the ones that made it smallest and quickest
-# to start.
+# program draws self, the tree it is given. On the show's stage, before the
+# first frame, it lays the tree out (layout.lamb) and plans the window's way
+# over it (tour.lamb); each frame it draws what the window shows (window.lamb).
+# num.lamb and columns.lamb hold the numbers it counts with.
 #
-# Evaluation is eager: a part that uses none of a λ's variables is worked out
-# before the λ is applied. So a branch is given what it goes on with only once
-# it is chosen, or the board would work out the rest of every branch.
+# The board does not run program but Generator.shrink of it: a much smaller
+# tree that behaves the same. fix gives that tree itself as self, so the tree
+# in the picture is the tree on the board.
+#
+# Two things shape the code:
+# - The helpers used everywhere, like church, inc and dec, are bound once, in
+#   program, and passed on as every definition's first arguments, the most
+#   used last: naming them in each definition would put a copy in each. The
+#   shrunk program unpacks itself on the board before it starts, and a
+#   variable costs more there the further out it is bound; these orders made
+#   the selfie smallest and quickest to start. A comment's [f x y] leaves the
+#   helpers out.
+# - Evaluation is eager: whatever in a function's body does not depend on its
+#   arguments is computed before the function is called. So a branch is given
+#   what it goes on with only once it is chosen, or every branch's rest would
+#   be computed.
 
-# [program self i]: the stage, the tour; then the window. The helpers follow
-# the body, the last bound first.
+# [program self i]: the stage, run once, plans the window's way over self (i,
+# the show's index, is not used). What it returns draws the frames: [t y x] is
+# the colour of the window's pixel in row y, column x, on frame t. The helpers'
+# values follow the body, innermost λ first: nz, then foldr, out to church.
 program = \self
   (\church (\nl (\inc (\dec (\le (\iter (\b1 (\n31 (\cdec (\cinc (\n25 (\foldr (\nz
     \_ Pair.match (Pico.Matrix.Selfie.window nl iter b1 n25 foldr inc dec church)
@@ -41,25 +50,26 @@ program = \self
     Pico.Matrix.Selfie.nl)
   Pico.Matrix.Selfie.church
 
-# ── The selfie ───────────────────────────────────────────────────────────────
-# Shrunk, the program is rebuilt only once applied: on the board, on its stage.
+# The selfie: program shrunk and given itself. Shrunk, program is rebuilt only
+# when first applied, which is on the board, during the stage.
 _selfie = fix (Generator.shrink program)
-# The show: on the board, slewing by 128 since the view moves with it, at 9.8
-# frames a second, what the board manages.
+# The show, at 9.8 frames a second, as fast as the board manages. Each LED
+# changes by at most 128 a frame towards its new colour, enough to keep up with
+# a view that moves every frame.
 _fps = 98
 show = Pico.Matrix.show_staged 128 _fps _selfie
-# The program, and the selfie.
+# Sizes in nodes: the program, and the selfie.
 _to_string = \l List.join " " $ List.map Nat.to_string l
 [size program; size _selfie]
 # = 50835 9442
 
-# What it draws, 6.1 s of it:
+# Its first 60 frames, 6.1 s on the board:
 Pico.Matrix.svg "selfie.svg" 60 show
 # = selfie.svg image/svg+xml 187394 bytes sha256:3bf8119e3752000ecbbaf2e9c55c28b842b702969f80ba48c951265d43da0dcc
 # The image to flash:
 Pico.Matrix.flash "selfie.uf2" [show]
 # = selfie.uf2 application/octet-stream 39936 bytes sha256:744169a0a030015deddd7b27cb4cf4f5dde6ceb4593379bf8e24681a1ed7d9ad
 
-# Its way over its own tree, as a page:
+# A page that plays the window's way over the tree (page.lamb):
 file "selfie.html" "text/html" $ Pico.Matrix.Selfie.page _fps _selfie
 # = selfie.html text/html 48209 bytes sha256:8e54a2bd1a1bed4cc40b950f76144fe41e638ac0c557a535764fb40737aa90bf

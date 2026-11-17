@@ -1,19 +1,19 @@
-# The selfie's way as a page of its own: the tree it draws, a pixel a node —
-# leaves red, stems green, forks blue, edges in two greys by row — the
-# window's path over it, and what the board's 25 × 25 shows each frame, played,
-# scrubbed, or picked by clicking the tree.
+# A web page that plays the selfie's way: the whole picture as the selfie
+# draws it, the window's path over it, and what the board shows on each frame.
+# It plays at a choice of speeds and can be scrubbed, and clicking the picture
+# goes to the first frame whose window holds that point, or comes nearest.
 #
-# The page gets the tree in preorder and each frame's move, and draws them
-# itself: _kinds and _moves say how.
+# The page gets the tree in preorder and the window's moves, frame by frame,
+# and draws both itself: _kinds and _moves say how they are written.
 
-# t in preorder, laid out as a says, before acc: 0 a leaf, 1 a stem, k + 1 a
-# fork whose children are k rows down and k columns to either side. n is a
-# unary number as a nat.
+# [_kinds n t a acc]: t's nodes in preorder, then acc: 0 for a leaf, 1 for a
+# stem, k + 1 for a fork whose children are k rows down and k columns to
+# either side. a is t's forks, and n makes a nat of a unary number.
 _kinds = \n fix $ \g \t \a \acc triage (\a List.cons 0 acc) (\c \a List.cons 1 (g c a acc))
   (\l \r \a Pair.match (\lr \k Pair.match (\al \ar List.cons (Nat.succ (n k)) (g l al (g r ar acc))) lr) a) t a
-# Each of places, △ x y, as a move from the one before, at x y: r, l or d a
-# column right or left or a row down, s none, j a jump; and the places jumped
-# to, x then y.
+# [_moves x y places]: each of places, △ x y, as a move from the one before,
+# starting from x y: r, l or d for a column right, a column left or a row
+# down, s for none, and j for a jump; and the places jumped to, x then y.
 _move = \x \y \x2 \y2 Bool.if (equal y y2)
   (Bool.if (equal x x2) (Option.some 's') (Bool.if (equal x2 (Nat.succ x)) (Option.some 'r') (Bool.if (equal x (Nat.succ x2)) (Option.some 'l') Option.none)))
   (Bool.if (Bool.and (equal x x2) (equal y2 (Nat.succ y))) (Option.some 'd') Option.none)
@@ -239,8 +239,8 @@ _script = "
 
 _title = "Selfie path"
 _lede = "The selfie show draws its own tree and slides the board's 25 &times; 25 window over it, one pixel a frame, a strip of 25 rows at a time from the top down. Its tree is the one the build generates from selfie.lamb, a smaller tree that gives the program back. Below: its path over that tree, frame by frame."
-# [page fps tree]: the page for the selfie's way over tree, fps the frames a
-# second the board shows, in tenths.
+# [page fps tree]: the page for the selfie's way over tree, fps the board's
+# frames a second, in tenths.
 page = \fps \tree
   let Pico.Matrix.Selfie.iter $ \iter
   let Pico.Matrix.Selfie.inc $ \inc

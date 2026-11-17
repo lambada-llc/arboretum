@@ -1,48 +1,68 @@
-# The selfie's layout of a tree: its forks, each with how long its diagonals
-# are, and its outline. An outline is the rows below the root, each △ l r: how
-# much further the leftmost pixel (l, mirrored) and the rightmost (r) reach
-# than in the row above, as church makes numbers: [d f g s] applies f or g that
-# many times.
+# How the selfie lays out a tree.
 #
-# The need of two outlines side by side: the most by which the left one's right
-# edge reaches past the right one's left edge, rows next to each other
-# included. Walking down both, △ G n is the need so far and how far below it
-# the current difference is; a row's moves count rises first.
+# The root is at the top. A stem's child is right below it. A fork's children
+# are k rows down and k columns to either side, at the ends of diagonal edges,
+# with k as small as keeps them apart: at least one empty column between the
+# two subtrees in every row, and between neighbouring rows.
+#
+# [lay t] is △ forks outline. forks holds every fork's k: for a leaf it is [],
+# for a stem its child's, and for a fork △ (△ left right) k, left and right
+# its children's. The outline is t's shape: for each row below the root, △ l r,
+# how much further the leftmost pixel reaches left (l) and the rightmost
+# reaches right (r) than in the row above. l and r are numbers as church makes
+# them: [n f g s] applies f n times, or g −n times.
+
+# Two outlines side by side, their roots in one column, overlap by how far the
+# left one's right edge is right of the right one's left edge (0 in the same
+# column). The need is the most they overlap in any row, or between
+# neighbouring rows. Walking down both, the state is △ g n: n the need so far,
+# and g how far the overlap now is below it. [_up s] is s with the overlap one
+# more, [_down s] one less.
 _up = Pair.match $ \g \n △ (△ (Pair.create 0 (Snat.succ n)) (\g Pair.create g n)) _ g
 _down = Pair.match $ \g \n Pair.create (Snat.succ g) n
-# s after a row whose moves are ra, of the left one's right edge, and lb, of
-# the right one's left edge; [ud x s] is s moved by x.
+# [_step ud ra s lb]: s after a row in which the left outline's right edge
+# moves ra columns right and the right outline's left edge lb columns left;
+# [ud x s] is s with the overlap grown by x. A rise is counted before a fall,
+# so each edge's new place is also measured against the other's old one: that
+# is the "between neighbouring rows".
 _step = \ud \ra \s \lb
   (\a \b △ (△ (\s a (b s)) (\_ \s b (a s))) _ (ra (\_ false) (\_ true) false) s) (ud lb) (ud ra)
-# A fork's diagonals are k long, 2k at least the need plus 2, taken from ks,
-# the list 1, 2, 3, … so that every fork with the same k shares it. ks goes
-# to 256.
+# A fork's k from the need: the smallest with 2k ≥ need + 2. It is taken from
+# ks, the list 1, 2, …, 256, so that forks with the same k share one number.
 _half = fix $ \h △ (△ Pair.fst (\p \ks △ (△ (Pair.fst (Pair.snd ks)) (\q h q (Pair.snd ks))) _ p)) _
 _ks_step = Pair.match $ \v \l Pair.create (triage _ id _ v) (List.cons v l)
 _ks = \iter \church (\n Pair.snd (church n _ks_step _ (Pair.create n []))) (iter 0 256 Snat.succ)
-# A fork's outline: k diagonal rows, then its children's rows merged — left of
-# the left child, right of the right one — down to where the shorter one ends,
-# where the longer one takes over: that row's step is the way from the shorter
-# one's last row to it, m2k plus the differences summed on the way down.
-# One walk down both children's outlines finds the need and merges them: △ k
-# rows, the rows below the diagonals; [_nm_end s f] is that, s the need and f
-# the rows given m2k.
+# One walk down both children's outlines finds the need and merges them into
+# the fork's outline below its diagonals: the left edge from the left child,
+# the right edge from the right child. Where the shorter one ends, the longer
+# one's edge takes over that side, and that row's move is from where the
+# shorter one's edge last was: −2k, as the children are 2k apart, plus how far
+# the two edges have drifted apart on the way down, plus the longer one's move.
+#
+# [_nm_end s f]: △ k rows, k from the final state s, and rows f m2k, with
+# m2k = −2k.
 _nm_end = \iter \dec \church \s \f (\k Pair.create k (f (church k dec _ (church k dec _ 0)))) (_half (Pair.snd s) (_ks iter church))
-# [_jsum s f g j]: s moved by the moves in j, each △ x y: by x, and by y the
-# other way.
+# [_jsum s f g j]: s, then for each △ x y of j, x steps by f and y steps by g:
+# with f one up and g one down, s plus the sum of x − y.
 _jsum = \s \f \g fix (\r triage s _ (\p \l Pair.match (\x \y x f g (y g f (r l))) p))
-# Where the shorter outline ends, the longer one takes over its side: mk makes
-# the next row of e, the longer one's move on that side, plus m2k and the moves
-# in j; rest are the longer one's rows below it.
+# [_nm_over … e j rest mk s], … being the functions it is passed: where only
+# the longer outline goes on. Its row is mk of its move from the shorter one's
+# edge (see above: e its own move, j the moves so far on that side), then
+# rest, its rows below. The state s takes e too, which measures that row
+# against the shorter one's last.
 _nm_over = \ud \inc \dec \church \fin \e \j \rest \mk \s fin (ud e s) (\m2k List.cons (mk (church (e inc dec (_jsum m2k inc dec j)))) rest)
-# Where both go on: the row la rb, and the walk w on below it.
+# [_nm_next … w jl jr ca la ra hb cb s]: where both go on, the left child's
+# row being △ la ra and the right child's hb: the merged row la rb, left edge
+# from the left child and right edge from the right child, then the walk w on
+# from the rows below.
 _nm_next = \ud \w \jl \jr \ca \la \ra \hb \cb \s Pair.match (\lb \rb
     Pair.match (\k \rows Pair.create k (List.cons (Pair.create la rb) rows))
       (w (_step ud ra s lb) (List.cons (Pair.create lb la) jl) (List.cons (Pair.create ra rb) jr) ca cb))
   hb
-# [w s jl jr ca cb]: s the need so far; jl and jr the moves so far on the left
-# and right, the last first, each △ x y: x of the one that goes on there, y of
-# the other's; ca and cb the rows left of each.
+# The walk, [w s jl jr ca cb]: s the state; ca and cb the two outlines' rows
+# still to come; jl and jr the moves so far on the left and right side, the
+# latest first, each △ x y with x the move of the child that would take over
+# that side and y the other's.
 _nm = \iter \inc \dec \church (\ud
   (\fin (\over fix $ \w \s \jl \jr \ca \cb
     △ (△ (△ (△ (\s fin s (\_ [])) _) (\hb \cb \s Pair.match (\lb \rb over lb jl cb (\x Pair.create x rb) s) hb)) _)
@@ -52,7 +72,6 @@ _nm = \iter \inc \dec \church (\ud
       ca cb s)
     (_nm_over ud inc dec church fin))
   (_nm_end iter dec church)) (\x x _up _down)
-# A tree's forks, each △ (△ left right) k, and its outline.
 lay = \iter \inc \dec \church
   (\nm \diag fix $ \r △ (△ (Pair.create [] []) (\c Pair.match (\a \rows Pair.create a (List.cons (Pair.create Pico.Matrix.Selfie.zero Pico.Matrix.Selfie.zero) rows)) (r c)))
     (\a \b Pair.match (\aa \ca Pair.match (\ab \cb

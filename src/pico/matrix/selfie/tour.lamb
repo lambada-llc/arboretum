@@ -1,80 +1,104 @@
-# The selfie's tour: the window's way over the laid-out tree, made on the stage
-# before the first frame.
+# The window's way over the selfie's picture, planned on the stage, before the
+# first frame.
 #
-# The rows from lv down, 25 to a band, each band △ lv s: its top row, as _ho
-# makes it, and its runs left to right, each △ a z: from where the window shows
-# nothing before columns with pixels, no 25 of them empty in a row, to where it
-# shows nothing after them. What grows from a pixel of lv in the 24 rows below
-# it keeps to columns next to each other.
-# Runs s with a z among them: runs that overlap or meet made one.
+# The picture is cut into bands of 25 rows, and the window crosses one after
+# the other: the first rightward, the next leftward, and so on. In a band, a
+# run is a stretch the window has to cross, △ a z: its left column from a,
+# where it shows nothing yet, to z, where it shows nothing any more. Between
+# runs it jumps, from one empty view to the next.
+#
+# At the end of a band, the window either jumps to where the next band's way
+# starts, or, if the next band's picture on that side ends no more than 24
+# columns short of this one's, goes on until the further out of the two is at
+# its far edge and slides down to the next band from there.
+#
+# A band is △ row runs: its top row, which the window draws the band from, and
+# its runs in order. Each pixel of the top row gives a run, from just left of
+# where what grows from it in the band reaches to just right of it, and runs
+# that overlap or touch are one.
+
+# [_ins s a z]: runs s, in order, with △ a z added; runs that overlap or touch
+# become one.
 _ins = \le fix $ \i \s \a \z △ (△ [Pair.create a z] _) (\az \s Pair.match (\a2 \z2
     le a2 z (\s (\a le z z2 (List.cons (Pair.create a z2)) (\s i s a z) s) (le a a2 a a2)) (\s List.cons (Pair.create a z) (List.cons az s)) s)
   az) s
-# The larger of a and b.
+# [_max a b]: the larger of a and b.
 _max = \inc \dec \church \a \b △ (△ a (\_ b)) (\_ \_ a) (church a dec inc b)
-# How far, △ l h, left and right, what grows from a pixel reaches in the d rows
-# below it, m rows above node t, stepping st, a t's forks, a pixel at a time:
-# _reach; the same one row further on, stepping st: _s1.
+# The reach of a pixel, △ l h: how far left and right what grows from it
+# reaches in the rows below. [_s1 st r]: this pixel's reach, r being the reach
+# of the pixel a step along st in the next row.
 _s1 = \st Pair.match (st (Pair.create (\l \h Pair.create (Snat.succ l) (triage 0 id _ h)) (\l \h Pair.create (triage 0 id _ l) (Snat.succ h))))
-# What grows from a fork's children, k rows below it: the further of the two
-# on each side.
+# [_reach_fork max g a d tl tr]: a fork's reach in d rows: on each side the
+# further of its two children's, g being _reach.
 _reach_fork = \max \g \a \d \tl \tr Pair.match (\lr \k Pair.match (\al \ar
     (\gk Pair.match (\l \h Pair.match (\l2 \h2 Pair.create (max l2 l) (max h h2)) (gk Pair.snd tr ar)) (gk Pair.fst tl al)) (g d k))
   lr) a
-# [_reach_at max g a t d]: at node t, d rows left, nothing if d is 0 or t a
-# leaf, else what grows from its children: a stem's right below it, walked on
-# from there, and a fork's from where its diagonals end, by g.
+# [_reach_at max g a t d]: the reach of node t (a its forks) in d rows: nothing
+# if d is 0 or t is a leaf; for a stem, its child's from right below; for a
+# fork, _reach_fork's.
 _reach_at = \max \g \a fix $ \n \t \d
   △ (△ (Pair.create 0 0) (\d2 △ (△ (Pair.create 0 0) (\t n t d2)) (_reach_fork max g a d) t)) _ d
+# [_reach d m st t a]: the reach in d rows of an item m pixels before node t
+# (a its forks), going st.
 _reach = \inc \dec \church (\max fix $ \g \d \m \st \t \a (\n fix (\w \d \m
     △ (△ (n t) (\m △ (△ (Pair.create 0 0) (\d _s1 st (w d m))) _)) _ m d) d m) (_reach_at max g a))
   (_max inc dec church)
-# A row with each column △ tile o, o a part of n31, so that the rows kept
-# share it.
+# [_ho row]: row with each column as △ h o, o a part of the one 31 as in nz,
+# which is all the window needs: a band keeps its top row for the whole show.
 _ho = \n31 \foldr \dec \church \row foldr (\it List.cons (Pair.match (\x Pair.create (Pair.match (\c \uo Pair.create c (church (Pair.fst uo) dec _ n31)) x)) it)) [] row
-# Runs s with one for item it among them.
+# [_run it s]: runs s with item it's run added: from where the window is just
+# left of all that grows from it in the next 24 rows to just right of it.
 _run = \cdec \cinc \le \n25 \iter \inc \dec \church (\ins \reach \back \it \s Pair.match (\x Pair.match (\m Pair.match (\st Pair.match (\t \a Pair.match (\l \h
     ins s (church l cdec _ (back x)) (church (Snat.succ h) cinc _ x))
   (reach m st t a))))) it) (_ins le) (_reach inc dec church (dec n25)) (\x iter (Pair.match (\h Pair.create (dec h)) x) 7 cinc)
+# [_band row]: the band whose top row is row.
 _band = \nz \cdec \cinc \le \n31 \n25 \foldr \iter \inc \dec \church \row
   Pair.create (_ho n31 foldr dec church row)
     (foldr (\pq List.cons (Pair.match (\a \z Pair.create (nz a) (nz z)) pq)) []
       (foldr (_run cdec cinc le n25 iter inc dec church) [] row))
-# The bands are made last first and reversed, so that what makes a band is
-# let go before the next one is made.
+# [bands row acc]: the bands from row down to where a row is empty. They are
+# made last first and reversed, so that what makes a band is let go before the
+# next one is made.
 bands = \nz \cdec \cinc \nl \le \n31 \n25 \foldr \iter \inc \dec \church (\down \band fix $ \r triage List.reverse _ (\h \t \acc (\l
   r (down l) (List.cons (band l) acc)) (List.cons h t)))
   (fix (\b △ (△ id (\n \lv b n (nl (Pair.create cdec cinc) lv))) _) n25) (_band nz cdec cinc le n31 n25 foldr iter inc dec church)
-# The window's way: segments △ r (△ kind (△ pos (△ lv d))), r frames from pos
-# on as △ t o, 32 t + o of them (made when needed, as \_ r), kind m pos the
-# window's place m frames on, m in bits, △ x skip: its left column x, its top
-# skip rows below lv's, which d, the way its band goes, says is an even row or
-# an odd one. Across each band in turn, alternately rightward and leftward —
-# the way d, const or p2 — over each run: from where the window shows nothing to
-# where it shows nothing again; but at the band's far side, if the next band's
-# run there ends no 24 columns short of this one, to where the window shows the
-# further of the two at its edge, and down there.
+# The way is a list of segments, △ r (△ kind (△ pos (△ lv d))). From pos, the
+# window moves for r frames, r a count △ t o of 32 t + o, made as \_ r so that
+# it is worked out only when the segments are grouped; [kind m pos] is where
+# it is m frames on, m in bits. A place is △ x skip: the window's left column
+# x, and its top row skip rows below lv, the top of the band. d is the band's
+# way, const rightward and p2 leftward; as a band is 25 rows, it is also the
+# parity of lv.
+#
+# [_rv runs]: runs in the order a leftward crossing meets them, each from its
+# end to its start.
 _rv = (\f fix (\v \acc △ (△ acc _) (\x v (List.cons (f x) acc))) []) Pair.swap
-# The segments g over runs cl, each △ from to, from s: each to its to, and on
-# from the next one's from; the last one fin c s.
+# [_runs runs g s fin]: the segments g makes over runs, from column s: to the
+# end of each run, then on from the start of the next; for the last, fin c s.
 _runs = fix $ \u \cl \g \s \fin Pair.match (\c \more △ (△ (\fin fin c) _) (\c2 \m \fin \s List.cons (g s (Pair.snd c)) (u (List.cons c2 m) g (Pair.fst c2) fin)) more fin s) cl
-# The frames from column s to e going the way d, △ t o: 32 t + o of them.
+# [_span d s e]: the frames from column s to column e going d, as △ t o.
 _span = \inc \dec \church \d \s \e Pair.match (\hl \uol Pair.match (\hh \uoh
     (\t △ (△ (Pair.create (dec t) (church (Pair.snd uoh) Snat.succ _ (Snat.succ (Snat.succ (Pair.fst uol))))) (\x Pair.create t (Snat.succ x))) _ (Pico.Matrix.Selfie.sub (Pair.snd uol) (Pair.snd uoh)))
     (church hl dec inc hh))
   (d e s)) (d s e)
+# [_across st ti m place]: the place m frames on when moving a column a frame,
+# st a column step and ti a tile step: m's lowest five bits are columns, the
+# rest whole tiles. [_sink m place]: the place m frames on when moving down.
 _across = \iter \st \ti \m Pair.match $ \c Pair.create (iter (iter c (iter m 5 Pair.snd) (Pair.match (\h Pair.create (ti h)))) (Pico.Matrix.Selfie.take m (iter 0 5 Snat.succ)) st)
 _sink = \iter \m Pair.match $ \c \s Pair.create c (iter s m Snat.succ)
+# 24 frames, as a segment's r.
 _k24 = \n25 \dec \_ Pair.create 0 (dec n25)
+# [_seg d lv s e]: the segment from column s to e across band lv, going d.
 _seg = \cdec \cinc \iter \inc \dec \church (\span \across \d \lv \s \e
   Pair.create (\_ span d s e) (Pair.create (across (d cinc cdec) (d inc dec)) (Pair.create (Pair.create s 0) lv))) (_span inc dec church) (_across iter)
-# x if column a is not behind column b going the way d, else y.
+# [_led d a b x y]: x if column a is not past column b going d, else y.
 _led = \le \d \a \b d (le a b) (le b a)
-# The segment down to the next band, from column x: 24 frames.
+# [_drop lv x]: the segment down from band lv to the next, in column x: 24
+# frames, the row after the band's top down to the last before the next band's.
 _drop = \n25 \iter \dec \lv \x Pair.create (_k24 n25 dec) (Pair.create (_sink iter) (Pair.create (Pair.create x Snat.one) lv))
-# At a band's far side, going the way d with segments g: from e, where its last
-# run ends, on to where the next band's first run starts, n; nx x the rest from
-# column x there.
+# [_turn d lv g e n nx s]: from column s at the end of band lv, going d with
+# segments g, on to the next band, where the way starts from column n: e is
+# where this band's last run ends, and [nx x] the way on from column x.
 _turn = \nz \cdec \cinc \le \n25 \iter \dec \church (\led \c24 \c25 \drop \d \lv \g \e \n \nx
   (\bk
     (\x led d (c24 bk _ e) n
@@ -82,9 +106,10 @@ _turn = \nz \cdec \cinc \le \n25 \iter \dec \church (\led \c24 \c25 \drop \d \lv
         (\nx \s List.cons (g s e) (nx n)) nx)
     (nz (c25 bk _ (led d e n n e))))
   (d cdec cinc)) (_led le) (church (dec n25)) (church n25) (_drop n25 iter dec)
-# Where the way over band b starts, going against d: its last run's end if
-# d goes rightward, its first run's start if not.
+# [_entry d band]: where the way over band starts, going against d: at its
+# last run's end if d is rightward, at its first run's start if leftward.
 _entry = \d \b Pair.match (\_ \s d (Pair.snd (Pair.match Pico.Matrix.Selfie.last s)) (Pair.fst (Pair.fst s))) b
+# [legs bands d x]: the way over bands, the first one going d, from column x.
 legs = \nz \cdec \cinc \le \n25 \iter \inc \dec \church (\turn \seg fix $ \r \bands \d \x Pair.match (\b \rest Pair.match (\lv \s
     (\lv
       (\g _runs (d id _rv s) g x (\c
@@ -96,9 +121,10 @@ legs = \nz \cdec \cinc \le \n25 \iter \inc \dec \church (\turn \seg fix $ \r \ba
       (seg d lv))
     (Pair.create lv d))
   b) bands) (_turn nz cdec cinc le n25 iter dec church) (_seg cdec cinc iter inc dec church)
-# The segments in eights, each △ n (its segments △ n (△ kind (△ pos lv))), n
-# their frames in bits, and the frames in all, △ t o; each eight made by a
-# function of its own, so that what makes it is let go before the next one.
+# The way in groups of eight segments, each △ n segments with n its frames in
+# bits, each segment's frames in bits too; and its frames in all, △ t o. Each
+# group is made by a function of its own, so that what makes one is let go
+# before the next.
 _force = \sg List.cons (Pair.create (Pair.fst sg _) (Pair.snd sg))
 _grp = \tadd \bin \foldr \c
   (\r Pair.create r (Pair.create (bin r) (foldr (\sg List.cons (Pair.create (bin (Pair.fst sg)) (Pair.snd sg))) [] c)))
@@ -107,10 +133,10 @@ _gk = \tadd \g \x \l Pair.match (\gs \r Pair.create (List.cons (Pair.snd x) gs) 
 _groups = \tadd \bin \foldr \iter (\n8 fix $ \g triage (Pair.create [] (Pair.create 0 0)) _ (\h \t
   _gk tadd g (_grp tadd bin foldr (foldr _force [] (Pico.Matrix.Selfie.take (List.cons h t) n8)))
     (fix (\r \n \l △ (△ l (\p r p (Pair.snd l))) _ n) n8 (List.cons h t)))) (iter 0 8 Snat.succ)
-# The first row: the root's pixel, toward self laid out.
+# [_top self]: the picture's first row: self's root, in column 0.
 _top = \self \n31 \iter \inc \dec \church [Pair.create (Pico.Matrix.Selfie.x0 n31) (Pair.create 0 (Pair.create Pair.fst (Pair.create self (Pair.fst (Pico.Matrix.Selfie.lay iter inc dec church self)))))]
-# [tour self]: self laid out and the window's way over it, as groups of
-# segments in bits, and its frames.
+# [tour self]: the window's way over self, in groups, and its length in frames,
+# in bits.
 tour = \self \nz \b1 \cdec \cinc \nl \le \n31 \n25 \foldr \iter \inc \dec \church (\bin
   ((\groups \legs \bands Pair.match (\gs \r Pair.create gs (bin r))
     (groups (legs bands const (Pair.fst (Pair.fst (Pair.snd (Pair.fst bands)))))))
