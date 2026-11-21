@@ -1,0 +1,46 @@
+# Transpile a function into a self-contained web page that runs it.
+#
+# of_func takes the function's return type and argument types — type names,
+# and "String" is the only one supported so far — an intro (HTML, shown
+# above the boxes), and the function itself. The page is one input box per
+# argument and one output box, and every edit applies the function to the
+# inputs again. The function rides along as JavaScript
+# (Transpile.Javascript), so the page needs nothing — no server, no LambAda.
+
+_style = "
+    body{margin:0;padding:1rem;font:15px system-ui,sans-serif;display:flex;flex-direction:column;gap:.5rem}
+    p{margin:0}
+    input,output{display:block;padding:.5rem;border:1px solid #bbb;border-radius:4px;font-family:monospace;font-size:1em;line-height:1.4;white-space:pre-wrap}
+    output{min-height:1.4em;background:#f6f6f6}"
+
+# The page tells its host its size, so a frame around it can be content-sized
+# rather than guessed. On resize as well as on each result: the host may still
+# be laying its frame out when the page loads — a report of width 0 says
+# nothing and is dropped — and the report that counts is the one after the
+# frame settles.
+_script = \f List.concat_list ["
+    const f = "; Transpile.Javascript.of_string_string f; ";
+    const inputs = [...document.querySelectorAll('input')];
+    const output = document.querySelector('output');
+    const fit = () => parent.postMessage({ width: innerWidth, height: document.body.offsetHeight }, '*');
+    const run = () => {
+      output.textContent = inputs.reduce((g, i) => g(i.value), f);
+      fit();
+    };
+    inputs.forEach(i => i.addEventListener('input', run));
+    addEventListener('resize', fit);
+    run();"]
+
+_title = \ret \args List.join " &#8594; " $ List.concat args [ret]
+of_func = \ret \args \intro \f Html.page (_title ret args) _style $ List.concat_list
+  [[Xml.element "p" [] [intro]];
+   List.map (\_ Xml.element "input" [△ "autocapitalize" "off"; △ "autocorrect" "off"; △ "spellcheck" "false"] []) args;
+   [Xml.element "output" [] [""];
+    Xml.element "script" [] [_script f]]]
+
+# The identity function is cat — a page that echoes what you type.
+file "cat.html" "text/html" $ of_func "String" ["String"] "<code>id</code>, echoing its input" id
+# = cat.html text/html 2437 bytes sha256:3293f95aef5ced38fade1cc1b8f489d12f2515e308ba49d2f4004fc914bd8d73
+# And a function doing actual work on each keystroke.
+file "reverse.html" "text/html" $ of_func "String" ["String"] "<code>List.reverse</code>, reversing its input" List.reverse
+# = reverse.html text/html 2704 bytes sha256:4e0004a14ca4ecb2be78f6efefa5509d7315b007e517e695d51807309c61d44d
