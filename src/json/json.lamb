@@ -1,0 +1,57 @@
+# JSON text from a JSON value.
+#
+# A value is Null, Bool b, String s, Array a or Object entries, Scott-encoded,
+# so rendering one is the value applied to one handler per constructor, with
+# [fix] threading the recursion. Strings are byte lists.
+#
+# [Object] holds an association list rather than a map, which is what the
+# format permits: entries keep the order they were built in, and a key may
+# repeat. [quote] escapes only what the format requires — the quote, the
+# backslash, and the C0 controls as \u00XX — so every other byte passes
+# through and text that is already UTF-8 stays UTF-8 without this module
+# knowing anything about encodings. [to_string] writes the compact form, with
+# no space around , or :.
+
+JSON \= Null | Bool b | String s | Array a | Object entries
+
+_escape_char = \c
+  Bool.match
+    (Bool.match
+      (Bool.match
+        [c]
+        (List.concat "\\u00" (Nat.byte_to_hex c))
+        (Nat.is_lte c 31))
+      "\\\\"
+      (equal_const 92 c))
+    "\\\""
+    (equal_const 34 c)
+
+quote = \s List.concat_list ["\""; List.concat_map _escape_char s; "\""]
+
+to_string = fix $ \self \json json
+  "null"
+  (Bool.match "false" "true")
+  quote
+  (\a List.enclose "[" "," "]" self a)
+  (\entries List.enclose "{" "," "}" (Pair.match $ \k \v List.concat_list [quote k; ":"; self v]) entries)
+
+to_string Null
+# = null
+to_string $ Bool false
+# = false
+to_string $ Bool true
+# = true
+to_string $ String "hello"
+# = "hello"
+to_string $ String "a\tb"
+# = "a\u0009b"
+to_string $ Array []
+# = []
+to_string $ Array [Null; Bool true; String "x"]
+# = [null,true,"x"]
+to_string $ Object []
+# = {}
+to_string $ Object [△ "name" $ String "Alice"; △ "age" $ Null]
+# = {"name":"Alice","age":null}
+to_string $ Object [△ "items" $ Array [Bool true; Bool false]; △ "count" $ String "2"]
+# = {"items":[true,false],"count":"2"}
