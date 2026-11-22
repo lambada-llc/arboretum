@@ -1,0 +1,104 @@
+# Decimal numbers as an `Int` mantissa and a `Nat` scale: `△ mantissa scale`
+# denotes mantissa × 10⁻ˢᶜᵃˡᵉ.
+#
+# These are the numbers a finite run of decimal digits can write — an integer's
+# digits with a point placed somewhere in them, and no expansion to cut short.
+# That is the line between this and `Rat`, which also holds 1/3: no decimal
+# denotes it, which is why `Rat.to_decimal` has to be told a precision and
+# truncate. The same line is why `div` is absent here. `add`, `sub` and `mul`
+# close over these and are exact; division does not, and a module that offered
+# it would have to round.
+#
+# The scale is a plain `Nat`, not a signed exponent, so a power of ten above
+# zero lives in the mantissa's own trailing zeros: 10¹⁰⁰ is 101 digits at
+# scale 0. Nothing is lost by that — every finite decimal is some m × 10⁻ˢ —
+# but a large magnitude costs its digits rather than an exponent, which is a
+# representation to revisit if one ever has to be read back from text.
+#
+# Values are not canonical: `create 150 1` and `create 15 0` are distinct trees
+# denoting 15. Nothing here normalizes, so the trailing zeros a caller builds
+# in are the ones `to_string` writes back.
+
+create = Pair.create
+mantissa = Pair.fst
+scale = Pair.snd
+from_int = \i Pair.create i 0
+from_nat = \n from_int (Int.from_nat n)
+zero = from_nat 0
+one = from_nat 1
+
+# Raise a mantissa by k decimal places, which is how two scales are aligned:
+# the larger scale wins, and the other side's mantissa makes up the difference.
+_shift = \k \m Int.mul m $ Int.from_nat $ Fn.pow k (Nat.mul_const 10) 1
+
+add = Pair.match $ \m \s Pair.match $ \n \t
+  let (Nat.max s t) $ \u
+  Pair.create (Int.add (_shift (Nat.sub u s) m) (_shift (Nat.sub u t) n)) u
+negate = Pair.match $ \m \s Pair.create (Int.negate m) s
+sub = \a \b add a (negate b)
+mul = Pair.match $ \m \s Pair.match $ \n \t Pair.create (Int.mul m n) (Nat.add s t)
+
+# Place the point `scale` digits from the right of the mantissa's digits,
+# keeping a digit on each side of it: neither "1." nor ".5" is ever written. A
+# mantissa with no more digits than the scale gets the "0." and the zeros that
+# separate the point from its digits.
+_point = \digits \s
+  let (List.length digits) $ \n
+  Bool.match
+    (List.concat_list [List.take (Nat.sub n s) digits; "."; List.drop (Nat.sub n s) digits])
+    (List.concat_list ["0."; List.repeat (Nat.sub s n) '0'; digits])
+    (Nat.is_lte n s)
+# `Nat.to_string` gives the digits with no leading zero, which is what keeps the
+# integer part well formed. Zero is written "0" at every scale, and never with
+# the sign: the mantissa is what the value is, and a scale cannot make it
+# another number.
+to_string = Pair.match $ \m \s
+  Bool.match
+    (let (Nat.to_string (Int.abs m)) $ \digits
+     let (Bool.match (_point digits s) digits (Nat.is_zero s)) $ \body
+     Bool.match body (List.concat "-" body) (Int.is_negative m))
+    "0"
+    (Nat.is_zero (Int.abs m))
+
+_to_string = to_string
+from_nat 0
+# = 0
+from_nat 42
+# = 42
+negate (from_nat 42)
+# = -42
+one
+# = 1
+# A scale splits the same digits: 1234 at 2 is 12.34, at 4 it is 0.1234.
+create (Int.from_nat 1234) 2
+# = 12.34
+create (Int.from_nat 1234) 4
+# = 0.1234
+# Fewer digits than the scale: the zeros between point and digits are written.
+create (Int.from_nat 5) 3
+# = 0.005
+negate (create (Int.from_nat 25) 2)
+# = -0.25
+# A power of ten above zero is carried in the mantissa, so no exponent.
+create (Int.from_nat 1500) 0
+# = 1500
+# Zero at any scale is "0", never "-0" or "0.00000".
+create (Int.from_nat 0) 5
+# = 0
+negate (create (Int.from_nat 0) 2)
+# = 0
+# Trailing zeros survive: nothing normalizes.
+create (Int.from_nat 150) 1
+# = 15.0
+# add takes the larger scale and lifts the other mantissa to meet it.
+add (create (Int.from_nat 1) 1) (create (Int.from_nat 25) 2)
+# = 0.35
+sub (from_nat 1) (create (Int.from_nat 1) 2)
+# = 0.99
+add (create (Int.from_nat 1) 2) (negate (create (Int.from_nat 1) 2))
+# = 0
+# mul multiplies the mantissas and adds the scales, so 1.5 × 1.5 is exact.
+mul (create (Int.from_nat 15) 1) (create (Int.from_nat 15) 1)
+# = 2.25
+mul (from_nat 3) (create (Int.from_nat 125) 3)
+# = 0.375
