@@ -1,9 +1,17 @@
-# Exact sharing, carried by a tree. A tree's size counts every copy of a
-# subtree, so a tree whose DAG is small can still be a large tree. [shrink t]
-# is △ defs root: the subtrees t holds more than once, each written once, and
-# t over them; [expand] gives back t exactly, so it serves data as well as
-# code. Both only read trees, so shrink's work is the size of t as a tree, not
-# of its DAG.
+# The sharing codec: exact sharing, carried by a tree. A tree's size counts
+# every copy of a subtree, so a tree whose DAG is small can still be a large
+# tree. [encode t] is △ defs root: the subtrees t holds more than once, each
+# written once, and t over them; [decode] gives back t exactly, so it serves
+# data as well as code.
+#
+# What it finds is repetition, so what it saves is how redundant the tree is,
+# and it cannot go below the count of distinct subtrees. The other codec here,
+# [Codec.Term], finds something else entirely and is not bounded that way; see
+# [Codec] for what the two share.
+#
+# Both passes only read trees, so encode's work is the size of t as a tree, not
+# of its DAG — which is what puts the largest trees, whose whole point is that
+# their DAG is small, out of reach.
 #
 # A body is △ (the leaf), △ path (the def at path), △ △ b (the stem over b) or
 # △ (△ l) r (the fork over l and r). A path is a def's position in bits, least
@@ -11,7 +19,7 @@
 # children first, so each refers only to ones before it, and the small ones,
 # which are the ones shared most, get the short paths.
 
-# ── Expanding ────────────────────────────────────────────────────────────────
+# ── Decoding ────────────────────────────────────────────────────────────────
 # The defs built so far are a trie by path: △ (empty) or △ v (△ t0 t1).
 _pinc = fix $ \self triage (△ △ △) (\r △ △ r) (\_ \r △ (self r))
 _tsplit = \t \k triage (\k k △ △ △) _ (\v \kids \k Pair.let kids $ \t0 \t1 k v t0 t1) t k
@@ -26,11 +34,11 @@ _dec = \env fix $ \self \b triage
   (\p _tget p env)
   (\x \y let (self y) $ \dy triage (△ dy) (\l △ (self l) dy) _ x)
   b
-expand = \c Pair.let c $ \defs \root
+decode = \c Pair.let c $ \defs \root
   Pair.let (List.foldl (\acc \b Pair.let acc $ \env \p △ (_tset p (_dec env b) env) (_pinc p)) (△ △ △) defs) $ \env \_
   _dec env root
 
-# ── Shrinking ────────────────────────────────────────────────────────────────
+# ── Encoding ────────────────────────────────────────────────────────────────
 # Interning: st = △ map (△ n nodes), map from a node's key — its children's
 # ids, △ c or △ l r — to its id, n the last id given out, nodes each △ id key,
 # newest first. The leaf is id 0.
@@ -66,30 +74,53 @@ _step = \parents \node \acc Pair.let node $ \id \key Pair.let acc $ \forms \rest
     (\_ △ (Map.pmap_set id (△ b s) forms) (△ path defs))
     (\_ △ (Map.pmap_set id (△ ref rs) forms) (△ (_pinc path) (△ b defs)))
     (_worth (Map.pmap_get id parents) s rs) △
-shrink = \t
+encode = \t
   Pair.let (_hc t (△ Map.empty (△ 0 []))) $ \root \st
   let (Pair.snd (Pair.snd st)) $ \nodes
   Pair.let (List.foldr (_step (_parents nodes)) (△ Map.empty (△ △ [])) nodes) $ \forms \rest
   △ (List.reverse (Pair.snd rest)) (Pair.fst (_form forms root))
 
+codec = Codec.create encode decode
+
 # ── Tests ────────────────────────────────────────────────────────────────────
 _to_string = Bool.to_source
-_same = \t equal (expand (shrink t)) t
+_same = \t equal (decode (encode t)) t
 List.all _same [△; △ △; △ △ △; △ (△ △) (△ △); true; false; Bool.not; fix; List.map; Nat.add; size]
 # = true
 _same Lambada.parse_expr
 # = true
 # A subtree held twice becomes the one def, referred to as △ △ (path 0).
 _to_string = Serialize.to_source
-let (△ (△ △) (△ △)) $ \y shrink (△ y y)
+let (△ (△ △) (△ △)) $ \y encode (△ y y)
 # = (△ (△ (△ (△ (△ △ △)) (△ △ △)) △) (△ (△ (△ △)) (△ △)))
 # Sizes as trees, before and after: a small tree only pays for the tags, a
 # shared one is written once.
 _to_string = \t List.join " → " $ List.map Nat.to_string t
-_sizes = \t [size t; size (shrink t)]
+_sizes = \t [size t; size (encode t)]
 _sizes Bool.not
 # = 8 → 14
 _sizes fix
 # = 57 → 71
 _sizes Lambada.parse_expr
 # = 491776 → 5832
+
+# Deferred, the same encoding gives a tree that runs: it is the function at
+# every argument, having decoded itself when the first one arrived.
+_to_string = Bool.to_source
+equal (Codec.defer decode (encode List.map) Nat.succ [1; 2]) [2; 3]
+# = true
+equal (Codec.defer decode (encode Nat.add) 2 3) 5
+# = true
+# Which is worth it only where the encoding beats the decoder it has to carry,
+# so Codec.shrink hands back the original for a small function and the deferred
+# tree for a large one.
+equal (Codec.shrink codec Bool.not) Bool.not
+# = true
+_to_string = \t List.join " → " $ List.map Nat.to_string t
+[size decode]
+# = 4492
+_sizes_deferred = \t [size t; size (Codec.shrink codec t)]
+_sizes_deferred Bool.not
+# = 8 → 8
+_sizes_deferred Lambada.parse_expr
+# = 491776 → 10336

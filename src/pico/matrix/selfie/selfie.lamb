@@ -22,20 +22,20 @@ program = \self
     Pico.Matrix.Selfie.nl)
   Pico.Matrix.Selfie.church
 
-_selfie = fix (Generator.shrink program)
+_selfie = fix (Codec.shrink Codec.Term.codec program)
 _fps = 98
 show = Pico.Matrix.show_staged 128 _fps _selfie
 _to_string = \l List.join " " $ List.map Nat.to_string l
 [size program; size _selfie]
-# = 50835 9442
+# = 50835 9451
 
 # Its first 60 frames, 6.1 s on the board:
 Pico.Matrix.svg "selfie.svg" 60 show
-# = selfie.svg image/svg+xml 187394 bytes sha256:3bf8119e3752000ecbbaf2e9c55c28b842b702969f80ba48c951265d43da0dcc
+# = selfie.svg image/svg+xml 180179 bytes sha256:f4ccafe49eeaba3113b8a26e6e2645da546855e40060471597a7c81a0588b83c
 # The image to flash:
 Pico.Matrix.flash "selfie.uf2" [show]
-# = selfie.uf2 application/octet-stream 39936 bytes sha256:744169a0a030015deddd7b27cb4cf4f5dde6ceb4593379bf8e24681a1ed7d9ad
+# = selfie.uf2 application/octet-stream 40448 bytes sha256:809749106b85ef5f64803416a604b2347dda76a62d724981df359f8a4c953bbc
 
 # The way, as a page:
 file "selfie.html" "text/html" $ Pico.Matrix.Selfie.page _fps _selfie
-# = selfie.html text/html 48209 bytes sha256:8e54a2bd1a1bed4cc40b950f76144fe41e638ac0c557a535764fb40737aa90bf
+# = selfie.html text/html 48079 bytes sha256:4e9b2bedab1f9105ef8e8dd8bd22be84f83594893d0a31c771bc680876918d1a
