@@ -1,18 +1,15 @@
 # JSON text from a JSON value.
 #
-# A value is Null, Bool b, String s, Array a, Object entries or
-# Number mantissa scale, Scott-encoded, so rendering one is the value applied
-# to one handler per constructor, with [fix] threading the recursion. Strings
-# are byte lists.
+# A value is Null, Bool b, String s, Array a, Object entries or Number d,
+# Scott-encoded, so rendering one is the value applied to one handler per
+# constructor, with [fix] threading the recursion. Strings are byte lists.
 #
-# [Number m s] is m × 10⁻ˢ, exactly: the mantissa's digits with a point s of
-# them from the right. Every number the format admits is a finite decimal, and
-# every finite decimal is some m × 10⁻ˢ, so this is as expressive as the
-# grammar and no more — there is nothing to round, and no way to ask for the
-# infinity or NaN that JSON has no syntax for. A rational would have been both
-# lossy and too expressive: 1/3 is not a JSON number. A power of ten above
-# zero is the mantissa's own trailing zeros ([Number 1500 0]), which is why
-# the scale is a plain Nat and the output never needs an exponent.
+# [Number] carries a [Decimal], which denotes what this format's numbers are
+# and nothing else: a finite run of digits with a point in it. So nothing is
+# decided here — no rounding, and no way to ask for the infinity or NaN JSON
+# has no syntax for, because no Decimal denotes one — and the number handler
+# is [Decimal.to_string] itself. [from_nat] and [from_int] are the sugar for
+# the integer case.
 #
 # [Object] holds an association list rather than a map, which is what the
 # format permits: entries keep the order they were built in, and a key may
@@ -22,7 +19,7 @@
 # knowing anything about encodings. [to_string] writes the compact form, with
 # no space around , or :.
 
-JSON \= Null | Bool b | String s | Array a | Object entries | Number mantissa scale
+JSON \= Null | Bool b | String s | Array a | Object entries | Number d
 
 _escape_char = \c
   Bool.match
@@ -38,37 +35,16 @@ _escape_char = \c
 
 quote = \s List.concat_list ["\""; List.concat_map _escape_char s; "\""]
 
-# Place the point s digits from the right of a mantissa's digits. Both sides of
-# it must carry a digit — the grammar admits neither "1." nor ".5" — so a
-# mantissa with no more digits than the scale gets the "0." and the zeros that
-# separate the point from its digits.
-_point = \digits \s
-  let (List.length digits) $ \n
-  Bool.match
-    (List.concat_list [List.take (Nat.sub n s) digits; "."; List.drop (Nat.sub n s) digits])
-    (List.concat_list ["0."; List.repeat (Nat.sub s n) '0'; digits])
-    (Nat.is_lte n s)
-# Nat.to_string gives the digits without a leading zero, which is the one thing
-# the grammar rules out in front. Zero is written "0" at every scale: the
-# mantissa is what the value is, and a scale cannot make it another number.
-_number = \m \s
-  Bool.match
-    (let (Nat.to_string (Int.abs m)) $ \digits
-     let (Bool.match (_point digits s) digits (Nat.is_zero s)) $ \body
-     Bool.match body (List.concat "-" body) (Int.is_negative m))
-    "0"
-    (Nat.is_zero (Int.abs m))
-
 to_string = fix $ \self \json json
   "null"
   (Bool.match "false" "true")
   quote
   (\a List.enclose "[" "," "]" self a)
   (\entries List.enclose "{" "," "}" (Pair.match $ \k \v List.concat_list [quote k; ":"; self v]) entries)
-  _number
+  Decimal.to_string
 
-from_int = \i Number i 0
-from_nat = \n Number (Int.from_nat n) 0
+from_int = \i Number (Decimal.from_int i)
+from_nat = \n Number (Decimal.from_nat n)
 
 to_string Null
 # = null
@@ -91,27 +67,12 @@ to_string $ Object [△ "name" $ String "Alice"; △ "age" $ Null]
 to_string $ Object [△ "items" $ Array [Bool true; Bool false]; △ "count" $ String "2"]
 # = {"items":[true,false],"count":"2"}
 
-to_string $ from_nat 0
-# = 0
 to_string $ from_nat 42
 # = 42
 to_string $ from_int (Int.negate (Int.from_nat 42))
 # = -42
-# A scale splits the same digits: 1234 at 2 is 12.34, at 4 it is 0.1234.
-to_string $ Number (Int.from_nat 1234) 2
+# The decimal is written by Decimal itself; its own tests cover the shapes.
+to_string $ Number (Decimal.create (Int.from_nat 1234) 2)
 # = 12.34
-to_string $ Number (Int.from_nat 1234) 4
-# = 0.1234
-# Fewer digits than the scale: the zeros between point and digits are written.
-to_string $ Number (Int.from_nat 5) 3
-# = 0.005
-to_string $ Number (Int.negate (Int.from_nat 25)) 2
-# = -0.25
-# A power of ten above zero needs no exponent, just the trailing zeros.
-to_string $ Number (Int.from_nat 1500) 0
-# = 1500
-# Zero is zero at any scale, and never "-0".
-to_string $ Number (Int.from_nat 0) 5
-# = 0
-to_string $ Object [△ "n" $ from_nat 7; △ "xs" $ Array [from_nat 1; Number (Int.from_nat 15) 1]]
+to_string $ Object [△ "n" $ from_nat 7; △ "xs" $ Array [from_nat 1; Number (Decimal.create (Int.from_nat 15) 1)]]
 # = {"n":7,"xs":[1,1.5]}
