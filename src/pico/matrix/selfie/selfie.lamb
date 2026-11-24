@@ -24,20 +24,12 @@ render = \tree
 
 small_render = Generator.shrink render
 selfie = fix small_render
-_fps = 98
-_show = Pico.Matrix.show_staged 128 _fps
-show = _show selfie
-# The firmware image, and a page that plays the window's way over the tree.
-to_uf2 = \tree Pico.Matrix.flash "selfie.uf2" [_show tree]
-to_preview_html = \tree file "selfie.html" "text/html" $ Pico.Matrix.Selfie.page _fps tree
 _to_string = \l List.join " " $ List.map Nat.to_string l
 [size render; size (fix render); size small_render; size selfie]
 # = 50835 50872 9405 9442
-
-# Its first 60 frames, 6.1 s on the board:
-Pico.Matrix.svg "selfie.svg" 60 show
+Pico.Matrix.Selfie.to_preview_svg selfie
 # = selfie.svg image/svg+xml 187394 bytes sha256:3bf8119e3752000ecbbaf2e9c55c28b842b702969f80ba48c951265d43da0dcc
-to_uf2 selfie
+Pico.Matrix.Selfie.to_uf2 selfie
 # = selfie.uf2 application/octet-stream 39936 bytes sha256:744169a0a030015deddd7b27cb4cf4f5dde6ceb4593379bf8e24681a1ed7d9ad
-to_preview_html selfie
+Pico.Matrix.Selfie.to_preview_html selfie
 # = selfie.html text/html 48209 bytes sha256:8e54a2bd1a1bed4cc40b950f76144fe41e638ac0c557a535764fb40737aa90bf
