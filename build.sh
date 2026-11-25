@@ -71,6 +71,21 @@ done
 # check that runs codemirror/scripts/statements-agree.mjs over src/.
 $dag extract --symbol Lambada.statements src/.dag-bundle-linked > "$compiler/statements.dag"
 
+# The compiler of one expression straight to its tree, prelude included: a
+# single file that, with the tree calculus CLI alone, turns source into a
+# program (`main.js -dag -file compile.dag -string '\x x' -ternary`). Nothing
+# here runs on it, so a broken one bricks nothing; probed anyway, since what
+# it is for is being downloaded on its own.
+$dag extract --symbol Lambada.compile src/.dag-bundle-linked > "$compiler/compile.dag.new"
+probe=$($main -dag -file "$compiler/compile.dag.new" -string '\x x' -ternary 2>/dev/null || true)
+if [ "$probe" != "21100" ]; then
+  rm -f "$compiler/compile.dag.new"
+  >&2 echo "ERROR: the extracted compile does not compile '\\x x' to the identity;"
+  >&2 echo "       the shipped one is left alone. Got: $probe"
+  exit 1
+fi
+mv "$compiler/compile.dag.new" "$compiler/compile.dag"
+
 # The scopes lambada's codemirror demo offers, cut the same way. A root brings
 # along what it is built from, so each file is self-contained.
 >&2 echo "Exporting demo environments"
