@@ -1,0 +1,62 @@
+# Making a tree smaller, and getting it back.
+#
+# A codec is an [encode] and a [decode] over trees, held as `△ encode decode`,
+# with `decode (encode t) = t` for every tree. [Codec.Sharing] and [Codec.Term]
+# are the two here, and each exports its pair as `codec`. They find different
+# redundancy and neither wins everywhere, so which to reach for is the caller's
+# choice; their own tests carry the sizes.
+#
+# There are two strengths of result, and the difference is not stylistic.
+#
+# [encode] and [decode] give back the tree itself, so they serve anything: data,
+# or a program that is read rather than run. [shrink] gives back a tree that
+# only *acts* as the original, applied — it is the original η-expanded, equal to
+# it at every argument but not the same tree. So [shrink] is for a function, and
+# a tree that will be inspected rather than applied needs the pair.
+#
+# That is also why [defer] exists rather than `decode c (encode c t)`: the whole
+# point is to carry the small tree and not the large one, so the decoding has to
+# wait for an argument. Evaluation here is eager, which works out whatever part
+# of a λ's body does not use the λ's variable as soon as the λ is — so the
+# application that decodes is put under a λ that does use it.
+
+create = Pair.create
+encode = Pair.fst
+decode = Pair.snd
+
+# Whichever of the two is the smaller tree, a's being kept on a tie.
+smaller = \a \b Bool.match a b (Nat.is_lt (size b) (size a))
+
+# [defer d p]: a tree that acts as whatever the decode [d] makes of p, decoding
+# it only once applied — given u it works out `d p` and applies that to u. It
+# takes the decode rather than the codec so that a known one is built into the
+# tree it returns, instead of a projection out of a pair that the tree would
+# then carry and run.
+defer = \d \p \u (\q d q u) p
+# [shrink c t]: a tree that acts as t, never larger — t itself when the
+# encoding does not pay for itself, which for a small tree it will not, the
+# decoder being most of what it costs.
+shrink = \c \t smaller t (defer (decode c) (encode c t))
+
+# The identity codec keeps the laws honest without an encoding in the way: what
+# a codec and a deferral have to do is the same whether or not anything shrinks.
+_id = create id id
+
+_to_string = Bool.to_source
+equal (decode _id (encode _id Bool.not)) Bool.not
+# = true
+# Deferred, it is the function again at its argument, both ways round.
+equal (defer id Bool.not true) (Bool.not true)
+# = true
+equal (defer id Bool.not false) (Bool.not false)
+# = true
+# An encoding that does not shrink is not taken: shrink hands back the original.
+equal (shrink _id Bool.not) Bool.not
+# = true
+# smaller reads sizes, not values, and keeps the first on a tie.
+equal (smaller Bool.not fix) Bool.not
+# = true
+equal (smaller fix Bool.not) Bool.not
+# = true
+equal (smaller Bool.not Bool.not) Bool.not
+# = true

@@ -1,8 +1,16 @@
-# A generator for a tree t: a tree g with g fix = t, much smaller than t when
-# t is a large compiled program. It works from t's tree alone; README.md says
-# how:
+# The term codec: [encode t] is a tree g with g fix = t, much smaller than t
+# when t is a large compiled program. It works from t's tree alone; README.md
+# says how:
+#
 #
 #   g = λf. bootstrap f decoder △ f (data t)
+#
+# What it finds is the λ-term the compiler made the tree from, which the
+# compiler erased and nothing at run time has. So it is not bounded by how
+# repetitive the tree is, the way [Codec.Sharing] is, and on a program written
+# with it in mind it goes well below what counting distinct subtrees could
+# reach. On a tree it cannot read back it finds nothing and falls back to K t.
+# See [Codec] for what the two codecs share.
 #
 # g waits for fix because evaluation is eager (below): given an argument it did
 # not use, it would be worked out, into t, before it was ever applied.
@@ -243,7 +251,6 @@ _val = \v △ (△ △ (△ (△ △) v))
 _is_val = triage false (triage false (\_ false) (\a \b triage (triage false (\_ false) (\c \_ triage false (\_ true) (\_ \_ false) c) b) (\_ false) (\_ \_ false) a)) (\_ \_ false)
 _enc_head = △ (△ △ (△ △ △))
 _enc_fix = △ (△ △ (△ △ (△ △)))
-_smaller = \a \b Bool.match a b (Nat.is_lt (size b) (size a))
 # λ over e: one more on e's chain of λs, if it is one: e is △ (△ a n), a not
 # △ and n unary.
 _one = \e △ (△ e △)
@@ -322,12 +329,12 @@ _pmkind = triage △ (\_ △) (\p \q triage
     p q)
 # plain or the pair match pm: pm, unless a part written as its value (a or b)
 # made plain the smaller
-_choose = \plain \pm \a \b Bool.match (\plain \pm pm) (\plain \pm _smaller plain pm) (Bool.match (_is_val b) true (_is_val a)) plain pm
+_choose = \plain \pm \a \b Bool.match (\plain \pm pm) (\plain \pm Codec.smaller plain pm) (Bool.match (_is_val b) true (_is_val a)) plain pm
 # [enc t env mode]: t as data, under the binders env; mode: △ as it is, △ △ as
 # its term, also where it is a part. A closed part is written as its term or as
 # its value, whichever is smaller there, and a pair match in its own form
 # wherever one is seen, through the part it is.
-_enc_part = \v \u \self \env \mode (\e triage (\e \v _smaller e (_val v)) (\_ \e \v e) _ mode e v) (self self u env △)
+_enc_part = \v \u \self \env \mode (\e triage (\e \v Codec.smaller e (_val v)) (\_ \e \v e) _ mode e v) (self self u env △)
 _enc_pm = \y \f \a \self \env (\ex (\ef (\plain triage
         (\plain \ef plain)
         (\pm \plain \ef _choose plain pm ef (triage ef (\_ ef) (\_ \ey ey) ef))
@@ -446,29 +453,27 @@ _bootstrap = \fix fix (\c △
 # [_pack t]: t's data and the decoder the bootstrap runs on it: given fix, which
 # then serves the bootstrap, the decoder and t, it works out t.
 _pack = \t \f _bootstrap f _decoder △ f (_data t)
-# [compress t]: the smallest tree g found with g fix = t. A candidate counts
-# only if it gives t back, which K t always does; that is all compress
-# promises, so any other way of making g can join the candidates.
-compress = \t (\k (\g _smaller k (Bool.match k g (equal (g fix) t))) (_pack t)) (△ △ t)
-# [_expand g]: a tree that acts as t, where g fix = t: given u, it works out
-# g fix and applies that to u. Nothing is worked out before u comes, and the
-# one fix in it is the one g is given.
-_expand = \g \u (\f g f u) fix
-# [shrink t]: a tree that acts as t, applied to anything, and is never larger:
-# compress t expanded, or t itself if that is smaller.
-shrink = \t _smaller t (_expand (compress t))
+# [encode t]: the smallest tree g found with g fix = t. A candidate counts only
+# if it gives t back, which K t always does; that is all encode promises, so
+# any other way of making g can join the candidates.
+encode = \t (\k (\g Codec.smaller k (Bool.match k g (equal (g fix) t))) (_pack t)) (△ △ t)
+# The fix a packed g waits for is all it needs to work itself out, so decoding
+# is handing it one. [Codec.defer] is what holds that off until an argument
+# comes, and [Codec.shrink] what keeps t instead when the pack does not pay.
+decode = \g g fix
+codec = Codec.create encode decode
 
 _to_string = Bool.to_source
-equal (compress List.map fix) List.map
+equal (decode (encode List.map)) List.map
 # = true
-equal (_expand (compress List.map) Nat.succ [1; 2]) [2; 3]
+equal (Codec.defer decode (encode List.map) Nat.succ [1; 2]) [2; 3]
 # = true
 # For a tree this small the pack would be larger, the decoder and the bootstrap
-# being most of it, so compress gives K t, two nodes more than t, and shrink t
-# itself.
+# being most of it, so encode gives K t, two nodes more than t, and
+# Codec.shrink t itself.
 _to_string = \l List.join " " $ List.map Nat.to_string l
-[size List.map; size (compress List.map); size (shrink List.map); size _decoder; size _bootstrap]
+[size List.map; size (encode List.map); size (Codec.shrink codec List.map); size _decoder; size _bootstrap]
 # = 130 132 130 1658 340
-# A larger program, the generator itself:
-[size compress; size (compress compress); size (shrink compress)]
-# = 782488 537468 537537
+# A larger program, this codec's own encoder:
+[size encode; size (encode encode); size (Codec.shrink codec encode)]
+# = 782488 537468 537546

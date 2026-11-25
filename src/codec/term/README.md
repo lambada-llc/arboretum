@@ -1,11 +1,12 @@
-# generator
+# term codec
 
-`Generator.shrink t` is a tree that acts as `t`, applied to anything, and is
-never larger; for a large compiled program it is much smaller. It is
-`Generator.compress t`, the smallest tree `g` it finds with `g fix = t`, wrapped
-so that it works out `g fix` only once applied. It sees only the tree. It is a
+`Codec.shrink Codec.Term.codec t` is a tree that acts as `t`, applied to
+anything, and is never larger; for a large compiled program it is much smaller.
+It is `Codec.Term.encode t`, the smallest tree `g` it finds with `g fix = t`,
+wrapped by [`Codec.defer`](../codec.lamb) so that it works out `g fix` only once
+applied. It sees only the tree. It is a
 definition like any other, evaluated by the build with the rest of the
-library. [selfie.lamb](../pico/matrix/selfie/selfie.lamb) uses it, and its tests
+library. [selfie.lamb](../../pico/matrix/selfie/selfie.lamb) uses it, and its tests
 keep the sizes.
 
 `g` is given `fix` rather than nothing because evaluation is eager: a `g` that
@@ -21,7 +22,7 @@ ignored its argument would be worked out, into `t`, before it was applied.
   until it has them all: each step it then takes is an application the
   compiler made that combinator for, and what is left is the λ-term's body. A
   step is taken only where the compiler would have made the combinator for it
-  (the conditions are with the rules in [generator.lamb](generator.lamb));
+  (the conditions are with the rules in [term.lamb](term.lamb));
   anything else is the closed function it is, applied as written, and data is
   `△` applied to its parts. So the term compiles back to the tree by
   construction: one pass, nothing tried twice, nothing compiled to check.
@@ -34,24 +35,24 @@ ignored its argument would be worked out, into `t`, before it was applied.
 - **Decoder.** Decodes the data and compiles it the way LambAda does, so that
   the result, evaluated, is the tree. It recognises a variable by its compiled
   form being `I`; a program with another term compiling to `I` where the η
-  rules look decodes to another tree, which `compress`'s check catches.
+  rules look decodes to another tree, which `encode`'s check catches.
 - **Bootstrap.** A closure compiler for a small λ-language with variables in
   binary; it runs the decoder, which is written in that language — in
   LambAda's own syntax, as a term under construction (the comment above
   `_mk`). The `fix` `g` is given serves the bootstrap, the decoder and the
   program.
 
-`compress` takes a candidate only if it gives `t` back, so the check is the
+`encode` takes a candidate only if it gives `t` back, so the check is the
 whole contract: the tree above is one candidate, and `K t`, which gives `t` back
 for any argument and is two nodes more than `t`, is the other. Any other way of
-making `g` only has to join them. The check is most of what `compress` costs.
+making `g` only has to join them. The check is most of what `encode` costs.
 
 ## Cost
 
 Reading is a function of the tree and of little else, and the build's
 evaluator remembers every application, so a tree met again costs nothing.
 Evaluation is eager, which shapes the code: see the comment at the top of
-[generator.lamb](generator.lamb).
+[term.lamb](term.lamb).
 
 `g` does its own work when it is given `fix`, on a machine that may remember
 nothing: it decodes and compiles all of `t` first. What that costs

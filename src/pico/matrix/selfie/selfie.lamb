@@ -1,6 +1,6 @@
 # Selfie: a show that draws its own tree, a pixel a node, and slides the board's
 # 25 × 25 window over it. portrait draws whatever tree it is given, fix hands it
-# itself, and Generator.shrink makes it small: the tree drawn is the one running.
+# itself, and Codec.shrink makes it small: the tree drawn is the one running.
 
 # Lays tree out and plans the window's way, then draws each frame. The helpers
 # are bound once here and passed down; naming them in each part would copy them.
@@ -25,17 +25,17 @@ _to_string = Nat.to_string
 size portrait
 # = 50835
 
-small_portrait = Generator.shrink portrait
+small_portrait = Codec.shrink Codec.Term.codec portrait
 size small_portrait
-# = 9405
+# = 9414
 
 selfie = fix small_portrait
 size selfie
-# = 9442
+# = 9451
 
 Pico.Matrix.Selfie.to_preview_svg selfie
-# = selfie.svg image/svg+xml 187394 bytes sha256:3bf8119e3752000ecbbaf2e9c55c28b842b702969f80ba48c951265d43da0dcc
+# = selfie.svg image/svg+xml 180179 bytes sha256:f4ccafe49eeaba3113b8a26e6e2645da546855e40060471597a7c81a0588b83c
 Pico.Matrix.Selfie.to_uf2 selfie
-# = selfie.uf2 application/octet-stream 39936 bytes sha256:744169a0a030015deddd7b27cb4cf4f5dde6ceb4593379bf8e24681a1ed7d9ad
+# = selfie.uf2 application/octet-stream 40448 bytes sha256:809749106b85ef5f64803416a604b2347dda76a62d724981df359f8a4c953bbc
 Pico.Matrix.Selfie.to_preview_html selfie
-# = selfie.html text/html 48209 bytes sha256:8e54a2bd1a1bed4cc40b950f76144fe41e638ac0c557a535764fb40737aa90bf
+# = selfie.html text/html 48079 bytes sha256:4e9b2bedab1f9105ef8e8dd8bd22be84f83594893d0a31c771bc680876918d1a
