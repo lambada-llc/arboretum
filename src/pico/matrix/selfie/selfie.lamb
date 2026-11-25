@@ -1,13 +1,13 @@
 # Selfie: a show that draws its own tree, a pixel a node, and slides the board's
-# 25 × 25 window over it. The board runs the program shrunk, given itself by
-# fix, so the tree it draws is the one it runs.
+# 25 × 25 window over it. portrait draws whatever tree it is given, fix hands it
+# itself, and Generator.shrink makes it small: the tree drawn is the one running.
 
-# Lays self out and plans the window's way, then draws each frame. The helpers
+# Lays tree out and plans the window's way, then draws each frame. The helpers
 # are bound once here and passed down; naming them in each part would copy them.
-program = \self
+portrait = \tree
   (\church (\nl (\inc (\dec (\le (\iter (\b1 (\n31 (\cdec (\cinc (\n25 (\foldr (\nz
     \_ Pair.match (Pico.Matrix.Selfie.window nl iter b1 n25 foldr inc dec church)
-      (Pico.Matrix.Selfie.tour self nz b1 cdec cinc nl le n31 n25 foldr iter inc dec church))
+      (Pico.Matrix.Selfie.tour tree nz b1 cdec cinc nl le n31 n25 foldr iter inc dec church))
     (Pico.Matrix.Selfie.nz n31 dec church))
     List.foldr)
     (Pico.Matrix.Selfie.n25 iter))
@@ -21,21 +21,21 @@ program = \self
     Pico.Matrix.Selfie.inc)
     Pico.Matrix.Selfie.nl)
   Pico.Matrix.Selfie.church
+_to_string = Nat.to_string
+size portrait
+# = 50835
 
-_selfie = fix (Generator.shrink program)
-_fps = 98
-show = Pico.Matrix.show_staged 128 _fps _selfie
-_to_string = \l List.join " " $ List.map Nat.to_string l
-[size program; size _selfie]
-# = 50835 9442
+small_portrait = Generator.shrink portrait
+size small_portrait
+# = 9405
 
-# Its first 60 frames, 6.1 s on the board:
-Pico.Matrix.svg "selfie.svg" 60 show
+selfie = fix small_portrait
+size selfie
+# = 9442
+
+Pico.Matrix.Selfie.to_preview_svg selfie
 # = selfie.svg image/svg+xml 187394 bytes sha256:3bf8119e3752000ecbbaf2e9c55c28b842b702969f80ba48c951265d43da0dcc
-# The image to flash:
-Pico.Matrix.flash "selfie.uf2" [show]
+Pico.Matrix.Selfie.to_uf2 selfie
 # = selfie.uf2 application/octet-stream 39936 bytes sha256:744169a0a030015deddd7b27cb4cf4f5dde6ceb4593379bf8e24681a1ed7d9ad
-
-# The way, as a page:
-file "selfie.html" "text/html" $ Pico.Matrix.Selfie.page _fps _selfie
+Pico.Matrix.Selfie.to_preview_html selfie
 # = selfie.html text/html 48209 bytes sha256:8e54a2bd1a1bed4cc40b950f76144fe41e638ac0c557a535764fb40737aa90bf
