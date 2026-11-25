@@ -21,12 +21,18 @@ portrait = \tree
     Pico.Matrix.Selfie.inc)
     Pico.Matrix.Selfie.nl)
   Pico.Matrix.Selfie.church
+_to_string = Nat.to_string
+size portrait
+# = 50835
 
 small_portrait = Generator.shrink portrait
+size small_portrait
+# = 9405
+
 selfie = fix small_portrait
-_to_string = \l List.join " " $ List.map Nat.to_string l
-[size portrait; size (fix portrait); size small_portrait; size selfie]
-# = 50835 50872 9405 9442
+size selfie
+# = 9442
+
 Pico.Matrix.Selfie.to_preview_svg selfie
 # = selfie.svg image/svg+xml 187394 bytes sha256:3bf8119e3752000ecbbaf2e9c55c28b842b702969f80ba48c951265d43da0dcc
 Pico.Matrix.Selfie.to_uf2 selfie
