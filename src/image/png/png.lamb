@@ -1,0 +1,75 @@
+# PNG encoder (truecolor RGB, 8-bit, no interlace).
+# Turns a pixel function f : x -> y -> [r; g; b] into a full PNG byte stream.
+# Compression is deflate "stored" (uncompressed) blocks, so there is no LZ77 or
+# Huffman to implement — the aim is a valid file, not a small one. Integers are
+# the little-endian bit-list Nats, so Nat.shr/xor/bit twiddling gives the CRC-32
+# and Adler-32 arithmetic the format needs.
+
+# Little-endian bit-list -> bytes. _byte keeps the low 8 bits of a nat.
+_byte  = List.take 8
+_u32be = \n [_byte (Nat.shr 24 n); _byte (Nat.shr 16 n); _byte (Nat.shr 8 n); _byte n]
+_u16le = \n [_byte n; _byte (Nat.shr 8 n)]
+
+# CRC-32, PNG polynomial 0xEDB88320 (reflected). A 256-entry table collapses the
+# per-bit inner loop into one lookup + xor per byte. crc_table builds the table
+# (a shape-keyed Map); it takes the empty map as a seed so the fold stays stuck
+# on that argument during the library build — the (large) construction happens
+# only when a caller applies it (crc_table Map.empty), amortised across images.
+# encode takes the built table, so no library symbol forces it at build time.
+_lowbit    = List.match false (\hd \_ hd)
+_crc_bit   = \c Bool.match (Nat.shr 1 c) (Nat.xor (Nat.shr 1 c) 3988292384) (_lowbit c)
+crc_table  = \seed List.foldl (\m \n Map.set n (Fn.pow 8 _crc_bit n) m) seed (List.range 256)
+_crc_step  = \tbl \c \b Nat.xor (Nat.shr 8 c) (Option.get_or 0 (Map.get (Nat.bit_and (Nat.xor c b) 255) tbl))
+_crc       = \tbl \bytes Nat.xor 4294967295 (List.foldl (_crc_step tbl) 4294967295 bytes)
+
+# Adler-32 (the zlib checksum): running (a, s) folded mod 65521, packed s<<16 | a.
+_adler_step = \p \b Pair.match (\a \s
+  let (Nat.mod (Nat.add a b) 65521) $ \a2
+  Pair.create a2 (Nat.mod (Nat.add s a2) 65521)) p
+_adler = \bytes Pair.match (\a \s Nat.add (Nat.shl 16 s) a)
+  (List.foldl _adler_step (Pair.create 1 0) bytes)
+
+# A single final deflate "stored" (uncompressed) block: header byte 1 (BFINAL=1,
+# BTYPE=00), then LEN and its ones-complement as little-endian 16-bit fields.
+# One block suffices — its length field is 16-bit and the images this module
+# targets stay far below 65535 bytes.
+_store = \data List.concat_list
+  [[1]; _u16le (List.length data); _u16le (Nat.sub 65535 (List.length data)); data]
+
+# zlib stream: 2-byte header (0x78 0x01) + stored block + Adler-32 of the raw data.
+_zlib = \data List.concat_list [[120; 1]; _store data; _u32be (_adler data)]
+
+# PNG chunk: length + type + data + CRC-32 over (type ++ data).
+_chunk = \tbl \type \data List.concat_list
+  [_u32be (List.length data); type; data; _u32be (_crc tbl (List.concat type data))]
+
+# IHDR body: width, height, bit depth 8, colour type 2 (RGB), no interlace.
+_ihdr = \w \h List.concat_list [_u32be w; _u32be h; [8; 2; 0; 0; 0]]
+
+# Raster: each scanline is filter byte 0 (None) followed by its RGB triples.
+_row     = \w \f \y △ 0 (List.concat_map (\x f x y) (List.range w))
+_raster  = \w \h \f List.concat_list (List.map (_row w f) (List.range h))
+
+_sig = [137; 80; 78; 71; 13; 10; 26; 10]
+
+# encode tbl w h f -> PNG byte list.  tbl = crc_table Map.empty (build once, reuse
+# across images).  f : x -> y -> [r; g; b], each component 0..255.
+encode = \tbl \w \h \f List.concat_list
+  [_sig;
+   _chunk tbl "IHDR" (_ihdr w h);
+   _chunk tbl "IDAT" (_zlib (_raster w h f));
+   _chunk tbl "IEND" []]
+
+# Tests: 32x32 pictures, each a function of (x, y), each building the table
+# inline (crc_table Map.empty).
+_img = \tbl \name \w \h \f △ (△ name "image/png") (encode tbl w h f)
+
+# 32x32 gradient: red climbs with x, green with y, blue held at 128.
+_img (crc_table Map.empty) "gradient.png" 32 32 (\x \y [Nat.mul 8 x; Nat.mul 8 y; 128])
+# = gradient.png image/png 3172 bytes sha256:64e6baa93860116ae09feddd2da5707ea8c60052702fe9fbaad5d3446034c2ad
+# 32x32 checkerboard of two greys, in 4x4 blocks (x, y shifted right by 2).
+_img (crc_table Map.empty) "checker.png" 32 32 (\x \y Bool.match [34; 34; 34] [221; 221; 221] (equal 0 (Nat.mod (Nat.add (Nat.shr 2 x) (Nat.shr 2 y)) 2)))
+# = checker.png image/png 3172 bytes sha256:cb30e24666ee5bf22873ac8962803cc85d4ca4c493ec2e21b11a910f983cd3e0
+# 32x32 radial-ish glow: brightness from distance-square to the corner.
+_img (crc_table Map.empty) "corner.png" 32 32 (\x \y let (Nat.add (Nat.mul x x) (Nat.mul y y)) $ \d [Nat.shr 3 d; Nat.shr 4 d; 64])
+# = corner.png image/png 3172 bytes sha256:23feb20e4209082536272fb80e386de71543adf0dd439cb5aa7c36db632d7b9c

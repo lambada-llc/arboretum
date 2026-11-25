@@ -1,0 +1,10 @@
+# What a selfie becomes: its show on the board, and the files made from it.
+_fps = 98
+# The show, at 9.8 frames a second, as fast as the board manages.
+to_show = Pico.Matrix.show_staged 128 _fps
+# Its first 60 frames, 6.1 s on the board.
+to_preview_svg = \tree Pico.Matrix.svg "selfie.svg" 60 (to_show tree)
+# The firmware image to flash.
+to_uf2 = \tree Pico.Matrix.flash "selfie.uf2" [to_show tree]
+# A page that plays the window's way over the tree.
+to_preview_html = \tree file "selfie.html" "text/html" $ Pico.Matrix.Selfie.page _fps tree

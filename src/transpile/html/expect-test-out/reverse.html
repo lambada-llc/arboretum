@@ -1,0 +1,48 @@
+<!doctype html><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>String &#8594; String</title><style>
+    body{margin:0;padding:1rem;font:15px system-ui,sans-serif;display:flex;flex-direction:column;gap:.5rem}
+    p{margin:0}
+    input,output{display:block;padding:.5rem;border:1px solid #bbb;border-radius:4px;font-family:monospace;font-size:1em;line-height:1.4;white-space:pre-wrap}
+    output{min-height:1.4em;background:#f6f6f6}</style><p><code>List.reverse</code>, reversing its input</p><input autocapitalize="off" autocorrect="off" spellcheck="false"/><output></output><script>
+    const f = arg => {
+  const program = [[[[[],[]],[[]]],[[[[[[[[[[[],[[[],[[[]]]]]],[[],[]]],[]]]],[[[[[[[[]],[[[[[]]],[]]]],[]],[[[[[]],[[[[],[[[],[]]]],[]]]],[[[[[]],[[[[],[[[],[]]]],[]]]],[]]]]]],[[[[[[[],[]],[[[],[[[[[[],[]]]],[]]]]]]]],[]]]],[]]]]],[[[[[],[[[],[[[]]]]]],[[],[]]],[]]]],[]]]],[[],[]]];
+  // Read input string and turn it into a tree
+  const ofB = b => b ? [[]] : [];
+  const ofL = l => { let f = []; for (let i = l.length; i; i--) f = [f, l[i - 1]]; return f };
+  const ofN = n => { let l = []; for (; n; n >>= 1) l.push(ofB(n % 2)); return ofL(l) };
+  const ofS = s => ofL(Array.from(s, c => ofN(c.codePointAt(0))));
+  const input = ofS(arg);
+  // Apply program to input and execute
+  const result = [input, ...program];
+  const todo = [result];
+  while (todo.length) {
+    const f = todo.pop();
+    if (f.length < 3) continue;
+    todo.push(f);
+    const a = f.pop(), b = f.pop(), c = f.pop();
+    if (a.length === 0) f.push(...b);
+    else if (a.length === 1) {
+      const newPotRedex = [c, ...b];
+      f.push(newPotRedex, c, ...a[0]);
+      todo.push(newPotRedex);
+    }
+    else if (a.length === 2)
+      if (c.length === 0) f.push(...a[1]);
+      else if (c.length === 1) f.push(c[0], ...a[0]);
+      else if (c.length === 2) f.push(c[0], c[1], ...b);
+  }
+  // Turn result into string
+  const toB = f => !!f?.length;
+  const toL = f => { let l = []; while (f?.length) { l.push(f[1]); f = f[0]; } return l };
+  const toN = f => toL(f).reduceRight((acc, b) => 2 * acc + (toB(b) ? 1 : 0), 0);
+  const toS = f => toL(f).map(toN).map(x => String.fromCodePoint(x)).join('');
+  return toS(result); };
+    const inputs = [...document.querySelectorAll('input')];
+    const output = document.querySelector('output');
+    const fit = () => parent.postMessage({ width: innerWidth, height: document.body.offsetHeight }, '*');
+    const run = () => {
+      output.textContent = inputs.reduce((g, i) => g(i.value), f);
+      fit();
+    };
+    inputs.forEach(i => i.addEventListener('input', run));
+    addEventListener('resize', fit);
+    run();</script>

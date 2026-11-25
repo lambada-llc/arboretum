@@ -1,0 +1,78 @@
+# JSON text from a JSON value.
+#
+# A value is Null, Bool b, String s, Array a, Object entries or Number d,
+# Scott-encoded, so rendering one is the value applied to one handler per
+# constructor, with [fix] threading the recursion. Strings are byte lists.
+#
+# [Number] carries a [Decimal], which denotes what this format's numbers are
+# and nothing else: a finite run of digits with a point in it. So nothing is
+# decided here — no rounding, and no way to ask for the infinity or NaN JSON
+# has no syntax for, because no Decimal denotes one — and the number handler
+# is [Decimal.to_string] itself. [from_nat] and [from_int] are the sugar for
+# the integer case.
+#
+# [Object] holds an association list rather than a map, which is what the
+# format permits: entries keep the order they were built in, and a key may
+# repeat. [quote] escapes only what the format requires — the quote, the
+# backslash, and the C0 controls as \u00XX — so every other byte passes
+# through and text that is already UTF-8 stays UTF-8 without this module
+# knowing anything about encodings. [to_string] writes the compact form, with
+# no space around , or :.
+
+JSON \= Null | Bool b | String s | Array a | Object entries | Number d
+
+_escape_char = \c
+  Bool.match
+    (Bool.match
+      (Bool.match
+        [c]
+        (List.concat "\\u00" (Nat.byte_to_hex c))
+        (Nat.is_lte c 31))
+      "\\\\"
+      (equal_const 92 c))
+    "\\\""
+    (equal_const 34 c)
+
+quote = \s List.concat_list ["\""; List.concat_map _escape_char s; "\""]
+
+to_string = fix $ \self \json json
+  "null"
+  (Bool.match "false" "true")
+  quote
+  (\a List.enclose "[" "," "]" self a)
+  (\entries List.enclose "{" "," "}" (Pair.match $ \k \v List.concat_list [quote k; ":"; self v]) entries)
+  Decimal.to_string
+
+from_int = \i Number (Decimal.from_int i)
+from_nat = \n Number (Decimal.from_nat n)
+
+to_string Null
+# = null
+to_string $ Bool false
+# = false
+to_string $ Bool true
+# = true
+to_string $ String "hello"
+# = "hello"
+to_string $ String "a\tb"
+# = "a\u0009b"
+to_string $ Array []
+# = []
+to_string $ Array [Null; Bool true; String "x"]
+# = [null,true,"x"]
+to_string $ Object []
+# = {}
+to_string $ Object [△ "name" $ String "Alice"; △ "age" $ Null]
+# = {"name":"Alice","age":null}
+to_string $ Object [△ "items" $ Array [Bool true; Bool false]; △ "count" $ String "2"]
+# = {"items":[true,false],"count":"2"}
+
+to_string $ from_nat 42
+# = 42
+to_string $ from_int (Int.negate (Int.from_nat 42))
+# = -42
+# The decimal is written by Decimal itself; its own tests cover the shapes.
+to_string $ Number (Decimal.create (Int.from_nat 1234) 2)
+# = 12.34
+to_string $ Object [△ "n" $ from_nat 7; △ "xs" $ Array [from_nat 1; Number (Decimal.create (Int.from_nat 15) 1)]]
+# = {"n":7,"xs":[1,1.5]}
