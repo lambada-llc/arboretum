@@ -1,0 +1,562 @@
+# The grammar codec: a tree as a straight-line grammar whose rules may have a
+# hole, read against bindings that are kept in a trie keyed by trees.
+#
+# [encode t] is a code, and [decode] gives back t exactly, so the codec serves
+# data as well as code. A code is
+#   △                          the leaf
+#   △ a b                      the fork over what a and b stand for
+#   △ (△ c)                    the stem over what c stands for
+#   △ k                        the tree bound at key k
+#   △ (△ p x)                  the context bound at prefix p, with its hole
+#                              filled by what x stands for
+#   △ (△ (△ (△ k v)) b)        b, read with k bound to what v stands for
+#   △ (△ (△ (△ (△ p c))) b)    b, read with the context c bound at p
+# A context is a tree with one hole, written as its code c, in which the hole
+# is △ △: the tree bound at the leaf, which a use binds to its filling.
+#
+# The bindings are a trie whose nodes are triage forks, △ (△ v s) f, so that
+# applying one to a code is looking the code up, and what is found is applied
+# to the trie in turn. Reading a code is just that: the leaf, the stem, the
+# fork and the two bindings are entries of the same trie, put there before
+# anything is bound, and a binding inserts into it. A use costs nothing beyond
+# its prefix and its filling, because the lookup of △ (△ p x) lands, after p,
+# on the context's own entry, which reads x and then c. Keys and prefixes are
+# chosen among the trees that miss the decoder's own entries ([_key], [_pre]).
+#
+# A context's code is read where it is used, so the names in it mean what they
+# mean there: a binding is placed at the lowest code that holds all its uses,
+# including those it gets through the contexts used there, and keys whose
+# scopes never nest can be the same key.
+
+# The decoder is kept as the tree that a size-tuned abstraction elimination
+# makes of [_decode_source]; the build's compiler makes a larger one of it (the
+# tests below have both sizes).
+decode = △ (△ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ (△ (△ △)) △))))) (△ △))))) (△ △ (△ (△ (△ △)) △)))) (△ △ (△ (△ (△ (△ (△ (△ (△ △ (△ (△ △ △) (△ (△ (△ (△ (△ △)) △)) △)))) (△ (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ (△ (△ (△ (△ △)) △)) (△ △ (△ △ △)))) (△ △ △)))) (△ △ △)))) (△ (△ (△ △)) △)))))))))) (△ (△ (△ (△ (△ △ (△ (△ (△ △ △)) (△ (△ (△ (△ △)) △))))) (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ △ △)))) (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ △)))))))) (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ △))) △))))))) (△ △)))))))))))) (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ △))) △))))))) (△ △))))))))))))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ (△ (△ (△ △ (△ △)))))) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ (△ △)))))))))))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ △))))))))))) (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ (△ (△ △ △)))))))))) (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ △)))))))))))))))))) (△ (△ (△ △ (△ (△ △ △) (△ (△ (△ (△ (△ △)) △)) △)))))))) △) (△ △ (△ △ △))) (△ (△ △ (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ (△ (△ △)) △))))) (△ △))))) (△ △ (△ (△ (△ △)) △))))) (△ (△ △ (△ (△ △ (△ (△ △ △) (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ △))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ (△ (△ △)) △))))) (△ △))))) (△ △ (△ (△ (△ △)) △))))))))))))) (△ (△ (△ △ (△ (△ (△ △ (△ △)))))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ (△ (△ (△ (△ (△ (△ △)) △)) (△ △ △))) (△ △ △)))))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) (△ (△ △) (△ △ △))))))))))) (△ △ (△ (△ (△ △ (△ △))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ (△ △))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ (△ (△ △)) △)))))))) (△ (△ (△ △ (△ (△ (△ △ (△ △)))))) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ △))))))) (△ △)))))))))) (△ △ (△ △ (△ (△ (△ △)) △)))))))))))))) (△ △ (△ △ (△ (△ (△ △)) △)))))))) (△ (△ (△ △ (△ (△ (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ (△ (△ △)) △))))) (△ △))))))))))) (△ (△ (△ △ (△ (△ (△ △ (△ △)))))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ (△ (△ (△ △ (△ △)))))) (△ (△ (△ △ (△ (△ (△ (△ (△ (△ (△ (△ (△ △)) △)) (△ △ △))) (△ △ △)))))) (△ (△ (△ △ (△ △))) △)))))))) (△ △ (△ △ (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ △ (△ (△ △ △)))) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) (△ △))))))))))))) (△ △ (△ △))))))))) (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ (△ (△ △)) △))))) (△ △))))) (△ △ (△ (△ (△ △)) △))))))))) △))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ △))) (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ △ △))))) (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ (△ (△ △)) △))))) (△ △))))) (△ △ (△ (△ (△ △)) △)))))))))) (△ △ (△ (△ (△ (△ (△ △ △)) (△ (△ (△ △ △)) (△ (△ (△ △ (△ (△ (△ (△ (△ △)) △))))) (△ △))))) (△ △ (△ (△ (△ △)) △)))))))
+
+_decode_source = (\upd (\e \p (\p \e e p e) p e)
+    (△ (△ (△ (△ upd △) (\_ \_ △))
+          (△ (△ △ (\c \env △ (env c env)))
+             (△ (△ △
+                   (△ (△ △ (△ (△ △ △) (\p \body \b \env (\e2 e2 b e2) (env △ △ (△ (△ p △))
+                        (\_ \_ (\x \env2 env2 (△ (△ (△ (△ △ x)) body)) env2)) env))))
+                      (\k \v \b \env env b ((\val env △ △ (△ k) (\l △ (triage △ △ (\_ △ (\_ val)) l)) env) (env v env)))))
+                △)))
+       (\a \b \env △ (env a env) (env b env))))
+  (fix $ \u \key \h (\c △ (△ (c (△ △ △) △) △) c) (triage (\h h) (\k \h (\g triage △ △ (\v \s △ (△ v (g s)))) (u k h)) (\a \b \h (\g \y \f △ y (g f)) (u a (\l △ (triage △ △ (\v △ (u b h v)) l)))) key h))
+
+# ── Encoding ────────────────────────────────────────────────────────────────
+# The evaluator remembers every application, so the work here is kept to folds
+# over the distinct subtrees, and to maps keyed by their ids: a pass that walked
+# the tree itself could never finish on one whose DAG is small and whose tree is
+# not, which is what the largest trees here are.
+
+_t0 = △
+_t1 = △ △
+_t2 = △ △ △
+_eq = fix $ \self \a \b triage
+  (\b triage true (\_ false) (\_ \_ false) b)
+  (\ac \b triage false (\bc self ac bc) (\_ \_ false) b)
+  (\al \ar \b triage false (\_ false) (\bl \br Bool.match (\_ \_ false) (\ar \br self ar br) (self al bl) ar br) b)
+  a b
+# Maps are tries by the trits of their keys, △ where empty, else
+# △ v (△ m0 (△ m1 m2)); a key that is not there reads as △.
+_child = \d triage △ _ (\m0 \m12 triage (\m0 \m12 m0) (\_ \m0 \m12 Pair.fst m12) (\_ \_ \m0 \m12 Pair.snd m12) d m0 m12)
+_get = fix $ \self \k \m triage
+  (\m triage △ _ (\v \_ v) m)
+  _
+  (\d \kt \m self kt (triage △ _ (\_ \r _child d r) m))
+  k m
+# [_upd k f m]: m with the value v at k replaced by f v.
+_upd = fix $ \self \k \f \m Pair.let (triage (△ △ (△ △ (△ △ △))) _ △ m) $ \v \r Pair.let r $ \m0 \m12 Pair.let m12 $ \m1 \m2 triage
+  (\f \v \m0 \m1 \m2 △ (f v) (△ m0 (△ m1 m2)))
+  _
+  (\d \kt \f \v \m0 \m1 \m2 triage
+    (\kt \f \v \m0 \m1 \m2 △ v (△ (self kt f m0) (△ m1 m2)))
+    (\_ \kt \f \v \m0 \m1 \m2 △ v (△ m0 (△ (self kt f m1) m2)))
+    (\_ \_ \kt \f \v \m0 \m1 \m2 △ v (△ m0 (△ m1 (self kt f m2))))
+    d kt f v m0 m1 m2)
+  k f v m0 m1 m2
+_put = \k \v _upd k (const v)
+_isucc = fix $ \self triage [_t0] _ (\d \r triage (\r △ _t1 r) (\_ \r △ _t2 r) (\_ \_ \r △ _t0 (self r)) d r)
+_is2 = triage false _ (\_ \t triage false _ (\_ \_ true) t)
+_some = triage false (\_ true) (\_ \_ true)
+
+# ── Hashing ─────────────────────────────────────────────────────────────────
+# A hash is 15 trits (about 24 bits), a trit being △, △ △ or △ △ △, which one
+# triage tells apart. Hashing a node adds its children's hashes, or a stem's
+# child's and a constant, digit by digit; puts each digit of the sum through a
+# permutation of its own; and reverses the digits, so that the carries, which
+# run upwards, reach every digit within a few levels of the tree.
+_K0 = [_t2; _t0; _t2; _t0; _t0; _t0; _t0; _t0; _t2; _t0; _t1; _t1; _t1; _t2; _t0]
+_K1 = [_t2; _t0; _t2; _t1; _t1; _t0; _t2; _t0; _t1; _t2; _t1; _t1; _t2; _t0; _t2]
+_Pstem = [[_t1; _t2; _t0]; [_t2; _t0; _t1]; [_t1; _t2; _t0]; [_t1; _t2; _t0]; [_t2; _t0; _t1]; [_t2; _t0; _t1]; [_t0; _t2; _t1]; [_t0; _t2; _t1]; [_t2; _t0; _t1]; [_t1; _t2; _t0]; [_t2; _t1; _t0]; [_t2; _t0; _t1]; [_t0; _t2; _t1]; [_t0; _t1; _t2]; [_t1; _t2; _t0]]
+_Pfork = [[_t1; _t0; _t2]; [_t0; _t2; _t1]; [_t0; _t1; _t2]; [_t2; _t0; _t1]; [_t2; _t1; _t0]; [_t2; _t1; _t0]; [_t0; _t1; _t2]; [_t2; _t0; _t1]; [_t1; _t2; _t0]; [_t1; _t2; _t0]; [_t2; _t1; _t0]; [_t2; _t1; _t0]; [_t2; _t0; _t1]; [_t2; _t1; _t0]; [_t0; _t2; _t1]]
+_inc = \p Pair.let p $ \d \cy triage (△ _t1 cy) (\_ △ _t2 cy) (\_ \_ △ _t0 true) d
+_addt = \y \p triage p (\_ _inc p) (\_ \_ _inc (_inc p)) y
+_perm = \p \d triage (Pair.fst p) (\_ Pair.fst (Pair.snd p)) (\_ \_ Pair.fst (Pair.snd (Pair.snd p))) d
+# The digit tables, worked out when this module is: for the digits to come,
+# with the carry c, a function from two digits to △ out (the next table).
+_rows = \f triage (f _t0) (\_ f _t1) (\_ \_ f _t2)
+_tables = fix $ \self \ps \c List.match △ (\p \rest _rows $ \x _rows $ \y
+    Pair.let (Bool.match id _inc c (_addt y (△ x false))) $ \d \cy
+    △ (_perm p d) (self rest cy)) ps
+_Tstem = _tables _Pstem false
+_Tfork = _tables _Pfork false
+_mixw = fix $ \self \tb \x \y \acc List.match
+  (\tb \y \acc acc)
+  (\xd \xt \tb \y \acc Pair.let y $ \yd \yt Pair.let (tb xd yd) $ \o \tb2 self tb2 xt yt (△ o acc))
+  x tb y acc
+_hash = fix $ \self triage _K0 (\c _mixw _Tstem (self c) _K1 △) (\l \r _mixw _Tfork (self l) (self r) △)
+
+# ── Interning ───────────────────────────────────────────────────────────────
+# Ids are strings of trits, counted shortest first, so that the n-th is about
+# log3 n long; none is the leaf, which is the leaf's own id. They are given
+# out in the order of first occurrence, children first.
+# st = △ map (△ n nodes): map from a hash to the subtrees with it, each
+# △ t id; n the last id given out; nodes each △ id key, newest first, key
+# being the children's ids, △ c or △ l r.
+_find = fix $ \self \t List.match
+  △
+  (\e \rest Pair.let e $ \u \id Bool.match (\t \rest self t rest) (\t \rest △ id) (_eq u t) t rest)
+_new = \t \key \st Pair.let st $ \map \rest Pair.let rest $ \n \nodes
+  let (_isucc n) $ \id let (_hash t) $ \h
+  △ id (△ (_upd h (△ (△ t id)) map) (△ id (△ (△ id key) nodes)))
+_look = \t \st \miss
+  triage (\miss \st miss st) (\id \miss \st △ id st) _ (_find t (_get (_hash t) (Pair.fst st))) miss st
+_intern = fix $ \self \t \st triage
+  (\t \st △ △ st)
+  (\c \t \st _look t st (\st Pair.let (self c st) $ \ic \st _new t (△ ic) st))
+  (\l \r \t \st _look t st (\st Pair.let (self l st) $ \il \st Pair.let (self r st) $ \ir \st _new t (△ il ir) st))
+  t t st
+
+# [_dag t] is △ root nodes: t's distinct subtrees other than the leaf, each
+# △ id key, newest first; root is t's id.
+_dag = \t Pair.let (_intern t (△ △ (△ △ []))) $ \root \st △ root (Pair.snd (Pair.snd st))
+
+# ── Chains ──────────────────────────────────────────────────────────────────
+# A subtree with two parents or more in the DAG is a value entry, and is an
+# *atom* where it is used, as the leaf is. Every other node is used once, and
+# is one of
+#   a stem                               letter S, continued at its child
+#   a fork with an atom c on the left    letter l c, continued on the right
+#   a fork with an atom c on the right   letter r c, continued on the left
+#   a fork of two non-atoms              where a chain of letters ends
+# so the bodies are chains of letters, and a context is a run of letters. Runs
+# are found as Re-Pair finds them in strings: the pair of adjacent letters seen
+# most often becomes a new letter, until no pair is seen twice. A letter made
+# so is a one-hole context, the hole being where the chain goes on.
+
+# Letters are trit strings, so that they key maps: S is [2], l c is 0 then c,
+# r c is 1 then c, the n-th letter made is 2 0 then n.
+_S = [_t2]
+_dead = [_t2; _t1]
+_letter = \n △ _t2 (△ _t0 n)
+# △ letter child for a node's key, △ for a fork of two non-atoms.
+_shape = \atom \left \k triage _ (\c △ _S c) (\l \r Bool.match
+    (\l \r Bool.match (\l \r △) (\l \r △ (△ _t1 r) l) (atom r) l r)
+    (\l \r Bool.match (\l \r △ (△ _t0 l) r) (\l \r Bool.match (\l \r △ (△ _t1 r) l) (\l \r △ (△ _t0 l) r) (left l r) l r) (atom r) l r)
+    (atom l) l r) k
+# For each id, △ parents (△ left right): how many nodes have it as a child, and
+# as their left child or their right one. A fork of two atoms takes the letter
+# of the side whose atom is more often on that side.
+_inc3 = \fl \fr \v Pair.let (triage (△ △ (△ △ △)) _ △ v) $ \t \lr Pair.let lr $ \a \b △ (Nat.succ t) (△ (fl a) (fr b))
+_counts = List.foldl (\m \node Pair.let node $ \_ \k triage _ (\c _upd c (_inc3 id id) m) (\l \r _upd r (_inc3 id Nat.succ) (_upd l (_inc3 Nat.succ id) m)) k) △
+# A letter's place in a chain is △ letter (△ prev (△ next tail)), at the id of
+# the node it starts at: prev and next are the places beside it, △ at either
+# end; at the end, tail is the child where the chain stops.
+_rl = Pair.fst
+_rp = \r Pair.fst (Pair.snd r)
+_rn = \r Pair.fst (Pair.snd (Pair.snd r))
+_rt = \r Pair.snd (Pair.snd (Pair.snd r))
+# Pairs of letters map to △ count places, the places where the pair starts,
+# newest first, some of them stale.
+_ent = triage (△ △ △) _ △
+# [_mod k f m]: △ o m', where f v is △ o v' for the value v at k, and m' has v'.
+_mod = fix $ \self \k \f \m Pair.let (triage (△ △ (△ △ (△ △ △))) _ △ m) $ \v \r Pair.let r $ \m0 \m12 Pair.let m12 $ \m1 \m2 triage
+  (\f \v \m0 \m1 \m2 Pair.let (f v) $ \o \v △ o (△ v (△ m0 (△ m1 m2))))
+  _
+  (\d \kt \f \v \m0 \m1 \m2 triage
+    (\kt \f \v \m0 \m1 \m2 Pair.let (self kt f m0) $ \o \m0 △ o (△ v (△ m0 (△ m1 m2))))
+    (\_ \kt \f \v \m0 \m1 \m2 Pair.let (self kt f m1) $ \o \m1 △ o (△ v (△ m0 (△ m1 m2))))
+    (\_ \_ \kt \f \v \m0 \m1 \m2 Pair.let (self kt f m2) $ \o \m2 △ o (△ v (△ m0 (△ m1 m2))))
+    d kt f v m0 m1 m2)
+  k f v m0 m1 m2
+# One more place p for a pair: △ count entry.
+_occ = \p \e Pair.let (_ent e) $ \c \o let (Nat.succ c) $ \c △ c (△ c (△ p o))
+# The pairs to replace wait in buckets by count: △ top buckets, buckets
+# mapping a count to its pairs △ a b. A pair goes in each time its count
+# reaches two or more, and an entry whose count has moved on since is passed
+# over when taken out. No count ever exceeds that of the pair being replaced,
+# so top only goes down once replacing starts.
+_bpush = \e \c \q Pair.let q $ \m \b △ (Nat.max m c) (_upd c (△ e) b)
+_bpop = fix $ \self \q Pair.let q $ \m \b Bool.match
+  (\m \b △)
+  (\m \b triage (\m \b self (△ (Nat.pred m) b)) _ (\e \rest \m \b △ m (△ e (△ m (_put m rest b)))) (_get m b) m b)
+  (_is2 m) m b
+_push = \a \b \c \heap Bool.match (\c \heap heap) (\c \heap _bpush (△ a b) c heap) (_is2 c) c heap
+_addocc = \p \a \b \dm \heap Pair.let (_mod a (_mod b (_occ p)) dm) $ \c \dm △ dm (_push a b c heap)
+_decf = \e Pair.let (_ent e) $ \c \o △ (Nat.pred c) o
+_dec = \a \b _upd a (_upd b _decf)
+
+# st is △ places (△ pairs buckets), built oldest node first so that a node's
+# child already has its place.
+_init = \atom \left List.foldr (\node \st Pair.let node $ \x \k Pair.let st $ \pos \r Pair.let r $ \dm \heap triage
+  (\x \pos \dm \heap st)
+  _
+  (\lt \y \x \pos \dm \heap let (_get y pos) $ \ry Bool.match
+    (\lt \y \x \ry \pos \dm \heap △ (_put x (△ lt (△ △ (△ △ y))) pos) (△ dm heap))
+    (\lt \y \x \ry \pos \dm \heap
+      let (_upd y (\v △ (_rl v) (△ x (Pair.snd (Pair.snd v)))) (_put x (△ lt (△ △ (△ y △))) pos)) $ \pos
+      Pair.let (_addocc x lt (_rl ry) dm heap) $ \dm \heap △ pos (△ dm heap))
+    (Bool.and (Bool.not (atom y)) (_some ry)) lt y x ry pos dm heap)
+  (_shape atom left k) x pos dm heap) (△ △ (△ △ (△ △ △)))
+
+# Replaces a b by nl at place p, if they are still there.
+_repl = \a \b \nl \st \p Pair.let st $ \pos \r Pair.let r $ \dm \heap
+  let (_get p pos) $ \rp let (_get (_rn rp) pos) $ \rq Bool.match
+  (\rp \rq \pos \dm \heap st)
+  (\rp \rq \pos \dm \heap let (_rp rp) $ \pp let (_rn rp) $ \q let (_rn rq) $ \nx
+    Pair.let (triage (\pp \dm \heap △ dm heap) _ (\_ \_ \pp \dm \heap let (_rl (_get pp pos)) $ \lp
+        Pair.let (_mod lp (\m _mod nl (_occ pp) (_upd a _decf m)) dm) $ \c \dm △ dm (_push lp nl c heap)) pp pp dm heap) $ \dm \heap
+    Pair.let (triage (\nx \dm \heap △ dm heap) _ (\_ \_ \nx \dm \heap let (_rl (_get nx pos)) $ \ln
+        _addocc p nl ln (_dec b ln dm) heap) nx nx dm heap) $ \dm \heap
+    let (_put p (△ nl (△ pp (△ nx (_rt rq)))) pos) $ \pos
+    let (_upd q (\v △ _dead (Pair.snd v)) pos) $ \pos
+    let (triage (\nx \pos pos) _ (\_ \_ \nx \pos _upd nx (\v △ (_rl v) (△ p (Pair.snd (Pair.snd v)))) pos) nx nx pos) $ \pos
+    △ pos (△ dm heap))
+  (Bool.and (_eq (_rl rp) a) (_eq (_rl rq) b)) rp rq pos dm heap
+
+# Until no pair is left: st is △ places (△ pairs (△ buckets (△ n made))), made
+# holding △ n (△ a b) for the n-th letter, newest first.
+_repair = fix $ \self \st Pair.let st $ \pos \r Pair.let r $ \dm \r Pair.let r $ \heap \r Pair.let r $ \n \made triage
+  (\pos \dm \n \made st)
+  _
+  (\c \r \pos \dm \n \made Pair.let r $ \ab \heap Pair.let ab $ \a \b
+    Pair.let (_ent (_get b (_get a dm))) $ \k \occ Bool.match
+      (\a \b \c \k \occ \heap \pos \dm \n \made self (△ pos (△ dm (△ (Bool.match (\heap heap) (\heap _bpush (△ a b) k heap)
+          (Bool.and (_is2 k) (Nat.is_lt k c)) heap) (△ n made)))))
+      (\a \b \c \k \occ \heap \pos \dm \n \made let (_isucc n) $ \n
+        Pair.let (List.foldl (_repl a b (_letter n)) (△ pos (△ (_upd a (_put b (△ △ △)) dm) heap)) occ) $ \pos \r Pair.let r $ \dm \heap
+        self (△ pos (△ dm (△ heap (△ n (△ (△ n (△ a b)) made))))))
+      (_eq k c) a b c k occ heap pos dm n made)
+  (_bpop heap) pos dm n made
+
+# ── The grammar ─────────────────────────────────────────────────────────────
+# Terms: △ leaf, △ c stem, △ △ k the value entry k (k △ the hole), △ (△ l) r
+# fork, △ (△ k a) △ the context k filled with a. Entries are keyed 0 then x for
+# node x, 1 then lt for the letter lt by itself, 2 then n for the n-th letter
+# made.
+_P = △ △ △
+_ref = \k △ △ k
+_call = \k \a △ (△ k a) △
+# The entry a letter calls.
+_rk = \lt Pair.let lt $ \d \rest triage (\rest \lt △ _t1 lt) (\_ \rest \lt △ _t1 lt)
+  (\_ \_ \rest \lt triage (\lt △ _t1 lt) _ (\_ \n \lt △ _t2 n) rest lt) d rest lt
+_aterm = \c triage (\c △) _ (\_ \_ \c _ref (△ _t0 c)) c c
+_native = \lt \h Pair.let lt $ \d \c triage (\c \h △ (△ (_aterm c)) h) (\_ \c \h △ (△ h) (_aterm c)) (\_ \_ \c \h △ h) d c h
+_term = \atom \pos \keys fix $ \self \x let (_get x pos) $ \rx
+  let (\y triage (\y △) _ (\_ \_ \y Bool.match (\y self y) (\y _ref (△ _t0 y)) (atom y) y) y y) $ \sub
+  triage
+    (\x \rx Pair.let (_get x keys) $ \l \r △ (△ (sub l)) (sub r))
+    _
+    (\lt \_ \x \rx _call (_rk lt) (triage (\t \n sub t) _ (\_ \_ \t \n self n) (_rn rx) (_rt rx) (_rn rx)))
+    rx x rx
+_body = \term \made \k Pair.let k $ \d \v triage
+  (\v term v)
+  (\_ \v triage (\v △ _P) _ (\_ \_ \v _native v _P) v v)
+  (\_ \_ \v triage (\v △) _ (\_ \_ \v Pair.let (_get v made) $ \a \b _call (_rk a) (_call (_rk b) _P)) v v)
+  d v
+# The entries a term uses, in order, with repeats.
+_uses = fix $ \self \t \acc triage
+  (\acc acc)
+  (\c \acc self c acc)
+  (\l \r \acc triage
+    (\k \acc triage (\acc acc) _ (\_ \_ \acc △ k acc) k acc)
+    (\u \r \acc self u (self r acc))
+    (\k \a \_ \acc △ k (self a acc))
+    l r acc)
+  t acc
+
+# [_walk body uses st]: the entries reachable through uses, st being
+# △ count (△ seen order): count maps an entry to how often it is used, order
+# lists the entries users first.
+_walk = \body fix $ \self \us \st List.foldl (\st \k Pair.let st $ \cnt \r Pair.let r $ \seen \order
+    let (_upd k Nat.succ cnt) $ \cnt triage
+      (\k \cnt \seen \order Pair.let (self (_uses (body k) △) (△ cnt (△ (_put k true seen) order))) $ \cnt \r
+        Pair.let r $ \seen \order △ cnt (△ seen (△ k order)))
+      (\_ \k \cnt \seen \order △ cnt (△ seen order))
+      _
+      (_get k seen) k cnt seen order)
+  st us
+
+# [_chains t] is △ start body: start is t written with the letters Re-Pair
+# made, body k the body of entry k.
+_chains = \t Pair.let (_dag t) $ \root \nodes
+  let (_counts nodes) $ \par
+  let (\c triage (\c true) _ (\_ \_ \c _is2 (Pair.fst (_get c par))) c c) $ \atom
+  let (\l \r Nat.is_lte (Pair.snd (Pair.snd (_get r par))) (Pair.fst (Pair.snd (_get l par)))) $ \left
+  let (List.foldl (\m \node Pair.let node $ \x \k _put x k m) △ nodes) $ \keys
+  Pair.let (_repair (Pair.let (_init atom left nodes) $ \pos \r Pair.let r $ \dm \heap △ pos (△ dm (△ heap (△ △ △))))) $ \pos \r Pair.let r $ \_ \r Pair.let r $ \_ \r Pair.let r $ \_ \made0
+  let (List.foldl (\m \e Pair.let e $ \n \ab _put n ab m) △ made0) $ \made
+  let (_term atom pos keys) $ \term
+  △ (term root) (_body term made)
+
+# ── Binding ─────────────────────────────────────────────────────────────────
+# Entries are those of [_chains]: △ _t0 x the shared node x, any other a
+# context. Terms: △ leaf, △ c stem, △ △ k entry k (△ the hole),
+# △ (△ l) r fork, △ (△ k a) △ context k filled with a.
+_ctx = \k triage false (\_ true) (\_ \_ true) (Pair.fst k)
+# Choosing contexts, at twice the costs: leaf 2, stem 4, fork 2, hole 4, a
+# shared node 7, a use 13 and a binding 21 more than its body. Shared nodes
+# are all kept here: whether one is bound is decided once contexts are.
+_cost = \keep \bc fix $ \self \t triage 2 (\c Nat.add 4 (self c)) (\l \r triage
+    (\k triage 4 _ (\_ \_ 7) k)
+    (\u \r Nat.add 2 (Nat.add (self u) (self r)))
+    (\k \a \_ Nat.add (Bool.match (\k Nat.sub (_get k bc) 4) (\k 13) (_get k keep) k) (self a))
+    l r) t
+_worth = \k \n \b Bool.match (\n \b true)
+  (\n \b Bool.not (Nat.is_lte (Nat.mul n (Nat.sub b 4)) (Nat.add (Nat.mul n 13) (Nat.add 21 b))))
+  (_ctx k) n b
+# [_choose body start]: which entries to keep. First from the callees up, each
+# priced at how often it is used where written; then from the users down, at
+# how often it is written once the users above it are decided.
+_choose = \body \start
+  Pair.let (_walk body (_uses start △) (△ △ (△ △ △))) $ \cnt \r Pair.let r $ \_ \order
+  Pair.let (List.foldr (\k \st Pair.let st $ \keep \bc let (_cost keep bc (body k)) $ \b
+      △ (_put k (_worth k (_get k cnt) b) keep) (_put k b bc)) (△ △ △) order) $ \_ \bc
+  Pair.snd (List.foldl (\st \k Pair.let st $ \occ \keep let (_get k occ) $ \o
+      let (_worth k o (_get k bc)) $ \kp
+      let (Bool.match o 1 kp) $ \w
+      △ (List.foldl (\m \c _upd c (Nat.add w) m) occ (_uses (body k) △)) (_put k kp keep))
+    (△ (List.foldl (\m \k _upd k Nat.succ m) △ (_uses start △)) △) order)
+_expand = \body \keep fix $ \self \t \h triage
+  (\h △)
+  (\c \h △ (self c h))
+  (\l \r \h triage
+    (\k \h triage (\k \h h) _ (\_ \_ \k \h Bool.match (\k self (body k) △) (\k △ △ k) (_get k keep) k) k k h)
+    (\u \r \h △ (△ (self u h)) (self r h))
+    (\k \a \_ \h let (self a h) $ \a Bool.match (\k \a self (body k) a) (\k \a △ (△ k a) △) (_get k keep) k a)
+    l r h)
+  t h
+# What a node costs written, a bound one 4, a use 5 more than what fills it.
+_icost = \isdef \cost fix $ \self \t triage 1 (\c Nat.add 2 (self c)) (\l \r triage
+    (\k triage 2 _ (\_ \_ Bool.match (_get k cost) 4 (_some (_get k isdef))) k)
+    (\u \r Nat.succ (Nat.add (self u) (self r)))
+    (\k \a \_ Nat.add 5 (self a))
+    l r) t
+# The entries a code names, with repeats: bound nodes and contexts.
+_sites = \isdef \fx fix $ \self \t \acc triage
+  (\acc acc)
+  (\c \acc self c acc)
+  (\l \r \acc triage
+    (\k \acc triage (\acc acc) _ (\_ \_ \acc Bool.match (\acc self (fx k) acc) (\acc △ k acc) (_some (_get k isdef)) acc) k acc)
+    (\u \r \acc self u (self r acc))
+    (\k \a \_ \acc △ k (self a acc))
+    l r acc)
+  t acc
+
+# The uses of bound subtrees under a code, △ n (△ counts ids): ids lists the
+# n subtrees that have been counted, counts how many uses each has there; a
+# subtree whose binding has been placed counts △ and is ignored.
+_none = △ 0 (△ △ [])
+_one = \e △ 1 (△ (_put e 1 △) [e])
+_add = \from \acc \e Pair.let acc $ \n \r Pair.let r $ \t \ks let (_get e from) $ \c
+  triage (\c \e \n \t \ks △ n (△ t ks)) _ (\_ \_ \c \e \n \t \ks triage
+      (\c \e \n \t \ks △ (Nat.succ n) (△ (_put e c t) (△ e ks)))
+      _
+      (\_ \_ \c \e \n \t \ks △ n (△ (_upd e (Nat.add c) t) ks))
+      (_get e t) c e n t ks)
+    c c e n t ks
+# Merging the smaller into the larger keeps the work at n log n; what comes
+# out with the merge are the ids whose counts went up.
+_into = \s \b List.foldl (_add (Pair.fst (Pair.snd s))) b (Pair.snd (Pair.snd s))
+_merge = \a \b Bool.match
+  (\a \b △ (_into b a) (Pair.snd (Pair.snd b)))
+  (\a \b △ (_into a b) (Pair.snd (Pair.snd a)))
+  (Nat.is_lte (Pair.fst a) (Pair.fst b)) a b
+_done = \tot \u List.filter (\e let (_get e (Pair.fst (Pair.snd u))) $ \c Bool.and (_some c) (equal c (_get e tot)))
+_drop = \e \u Pair.let u $ \n \r Pair.let r $ \t \ks △ n (△ (_put e △ t) ks)
+# Binding y here puts every subtree still counted under its scope, and
+# those are bound further out: they need keys other than y's.
+_clash = \y \u \es let (Pair.fst (Pair.snd u)) $ \t
+  List.foldl (\es \x triage (\x \es es) _ (\_ \_ \x \es △ (△ x y) es) (_get x t) x es) es (Pair.snd (Pair.snd u))
+
+# A use of a context reads what its body names where it is used, so it counts
+# as a use of everything its body names, and of what their bodies name; any
+# of those may be complete there.
+_set = List.foldl (\u \e Pair.let u $ \n \r Pair.let r $ \t \ks
+  triage (\e \n \t \ks △ (Nat.succ n) (△ (_put e 1 t) (△ e ks))) _ (\_ \_ \e \n \t \ks △ n (△ t ks)) (_get e t) e n t ks) _none
+
+# [ex t E] is △ code (△ uses E) for the term t, a skeleton of the code: △
+# leaf, △ △ hole, △ (△ c) stem, △ (△ k a) use of context k, △ (△ a) b fork,
+# △ △ y bound node, △ (△ y v) b binding of y. A binding goes in as soon as all
+# uses are under it, inner bindings first, and a node's body's uses count from
+# then on; a subtree its body completes may already be waiting. E collects the
+# pairs that clash. [plain t] is the skeleton of a context's body.
+_plain = \isdef \fx fix $ \self triage
+  △
+  (\c △ (△ (self c)))
+  (\l \r triage
+    (\k triage (\k △ △) _ (\_ \_ \k Bool.match (\k self (fx k)) (\k △ △ k) (_some (_get k isdef)) k) k k)
+    (\u \r △ (△ (self u)) (self r))
+    (\k \a \_ △ (△ k (self a)))
+    l r)
+_bind = fix $ \self \work \code \u \es \ex \tot \fx \pl List.match
+  (\code \u \es \ex \tot \fx \pl △ code (△ u es))
+  (\y \rest \code \u \es \ex \tot \fx \pl let (_drop y u) $ \u let (_clash y u es) $ \es
+    Bool.match
+      (\y \rest \code \u \es Pair.let (ex (fx y) es) $ \v \r Pair.let r $ \uv \es
+        Pair.let (_merge uv u) $ \u \up
+        self (List.concat (List.filter (\e Bool.not (List.any (equal e) rest)) (_done tot u up)) rest) (△ (△ y v) code) u es ex tot fx pl)
+      (\y \rest \code \u \es self rest (△ (△ y (pl y)) code) u es ex tot fx pl)
+      (_ctx y) y rest code u es)
+  work code u es ex tot fx pl
+_ex = \isdef \fx \fb \tot \cl let (\y _plain isdef fx (fb y)) $ \pl fix $ \self \t \es triage
+  (\es △ △ (△ _none es))
+  (\c \es Pair.let (self c es) $ \s \r △ (△ (△ s)) r)
+  (\l \r \es triage
+    (\k \es triage (\k \es △ (△ △) (△ _none es)) _ (\_ \_ \k \es Bool.match
+        (\k \es self (fx k) es)
+        (\k \es △ (△ △ k) (△ (_one k) es))
+        (_some (_get k isdef)) k es) k k es)
+    (\u \r \es Pair.let (self u es) $ \sl \rl Pair.let rl $ \ul \es
+      Pair.let (self r es) $ \sr \rr Pair.let rr $ \ur \es
+      Pair.let (_merge ul ur) $ \u \up
+      _bind (_done tot u up) (△ (△ sl) sr) u es self tot fx pl)
+    (\k \a \_ \es Pair.let (self a es) $ \sa \ra Pair.let ra $ \ua \es
+      let (_get k cl) $ \c
+      let (_into c ua) $ \u
+      _bind (_done tot u (Pair.snd (Pair.snd c))) (△ (△ k sa)) u es self tot fx pl)
+    l r es)
+  t es
+
+# Keys are trees, smallest first: a node's key no stem, none of the shapes a
+# binding's code starts with and no fork whose left is a prefix; a prefix none
+# of the shapes that start a binding's code once it is under △ (△ p x).
+_key = triage true (\_ false) (\l \_ triage true (\x triage true (\y triage true (\_ true) (\_ \_ false) y) (\_ \_ false) x) (\_ \_ true) l)
+_pre = triage true (\x triage true (\y triage true (\_ true) (\_ \_ false) y) (\_ \_ false) x) (\_ \_ true)
+# The trees of the next size, from those of each smaller size, largest first.
+_level = \r List.concat (List.map △ (List.head_or [] r))
+  (List.match [] (\_ \rt List.concat_map (\p Pair.let p $ \a \b List.concat_map (\x List.map (△ x) b) a) (List.zip_with △ (List.reverse r) rt)) r)
+_trees = \ok \k (fix $ \self \r \out Bool.match
+  (\r \out let (_level r) $ \l self (△ l r) (List.concat out (List.filter ok l)))
+  (\r \out List.take k out)
+  (Nat.is_lte k (List.length out)) r out) [[△]] (List.filter ok [△])
+
+# Colours are △ id index: each entry, most used first, takes the first colour
+# from start x up that none of its clashes has taken.
+_colour = \adj \start List.foldl (\col \x
+  let (List.foldl (\s \y let (_get y col) $ \c triage (\c \s s) _ (\_ \_ \c \s _put (Pair.fst c) true s) c c s) △ (_get x adj)) $ \used
+  _put x ((fix $ \f \c Bool.match (\c c) (\c f (△ (_isucc (Pair.fst c)) (Nat.succ (Pair.snd c)))) (_some (_get (Pair.fst c) used)) c) (start x)) col) △
+_first = △ (_isucc △) 0
+_second = △ (_isucc (_isucc △)) 1
+# How much each colour's key is worth shortening: an entry counts once for
+# its binding and once for each use; [n] colours, by index.
+_ids = fix $ \self \c \n Nat.match (\c []) (\p \c △ c (self (_isucc c) p)) n c
+_weights = \tot \col \n \order let (List.foldl (\m \x _upd (Pair.fst (_get x col)) (Nat.add (Nat.succ (_get x tot))) m) △ order) $ \w
+  List.map (\i _get i w) (_ids (_isucc △) n)
+_ncol = \col List.foldl (\n \x Nat.max n (Nat.succ (Pair.snd (_get x col)))) 0
+_table = \keys Pair.snd (List.foldl (\acc \k Pair.let acc $ \c \m △ (_isucc c) (_put c k m)) (△ (_isucc △) △) keys)
+_dot = \w \sz \base List.foldl Nat.add 0 (List.zip_with (\a \k Nat.mul a (Nat.add base (size k))) w sz)
+
+_emit = \key fix $ \self triage
+  △
+  (\s triage (△ △) (\c △ (△ (self c))) (\y \x △ (△ (key y) (self x))) s)
+  (\l \r triage
+    (\r △ (key r))
+    (\a \r △ (self a) (self r))
+    (\y \v \r Bool.match (\v △ (△ (△ (△ (key y) v)) (self r))) (\v △ (△ (△ (△ (△ (key y) v))) (self r))) (_ctx y) (self v))
+    l r)
+
+encode = \t Pair.let (_chains t) $ \top \body
+  let (_choose body top) $ \keep
+  let (\k _expand body keep (body k) (△ △ △)) $ \fb
+  let (\x _expand body keep (body x) △) $ \fx
+  let (_expand body keep top △) $ \start
+  Pair.let (_walk (\k Bool.match (fx k) (fb k) (_ctx k)) (_uses start △) (△ △ (△ △ △))) $ \cnt \r Pair.let r $ \_ \order
+  let (List.reverse order) $ \up
+  let (List.filter _ctx order) $ \ctxs
+  let (List.filter (\k Bool.not (_ctx k)) order) $ \nodes
+  # Binding nodes, callees first: one written m times at cost c is bound when
+  # that saves more than the binding and its uses cost.
+  Pair.let (List.foldl (\st \x Pair.let st $ \isdef \cost Bool.match (\isdef \cost
+      let (_icost isdef cost (fx x)) $ \c let (_get x cnt) $ \m
+      Bool.match (\c \isdef \cost △ isdef (_put x c cost)) (\c \isdef \cost △ (_put x true isdef) (_put x 4 cost))
+        (Nat.is_lt (Nat.add (Nat.mul 4 m) 8) (Nat.mul (Nat.sub m 1) c)) c isdef cost) (\isdef \cost st) (_ctx x) isdef cost) (△ △ △) up) $ \isdef \_
+  let (List.filter (\x _some (_get x isdef)) nodes) $ \defs
+  let (_sites isdef fx) $ \sites
+  # Each context's closure: itself and, through its body, what it names.
+  let (List.foldl (\m \k _put k (_set (△ k (List.concat_map (\s Bool.match [s] (Pair.snd (Pair.snd (_get s m))) (_ctx s)) (sites (fb k) △)))) m) △ (List.reverse ctxs)) $ \cl
+  let (List.foldl (\m \k List.foldl (\m \s _put s true m) m (sites (fb k) △)) △ ctxs) $ \named
+  let (List.foldl (\m \s _upd s Nat.succ m) △ (List.foldl (\acc \x sites (fx x) acc) (sites start △) defs)) $ \direct
+  let (List.foldl (\m \s Bool.match (\m _upd s (Nat.add (_get s direct)) m) (\m List.foldl (\m \e _upd e (Nat.add (_get s direct)) m) m (Pair.snd (Pair.snd (_get s cl)))) (_ctx s) m) △ (List.concat defs ctxs)) $ \tot
+  Pair.let (_ex isdef fx fb tot cl start []) $ \code \r Pair.let r $ \_ \es
+  let (List.foldl (\m \p Pair.let p $ \x \y _upd x (△ y) (_upd y (△ x) m)) △ es) $ \adj
+  let (\l List.map Pair.snd (List.sort (\a \b Nat.is_lte (Pair.fst b) (Pair.fst a)) (List.map (\d △ (_get d tot) d) l))) $ \bytot
+  let (bytot ctxs) $ \ctxs
+  let (bytot defs) $ \defs
+  let (_colour adj (\_ _first) ctxs) $ \ccol
+  let (_colour adj (\x Bool.match _first _second (_some (_get x named))) defs) $ \ncol
+  let (_ncol ccol ctxs) $ \nc
+  let (_ncol ncol defs) $ \nn
+  let (_weights tot ccol nc ctxs) $ \wc
+  let (_weights tot ncol nn defs) $ \wn
+  let (_trees _pre (Nat.add nc 3)) $ \pcs
+  # The prefixes start at one of the first four, whichever makes keys cheapest.
+  let (List.map (\off let (List.take nc (List.drop off pcs)) $ \ch
+      let (_trees (\k Bool.and (_key k) (triage true (\_ true) (\a \_ Bool.not (List.any (equal a) ch)) k)) nn) $ \ks
+      △ (Nat.add (_dot wc ch 2) (_dot wn ks 1)) (△ ch ks)) [0; 1; 2; 3]) $ \cands
+  Pair.let (Pair.snd (List.foldl (\b \c Bool.match b c (Nat.is_lt (Pair.fst c) (Pair.fst b))) (List.head_or △ cands) cands)) $ \ch \ks
+  let (_table ch) $ \ckey
+  let (_table ks) $ \nkey
+  _emit (\y Bool.match (\y _get (Pair.fst (_get y ncol)) nkey) (\y _get (Pair.fst (_get y ccol)) ckey) (_ctx y) y) code
+codec = Codec.create encode decode
+
+_to_string = Bool.to_source
+List.all (\t equal (decode (encode t)) t) [△; △ △; △ △ △; △ (△ △) (△ △); true; false; fix; Nat.add; Codec.size; "hello hello hello hello"]
+# = true
+# The source reads the same codes as the tree it was made into.
+List.all (\t equal (_decode_source (encode t)) t) [fix; Nat.add; "hello hello hello hello"]
+# = true
+
+# What it costs to carry: the decoder, then, for trees from eight nodes to
+# 2.4·10¹¹, programs and data, the tree → its code → what [Codec.shrink] keeps,
+# which is the code and the decoder under [Codec.defer], or the tree itself
+# where that is not smaller. A row is empty if the code does not decode back to
+# the tree; it is one test with the sizes so that the largest tree is encoded
+# once.
+_to_string = Nat.to_source
+size decode
+# = 1047
+size _decode_source
+# = 1116
+_to_string = \l List.join " → " $ List.map Nat.to_string l
+_sizes = \t let (encode t) $ \c Bool.match [] [Codec.size t; Codec.size c; Codec.size (Codec.shrink codec t)] (equal (decode c) t)
+_sizes Bool.not
+# = 8 → 9 → 8
+_sizes List.map
+# = 130 → 153 → 130
+_sizes Nat.to_source
+# = 4502 → 2257 → 3316
+_sizes Lambada.prelude
+# = 9813 → 1783 → 2842
+_sizes Image.Png.crc_table
+# = 15153 → 5575 → 6634
+_sizes Pico.Matrix.Selfie.portrait
+# = 50835 → 17836 → 18895
+_sizes Lambada.parse_expr
+# = 491776 → 4033 → 5092
+_sizes Lambada.compile
+# = 240506188491 → 151335 → 152394
+
+# What it costs to decode, on an evaluator that remembers nothing.
+_to_string = id
+Bench.run [decode; encode List.map]
+# =  oh |  0a  0b    1    2 3a 3b 3c |  alc  red
+#   243 | 735 899 1427 1508 46 69 90 | 1634 3140
+Bench.run [decode; encode Nat.to_source]
+# =   oh |    0a    0b     1     2   3a   3b   3c |   alc   red
+#   4633 | 14510 22303 31477 33657 1305 1399 2280 | 36813 70118
+Bench.run [decode; encode Lambada.parse_expr]
+# =   oh |    0a    0b     1     2   3a   3b   3c |   alc    red
+#   8552 | 25765 42136 57564 61894 2721 2802 4397 | 67901 129378

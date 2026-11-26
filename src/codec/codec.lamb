@@ -1,7 +1,7 @@
 # Making a tree smaller, and getting it back.
 #
 # A codec is an [encode] and a [decode] over trees, held as `△ encode decode`,
-# with `decode (encode t) = t` for every tree. [Codec.Sharing] and [Codec.Term]
+# with `decode (encode t) = t` for every tree. [Codec.Grammar] and [Codec.Term]
 # are the two here, and each exports its pair as `codec`. They find different
 # redundancy and neither wins everywhere, so which to reach for is the caller's
 # choice; their own tests carry the sizes.
@@ -23,6 +23,13 @@
 create = Pair.create
 encode = Pair.fst
 decode = Pair.snd
+
+# [size t]: the count [size] gives, from the children's counts rather than by
+# adding along a walk. The evaluator remembers every application, so a subtree
+# is counted once however often it occurs: the cost is the tree's DAG, where
+# [size]'s is the tree, and the trees worth shrinking are the ones whose DAG is
+# far smaller than they are.
+size = fix $ \self triage 1 (\c Nat.succ (self c)) (\l \r Nat.succ (Nat.add (self l) (self r)))
 
 # Whichever of the two is the smaller tree, a's being kept on a tie.
 smaller = \a \b Bool.match a b (Nat.is_lt (size b) (size a))

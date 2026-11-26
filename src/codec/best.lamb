@@ -10,17 +10,18 @@
 # paying that once at build time.
 
 shrink_best = \t Codec.smaller
-  (Codec.shrink Codec.Sharing.codec t)
+  (Codec.shrink Codec.Grammar.codec t)
   (Codec.shrink Codec.Term.codec t)
 
-# Which one wins says something about the tree. Sharing wins wherever a tree is
-# merely repetitive, and by a wide margin on a large one. The term codec wins
-# where a program was written with it in mind — binding what its inner code uses
-# close to it — and the selfie is the one such program here; its own tests keep
-# that figure, since depending on it from this module would be a cycle.
+# Which one wins says something about the tree. The grammar codec wins
+# wherever a tree is merely repetitive, and by a wide margin on a large one.
+# The term codec wins where a program was written with it in mind — binding
+# what its inner code uses close to it — and the selfie is the one such program
+# here; its own tests keep that figure, since depending on it from this module
+# would be a cycle.
 _to_string = \l List.join " → " $ List.map Nat.to_string l
 [size Lambada.parse_expr; size (shrink_best Lambada.parse_expr)]
-# = 491776 → 10336
+# = 491776 → 5092
 # Below what either encoding costs to carry, the tree comes back as it was.
 [size Bool.not; size (shrink_best Bool.not)]
 # = 8 → 8
