@@ -33,9 +33,11 @@ xor  = List.zip_with Bool.xor
 
 # === Shifts ===
 # LSB-first: shl prepends low-order zeros and truncates the high end;
-# shr drops low-order bits and pads zeros on the high end.
+# shr drops low-order bits and pads zeros on the high end. Both take the
+# width back at the end, so a shift past it gives zero at the same width
+# rather than a longer list.
 shl = \k \b List.take (width b) (List.concat (List.repeat k false) b)
-shr = \k \b List.concat (List.drop k b) (List.repeat k false)
+shr = \k \b List.take (width b) (List.concat (List.drop k b) (List.repeat k false))
 
 # === Arithmetic (wrapping) ===
 # Full adder propagating carry along the bit list (LSB → MSB).
@@ -129,3 +131,8 @@ succ (succ (_8 254))
 # = 00000000
 add (_8 100) (_8 200)
 # = 00101100
+# A shift past the width keeps the width, either way.
+shr 10 (max 8)
+# = 00000000
+shl 10 (max 8)
+# = 00000000
