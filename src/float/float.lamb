@@ -1,0 +1,1208 @@
+# Parameterized binary floating-point (IEEE 754-style).
+#
+# Internal representation: Scott-encoded tagged sum.
+# A Float is a function \z \i \n \f → (one of the four cases).
+# This makes pattern matching O(1) and eliminates repeated Bin traversals.
+
+# === Formats ===
+f16 = Pair.create 5  10
+f32 = Pair.create 8  23
+f64 = Pair.create 11 52
+
+exp_bits   = Pair.fst
+frac_bits  = Pair.snd
+total_bits = \format Nat.add 1 $ Nat.add (exp_bits format) (frac_bits format)
+
+exp_max  = \format Nat.sub (Nat.pow2 (exp_bits format)) 1
+bias     = \format Nat.sub (Nat.pow2 (Nat.pred (exp_bits format))) 1
+frac_max = \format Nat.sub (Nat.pow2 (frac_bits format)) 1
+
+# === Representation: Scott-encoded tagged sum ===
+V \= Zero fmt s | Inf fmt s | Nan fmt | Fin fmt s e m
+
+zero     = Zero
+infinity = Inf
+nan      = Nan
+
+create = \format \sign \exp_r \man_n
+  Bool.match
+    (Bool.match
+      (Fin format sign exp_r man_n)
+      (Bool.match (Fin format sign 0 man_n) (Zero format sign) (Nat.is_zero man_n))
+      (Nat.is_zero exp_r))
+    (Bool.match (Nan format) (Inf format sign) (Nat.is_zero man_n))
+    (equal exp_r (exp_max format))
+
+# === Accessors ===
+fmt      = \v v (\f \_ f) (\f \_ f) (\f f) (\f \_ \_ \_ f)
+sign     = \v v (\_ \s s) (\_ \s s) (\_ false) (\_ \s \_ \_ s)
+exp_raw  = \v v (\_ \_ 0) (\f \_ exp_max f) (\f exp_max f) (\_ \_ \e \_ e)
+mantissa = \v v (\_ \_ 0) (\_ \_ 0) (\_ 1) (\_ \_ \_ \m m)
+
+# === Predicates ===
+is_zero      = \v v (\_ \_ true)  (\_ \_ false) (\_ false) (\_ \_ \_ \_ false)
+is_infinity  = \v v (\_ \_ false) (\_ \_ true)  (\_ false) (\_ \_ \_ \_ false)
+is_nan       = \v v (\_ \_ false) (\_ \_ false) (\_ true)  (\_ \_ \_ \_ false)
+is_finite    = \v v (\_ \_ true)  (\_ \_ false) (\_ false) (\_ \_ \_ \_ true)
+is_negative  = sign
+is_subnormal = \v v (\_ \_ false) (\_ \_ false) (\_ false) (\_ \_ \e \m Bool.and (Nat.is_zero e) (Bool.not (Nat.is_zero m)))
+is_normal    = \v v (\_ \_ false) (\_ \_ false) (\_ false) (\_ \_ \e \_ Bool.not (Nat.is_zero e))
+
+# === Sign manipulation ===
+negate   = \v v (\f \s Zero f (Bool.not s)) (\f \s Inf f (Bool.not s)) (\f Nan f) (\f \s \e \m Fin f (Bool.not s) e m)
+abs      = \v v (\f \_ Zero f false) (\f \_ Inf f false) (\f Nan f) (\f \_ \e \m Fin f false e m)
+copysign = \a \b let (sign b) $ \s a (\f \_ Zero f s) (\f \_ Inf f s) (\f Nan f) (\f \_ \e \m Fin f s e m)
+
+# === Bit encoding / decoding ===
+encode = \v v
+  (\f \s List.concat [s] $ List.concat (Bin.to_msb (Bin.of_nat (exp_bits f) 0)) (Bin.to_msb (Bin.of_nat (frac_bits f) 0)))
+  (\f \s List.concat [s] $ List.concat (Bin.to_msb (Bin.of_nat (exp_bits f) (exp_max f))) (Bin.to_msb (Bin.of_nat (frac_bits f) 0)))
+  (\f   List.concat [false] $ List.concat (Bin.to_msb (Bin.of_nat (exp_bits f) (exp_max f))) (Bin.to_msb (Bin.of_nat (frac_bits f) 1)))
+  (\f \s \e \m List.concat [s] $ List.concat (Bin.to_msb (Bin.of_nat (exp_bits f) e)) (Bin.to_msb (Bin.of_nat (frac_bits f) m)))
+
+decode = \format \bits
+  create format
+    (List.match false (\h \_ h) bits)
+    (Bin.to_nat (Bin.of_msb (List.take (exp_bits  format) (List.drop 1 bits))))
+    (Bin.to_nat (Bin.of_msb (List.take (frac_bits format) (List.drop (Nat.add 1 (exp_bits format)) bits))))
+
+# === Scientific notation (decimal) ===
+
+_pow10     = \n Fn.pow n (Nat.mul_const 10) 1
+_round_div = \a \b Nat.div (Nat.add (Nat.double a) b) (Nat.double b)
+
+_to_ratio = \f
+  let (fmt f) $ \format
+  let (Nat.add (bias format) (frac_bits format)) $ \shift
+  let (exp_raw f) $ \eraw
+  let (mantissa f) $ \mn
+  Bool.match
+    (let (Nat.add (Nat.pow2 (frac_bits format)) mn) $ \sig
+     Bool.match
+       (Pair.create sig (Nat.pow2 (Nat.sub shift eraw)))
+       (Pair.create (Nat.mul sig (Nat.pow2 (Nat.sub eraw shift))) 1)
+       (Nat.is_gte eraw shift))
+    (Pair.create mn (Nat.pow2 (Nat.sub shift 1)))
+    (Nat.is_zero eraw)
+
+# The recursive branch is deferred behind a lambda bound to the scaled operand
+# and forced by the trailing argument: passing the recursive call directly would
+# reduce it whichever way the comparison goes, and since each step only scales
+# again there is no bottom to reach — the loop never terminates under eager
+# reduction.
+#
+# The scaled operand has to be the *first* parameter, too. Whatever is applied
+# before the bound argument does not depend on it, so it is lifted out of the
+# lambda and reduced anyway: with `\den \num \mag`, writing `self num d …` leaves
+# `self num` hoistable, and unfolding that alone diverges. Taking the operand
+# first makes the whole recursive call depend on the binder.
+_norm10_up = fix $ \self \den \num \mag
+  let (Nat.mul_const 10 den) $ \den10
+  Bool.match
+    (\_ Pair.create (Pair.create num den) (Pair.create false mag))
+    (\d self d num (Nat.succ mag))
+    (Nat.is_gte num den10)
+    den10
+
+_norm10_down = fix $ \self \num \den \mag
+  Bool.match
+    (\n self n den (Nat.succ mag))
+    (\_ Pair.create (Pair.create num den) (Pair.create true mag))
+    (Nat.is_gte num den)
+    (Nat.mul_const 10 num)
+
+_norm10 = \num \den
+  Bool.match
+    (_norm10_down num den 0)
+    (_norm10_up   den num 0)
+    (Nat.is_gte num den)
+
+_exp10_inc = Pair.match $ \neg \mag
+  Bool.match
+    (Pair.create false (Nat.succ mag))
+    (Bool.match
+      (Pair.create true (Nat.pred mag))
+      (Pair.create false 1)
+      (Nat.is_zero mag))
+    neg
+
+_exp10_str = Pair.match $ \neg \mag
+  List.concat "e"
+  $ List.concat (Bool.match "+" "-" (Bool.and neg (Bool.not (Nat.is_zero mag))))
+                (Nat.to_string mag)
+
+_insert_dot = \prec \digits
+  Bool.match
+    (List.match digits (\h \t △ h (△ '.' t)) digits)
+    digits
+    (Nat.is_zero prec)
+
+_zero_scientific = \prec
+  List.concat
+    (Bool.match (List.concat "0." (List.repeat prec '0')) "0" (Nat.is_zero prec))
+    "e+0"
+
+_render_digits = \prec \is_neg \nm \dn \exp10
+  let (Nat.to_string (_round_div (Nat.mul nm (_pow10 prec)) dn))    $ \m_str
+  let (Nat.is_gt (List.length m_str) (Nat.succ prec))              $ \carry
+  let (Bool.match m_str (List.take (Nat.succ prec) m_str) carry)   $ \digits
+  let (Bool.match exp10 (_exp10_inc exp10) carry)                   $ \final_exp
+  List.concat (Bool.match "" "-" is_neg)
+  $ List.concat (_insert_dot prec digits)
+  $ _exp10_str final_exp
+
+_render_nonzero = \prec \is_neg \f
+  Pair.match (\num \den
+    Pair.match (\nd \exp10
+      Pair.match (\nm \dn _render_digits prec is_neg nm dn exp10)
+      nd)
+    $ _norm10 num den)
+  $ _to_ratio f
+
+to_string_scientific = \prec \f f
+  (\_ \_ _zero_scientific prec)
+  (\_ \s Bool.match "Infinity" "-Infinity" s)
+  (\_ "NaN")
+  (\_ \s \_ \_ _render_nonzero prec s f)
+
+to_string = to_string_scientific 6
+
+# === Arithmetic helpers ===
+
+_bit_at  = \k \n List.match false (\h \_ h) (Nat.shr k n)
+_low_nz  = \k \n List.foldr Bool.or false (List.take k n)
+
+_rshift_round = \shr \sig
+  let (Nat.pred shr) $ \shr1
+  let (Nat.shr shr sig) $ \kept
+  let (Bool.and (_bit_at shr1 sig) (Bool.or (_low_nz shr1 sig) (_bit_at 0 kept))) $ \roundup
+  Bool.match kept (Nat.succ kept) roundup
+
+# The encode chain takes precomputed format-derived constants:
+#   emax     = exp_max fmt          (= 2^eb - 1)
+#   implicit = Nat.pow2 fb          (= 2^fb)
+#   implicit2 = Nat.double implicit (= 2^(fb+1))
+#   fb1      = Nat.succ fb          (= fb + 1)
+# This avoids recomputing Nat.pow2 in every helper on every call.
+# [_fmt_consts] derives them once from a format and hands them to [k].
+_fmt_consts = \fmt \k
+  let (frac_bits fmt) $ \fb
+  let (Nat.succ fb) $ \fb1
+  let (Nat.pow2 fb) $ \implicit
+  let (Nat.double implicit) $ \implicit2
+  let (exp_max fmt) $ \emax
+  k fb fb1 implicit implicit2 emax
+
+_pack_at = \fmt \emax \s \er \man
+  Bool.match
+    (Fin fmt s er man)
+    (Inf fmt s)
+    (Nat.is_lte emax er)
+
+_pack_rounded = \fmt \emax \implicit \implicit2 \s \er \kept2
+  Bool.match
+    (_pack_at fmt emax s er (Nat.sub kept2 implicit))
+    (Bool.match
+      (_pack_at fmt emax s er 0)
+      (_pack_at fmt emax s (Nat.succ er) 0)
+      (Nat.is_lte emax (Nat.succ er)))
+    (equal kept2 implicit2)
+
+_encode_normal = \fmt \emax \implicit \implicit2 \fb1 \s \bw \er \sig
+  Bool.match
+    (_pack_rounded fmt emax implicit implicit2 s er (_rshift_round (Nat.sub bw fb1) sig))
+    (_pack_at fmt emax s er (Nat.sub (Nat.shl (Nat.sub fb1 bw) sig) implicit))
+    (Nat.is_lte bw fb1)
+
+_encode_finite = \fmt \emax \implicit \implicit2 \fb1 \s \sig \e_min
+  let (List.length sig) $ \bw
+  let (Nat.add bw e_min) $ \bwe
+  Bool.match
+    (_encode_normal fmt emax implicit implicit2 fb1 s bw (Nat.sub bwe fb1) sig)
+    (create fmt s 0 (Nat.shl (Nat.pred e_min) sig))
+    (Nat.is_lte bwe fb1)
+
+_encode_shifted = \fmt \emax \implicit \implicit2 \fb1 \s \sig \a_exp \b_exp
+  Bool.match
+    (let (Nat.succ (Nat.sub b_exp a_exp)) $ \shr
+     _encode_finite fmt emax implicit implicit2 fb1 s (_rshift_round shr sig) 1)
+    (_encode_finite fmt emax implicit implicit2 fb1 s sig (Nat.sub a_exp b_exp))
+    (Nat.is_lt b_exp a_exp)
+
+# === Addition ===
+
+# Build the full significand: ma when subnormal, implicit | ma when normal.
+# Skips the Nat.add entirely when ma=0 (just returns implicit), which is the
+# common case for any power of two (1, 2, 0.5, ...).
+_sig_of = \implicit \ma \za
+  Bool.match
+    (\ma Bool.match (Nat.add implicit) (\_ implicit) (Nat.is_zero ma) ma)
+    id
+    za ma
+
+# True exponent for alignment: ea if normal, 1 if subnormal (ea=0).
+# Cheaper than Nat.max ea 1 — a Bool dispatch instead of a bit-list walk.
+_e_of = \ea \za Bool.match ea 1 za
+
+# Prepare one operand: hand its significand and true exponent to [k].
+_operand = \implicit \e \m \k
+  let (Nat.is_zero e) $ \z
+  k (_sig_of implicit m z) (_e_of e z)
+
+_add_finite_core = \fmt \sa \ea \ma \sb \eb \mb
+  _fmt_consts fmt $ \fb \fb1 \implicit \implicit2 \emax
+  _operand implicit ea ma $ \sig_a \e_a
+  _operand implicit eb mb $ \sig_b \e_b
+  let (Nat.min e_a e_b) $ \e_min
+  let (Nat.shl (Nat.sub e_a e_min) sig_a) $ \aa
+  let (Nat.shl (Nat.sub e_b e_min) sig_b) $ \bb
+  Bool.match
+    (Bool.match
+      (_encode_finite fmt emax implicit implicit2 fb1 sb (Nat.sub bb aa) e_min)
+      (Bool.match
+        (_encode_finite fmt emax implicit implicit2 fb1 sa (Nat.sub aa bb) e_min)
+        (Zero fmt false)
+        (equal aa bb))
+      (Nat.is_lte bb aa))
+    (_encode_finite fmt emax implicit implicit2 fb1 sa (Nat.add aa bb) e_min)
+    (equal sa sb)
+
+add = \a \b a
+  (\fa \sa b
+    (\_ \sb Zero fa (Bool.match false sa (equal sa sb)))
+    (\_ \sb b)
+    (\_ Nan fa)
+    (\_ \_ \_ \_ b))
+  (\fa \sa b
+    (\_ \_ a)
+    (\_ \sb Bool.match (Nan fa) a (equal sa sb))
+    (\_ Nan fa)
+    (\_ \_ \_ \_ a))
+  (\fa Nan fa)
+  (\fa \sa \ea \ma b
+    (\_ \_ a)
+    (\_ \sb b)
+    (\_ Nan fa)
+    (\_ \sb \eb \mb _add_finite_core fa sa ea ma sb eb mb))
+
+sub = \a \b add a (negate b)
+
+# === Multiplication ===
+
+_mul_finite_core = \fmt \s_r \sa \ea \ma \sb \eb \mb
+  _fmt_consts fmt $ \fb \fb1 \implicit \implicit2 \emax
+  _operand implicit ea ma $ \sig_a \e_a
+  _operand implicit eb mb $ \sig_b \e_b
+  _encode_shifted fmt emax implicit implicit2 fb1 s_r
+    (Nat.mul sig_a sig_b)
+    (Nat.add e_a e_b)
+    (Nat.add (Nat.div2 emax) fb)
+
+mul = \a \b a
+  (\fa \sa let (Bool.xor sa (sign b)) $ \s_r b
+    (\_ \_ Zero fa s_r)
+    (\_ \_ Nan fa)
+    (\_ Nan fa)
+    (\_ \_ \_ \_ Zero fa s_r))
+  (\fa \sa let (Bool.xor sa (sign b)) $ \s_r b
+    (\_ \_ Nan fa)
+    (\_ \_ Inf fa s_r)
+    (\_ Nan fa)
+    (\_ \_ \_ \_ Inf fa s_r))
+  (\fa Nan fa)
+  (\fa \sa \ea \ma let (Bool.xor sa (sign b)) $ \s_r b
+    (\_ \_ Zero fa s_r)
+    (\_ \_ Inf fa s_r)
+    (\_ Nan fa)
+    (\_ \sb \eb \mb _mul_finite_core fa s_r sa ea ma sb eb mb))
+
+# === Division ===
+
+_div_finite_core = \fmt \s_r \sa \ea \ma \sb \eb \mb
+  _fmt_consts fmt $ \fb \fb1 \implicit \implicit2 \emax
+  _operand implicit ea ma $ \sig_a \e_a
+  _operand implicit eb mb $ \sig_b \e_b
+  let (Nat.add fb 2) $ \shift
+  let (Nat.shl shift sig_a) $ \sig_a_ext
+  let (Pair.match (\q \r
+        Bool.match id Nat.succ (Nat.is_zero r) (Nat.double q))
+       (Nat.divmod sig_a_ext sig_b)) $ \q_with_sticky
+  _encode_shifted fmt emax implicit implicit2 fb1 s_r q_with_sticky
+    (Nat.add e_a (Nat.add (Nat.div2 emax) fb))
+    (Nat.add e_b (Nat.succ shift))
+
+div = \a \b a
+  (\fa \sa let (Bool.xor sa (sign b)) $ \s_r b
+    (\_ \_ Nan fa)
+    (\_ \_ Zero fa s_r)
+    (\_ Nan fa)
+    (\_ \_ \_ \_ Zero fa s_r))
+  (\fa \sa let (Bool.xor sa (sign b)) $ \s_r b
+    (\_ \_ Inf fa s_r)
+    (\_ \_ Nan fa)
+    (\_ Nan fa)
+    (\_ \_ \_ \_ Inf fa s_r))
+  (\fa Nan fa)
+  (\fa \sa \ea \ma let (Bool.xor sa (sign b)) $ \s_r b
+    (\_ \_ Inf fa s_r)
+    (\_ \_ Zero fa s_r)
+    (\_ Nan fa)
+    (\_ \sb \eb \mb _div_finite_core fa s_r sa ea ma sb eb mb))
+
+# === Ordering ===
+
+_mag_lt = \ea \ma \eb \mb
+  Bool.match
+    (Nat.is_lt ea eb)
+    (Nat.is_lt ma mb)
+    (equal ea eb)
+
+_mag_gt = \ea \ma \eb \mb _mag_lt eb mb ea ma
+
+is_lt = \a \b a
+  (\_ \_ b
+    (\_ \_ false)
+    (\_ \sb Bool.not sb)
+    (\_ false)
+    (\_ \sb \_ \_ Bool.not sb))
+  (\_ \sa b
+    (\_ \_ sa)
+    (\_ \sb Bool.and sa (Bool.not sb))
+    (\_ false)
+    (\_ \_ \_ \_ sa))
+  (\_ false)
+  (\_ \sa \ea \ma b
+    (\_ \_ sa)
+    (\_ \sb Bool.not sb)
+    (\_ false)
+    (\_ \sb \eb \mb
+      Bool.match
+        (\_ \_ \_ \_ sa)
+        (Bool.match _mag_lt _mag_gt sa)
+        (equal sa sb) ea ma eb mb))
+
+is_gt  = \a \b is_lt b a
+_neither_nan = \a \b Bool.and (Bool.not (is_nan a)) (Bool.not (is_nan b))
+is_lte = \a \b Bool.and (_neither_nan a b) (Bool.not (is_lt b a))
+is_gte = \a \b Bool.and (_neither_nan a b) (Bool.not (is_lt a b))
+
+gt_zero = \v v (\_ \_ false) (\_ \_ false) (\_ false) (\_ \s \_ \_ Bool.not s)
+
+# === Conversion to/from Nat ===
+
+of_nat = \format \n
+  Bool.match
+    (\n _fmt_consts format $ \fb \fb1 \implicit \implicit2 \emax
+     _encode_finite format emax implicit implicit2 fb1 false n (Nat.add (Nat.div2 emax) fb))
+    (\_ Zero format false)
+    (Nat.is_zero n) n
+
+_to_nat = \op \f f
+  (\_ \_ 0)
+  (\_ \_ 0)
+  (\_ 0)
+  (\fmt \s \_ \_ Bool.match (\f Pair.match op (_to_ratio f)) (\_ 0) s f)
+
+floor = _to_nat Nat.div
+ceil  = _to_nat $ \num \den Nat.div (Nat.add num (Nat.pred den)) den
+round = _to_nat _round_div
+
+# === Integer power ===
+pow_int = \f \n Fn.pow n (mul f) (of_nat (fmt f) 1)
+
+# === Transcendentals: log, exp ===
+
+ln_2   = \fmt div (of_nat fmt 6931471805599453)  (of_nat fmt 10000000000000000)
+log2_e = \fmt div (of_nat fmt 14426950408889634) (of_nat fmt 10000000000000000)
+
+_exp_taylor = \fmt \r
+  let (of_nat fmt 1) $ \one_f
+  Pair.fst (Fn.pow 9 (\state Pair.match (\acc \k
+    Pair.create
+      (add one_f (div (mul acc r) (of_nat fmt k)))
+      (Nat.pred k)
+  ) state) (Pair.create one_f 9))
+
+_pow2_signed = \fmt \k_neg \k_mag
+  let (pow_int (of_nat fmt 2) k_mag) $ \pos
+  Bool.match (\_ pos) (\fmt div (of_nat fmt 1) pos) k_neg fmt
+
+_round_signed = \f Pair.create (sign f) (round (abs f))
+
+exp = \x
+  let (fmt x) $ \fmt0
+  x
+    (\_ \_ of_nat fmt0 1)
+    (\_ \s Bool.match Inf Zero s fmt0 false)
+    (\_ Nan fmt0)
+    (\_ \_ \_ \_
+      Pair.match (\k_neg \k_mag
+        let (mul (Bool.match id negate k_neg (of_nat fmt0 k_mag))
+                 (ln_2 fmt0)) $ \k_ln2
+        let (sub x k_ln2) $ \r
+        mul (_exp_taylor fmt0 r) (_pow2_signed fmt0 k_neg k_mag)
+      ) (_round_signed (mul x (log2_e fmt0))))
+
+_atanh_series = \fmt \z
+  let (mul z z) $ \z2
+  Pair.fst (Fn.pow 8 (\state Pair.match (\acc \k
+    Pair.create
+      (add (div z (of_nat fmt (Nat.add (Nat.double k) 1))) (mul z2 acc))
+      (Nat.pred k)
+  ) state) (Pair.create (Zero fmt false) 7))
+
+log = \x
+  let (fmt x) $ \fmt0
+  x
+    (\_ \s Bool.match (\fmt negate (Inf fmt false)) Nan s fmt0)
+    (\_ \s Bool.match (\fmt Inf fmt false) Nan s fmt0)
+    (\_ Nan fmt0)
+    (\_ \s \e_nat \m_nat
+      Bool.match
+        (\m_nat Bool.match
+          (\m_nat
+           let (bias fmt0)                                              $ \bb
+           let (create fmt0 false bb m_nat)                             $ \m
+           let (of_nat fmt0 1)                                          $ \one_f
+           let (div (sub m one_f) (add m one_f))                        $ \z
+           let (mul (of_nat fmt0 2) (_atanh_series fmt0 z))             $ \log_m
+           let (Nat.is_lte bb e_nat)                                    $ \pos_e
+           let (Bool.match Nat.sub (\a \b Nat.sub b a) pos_e bb e_nat)  $ \e_mag
+           let (mul (of_nat fmt0 e_mag) (ln_2 fmt0))                    $ \e_ln2
+           Bool.match sub add pos_e log_m e_ln2)
+          (\_ negate (Inf fmt0 false))
+          (Bool.or (Nat.is_zero e_nat) (is_subnormal x))
+          m_nat)
+        (\_ Nan fmt0)
+        s m_nat)
+
+# === Tests ===
+
+_to_string = Nat.to_source
+exp_bits f16
+# = 5
+exp_bits f32
+# = 8
+exp_bits f64
+# = 11
+frac_bits f16
+# = 10
+frac_bits f32
+# = 23
+frac_bits f64
+# = 52
+total_bits f16
+# = 16
+total_bits f32
+# = 32
+total_bits f64
+# = 64
+exp_max f16
+# = 31
+exp_max f32
+# = 255
+exp_max f64
+# = 2047
+bias f16
+# = 15
+bias f32
+# = 127
+bias f64
+# = 1023
+frac_max f16
+# = 1023
+frac_max f32
+# = 8388607
+
+# fmt derived from a value matches the format it was constructed with.
+exp_bits  (fmt (zero f16 false))
+# = 5
+frac_bits (fmt (zero f16 false))
+# = 10
+exp_bits  (fmt (zero f32 false))
+# = 8
+frac_bits (fmt (zero f32 false))
+# = 23
+exp_bits  (fmt (zero f64 false))
+# = 11
+frac_bits (fmt (zero f64 false))
+# = 52
+
+_to_string = to_string
+zero f32 false
+# = 0.000000e+0
+zero f32 true
+# = 0.000000e+0
+infinity f32 false
+# = Infinity
+infinity f32 true
+# = -Infinity
+nan f32
+# = NaN
+
+# Reference values at f32:
+_one_f32           = of_nat f32 1
+_two_f32           = of_nat f32 2
+_neg_one_f32       = negate _one_f32
+_half_f32          = create f32 false 126 0
+_min_subnormal_f32 = create f32 false 0 1
+_max_subnormal_f32 = create f32 false 0 (frac_max f32)
+_min_normal_f32    = create f32 false 1 0
+_max_finite_f32    = create f32 false 254 (frac_max f32)
+
+_to_string = Bool.to_source
+is_zero (zero f32 false)
+# = true
+is_zero (zero f32 true)
+# = true
+is_zero _one_f32
+# = false
+is_negative      (zero f32 false)
+# = false
+is_negative      (zero f32 true)
+# = true
+is_negative      _neg_one_f32
+# = true
+is_subnormal _min_subnormal_f32
+# = true
+is_subnormal _max_subnormal_f32
+# = true
+is_subnormal _one_f32
+# = false
+is_subnormal (zero f32 false)
+# = false
+is_normal    _one_f32
+# = true
+is_normal    _min_normal_f32
+# = true
+is_normal    _max_finite_f32
+# = true
+is_normal    _min_subnormal_f32
+# = false
+is_normal    (zero f32 false)
+# = false
+is_normal    (infinity f32 false)
+# = false
+is_infinity  (infinity f32 false)
+# = true
+is_infinity  (infinity f32 true)
+# = true
+is_infinity  (nan f32)
+# = false
+is_infinity  _max_finite_f32
+# = false
+is_nan       (nan f32)
+# = true
+is_nan       (infinity f32 false)
+# = false
+is_nan       _one_f32
+# = false
+is_finite    _one_f32
+# = true
+is_finite    _max_finite_f32
+# = true
+is_finite    (infinity f32 false)
+# = false
+is_finite    (nan f32)
+# = false
+
+# Sign manipulation: negate / abs / copysign.
+_to_string = to_string
+negate _one_f32
+# = -1.000000e+0
+negate _neg_one_f32
+# = 1.000000e+0
+negate (zero f32 false)
+# = 0.000000e+0
+negate (zero f32 true)
+# = 0.000000e+0
+negate (infinity f32 false)
+# = -Infinity
+negate (infinity f32 true)
+# = Infinity
+negate (nan f32)
+# = NaN
+negate (create f16 false 0 1)
+# = -5.960464e-8
+
+abs _one_f32
+# = 1.000000e+0
+abs _neg_one_f32
+# = 1.000000e+0
+abs (zero f32 false)
+# = 0.000000e+0
+abs (zero f32 true)
+# = 0.000000e+0
+abs (infinity f32 false)
+# = Infinity
+abs (infinity f32 true)
+# = Infinity
+abs (nan f32)
+# = NaN
+
+copysign _one_f32     _neg_one_f32
+# = -1.000000e+0
+copysign _neg_one_f32 _one_f32
+# = 1.000000e+0
+copysign _one_f32     _one_f32
+# = 1.000000e+0
+copysign _neg_one_f32 _neg_one_f32
+# = -1.000000e+0
+copysign (infinity f32 false) _neg_one_f32
+# = -Infinity
+copysign (zero f32 false) _neg_one_f32
+# = 0.000000e+0
+
+# Encoded length must equal total_bits.
+_to_string = Nat.to_source
+List.length (encode (zero f16 false))
+# = 16
+List.length (encode _one_f32)
+# = 32
+List.length (encode (of_nat f64 1))
+# = 64
+
+# Bit layouts (MSB-first, '1'/'0' per bit).
+_bits_to_str = \b Nat.bits_to_dstring b ""
+
+_to_string = String.to_source
+_bits_to_str (encode (zero f32 false))
+# = "00000000000000000000000000000000"
+_bits_to_str (encode (zero f32 true))
+# = "10000000000000000000000000000000"
+_bits_to_str (encode _one_f32)
+# = "00111111100000000000000000000000"
+_bits_to_str (encode _neg_one_f32)
+# = "10111111100000000000000000000000"
+_bits_to_str (encode (infinity f32 false))
+# = "01111111100000000000000000000000"
+_bits_to_str (encode (infinity f32 true))
+# = "11111111100000000000000000000000"
+_bits_to_str (encode (nan f32))
+# = "01111111100000000000000000000001"
+_bits_to_str (encode (of_nat f16 1))
+# = "0011110000000000"
+_bits_to_str (encode (infinity f16 false))
+# = "0111110000000000"
+
+# encode/decode round-trips.
+_to_string = to_string
+decode f32 (encode (zero f32 false))
+# = 0.000000e+0
+decode f32 (encode (zero f32 true))
+# = 0.000000e+0
+decode f32 (encode _one_f32)
+# = 1.000000e+0
+decode f32 (encode _neg_one_f32)
+# = -1.000000e+0
+decode f32 (encode (infinity f32 false))
+# = Infinity
+decode f32 (encode (nan f32))
+# = NaN
+decode f16 (encode (create f16 false 0 1))
+# = 5.960464e-8
+decode f16 (encode (create f16 false 30 1023))
+# = 6.550400e+4
+decode f16 (encode (create f16 true  0    1))
+# = -5.960464e-8
+decode f64 (encode (of_nat f64 1))
+# = 1.000000e+0
+decode f16 (encode (of_nat f16 1))
+# = 1.000000e+0
+
+# Scientific notation.
+_to_string = String.to_source
+to_string_scientific 6 (zero f32 false)
+# = "0.000000e+0"
+to_string_scientific 6 (zero f32 true)
+# = "0.000000e+0"
+to_string_scientific 0 (zero f32 false)
+# = "0e+0"
+to_string_scientific 6 (nan f32)
+# = "NaN"
+to_string_scientific 6 (infinity f32 false)
+# = "Infinity"
+to_string_scientific 6 (infinity f32 true)
+# = "-Infinity"
+
+to_string_scientific 6 _one_f32
+# = "1.000000e+0"
+to_string_scientific 6 _neg_one_f32
+# = "-1.000000e+0"
+to_string_scientific 0 _one_f32
+# = "1e+0"
+to_string_scientific 2 _one_f32
+# = "1.00e+0"
+
+# 2.0, 0.5, 12.0
+to_string_scientific 4 _two_f32
+# = "2.0000e+0"
+to_string_scientific 4 _half_f32
+# = "5.0000e-1"
+to_string_scientific 4 (of_nat f32 12)
+# = "1.2000e+1"
+
+# Carry: just-below-1 rounded to "1.00e+0" with prec=2; "9.999...e-1" with prec=6.
+to_string_scientific 2 (create f32 false 126 8388607)
+# = "1.00e+0"
+to_string_scientific 6 (create f32 false 126 8388607)
+# = "9.999999e-1"
+
+# Carry: 9.5 rounds up to "1e+1" with prec=0.
+to_string_scientific 0 (create f32 false 130 1572864)
+# = "1e+1"
+
+# Subnormals and finite extremes (using f16 to keep decimal exponent small).
+to_string_scientific 4 (create f16 false 0 1)
+# = "5.9605e-8"
+to_string_scientific 4 (create f16 false 0 (frac_max f16))
+# = "6.0976e-5"
+to_string_scientific 4 (create f16 false 1 0)
+# = "6.1035e-5"
+to_string_scientific 4 (create f16 false 30 (frac_max f16))
+# = "6.5504e+4"
+to_string_scientific 4 (create f16 true  30 (frac_max f16))
+# = "-6.5504e+4"
+
+# Other formats.
+to_string_scientific 4 (of_nat f16 1)
+# = "1.0000e+0"
+to_string_scientific 4 (of_nat f64 1)
+# = "1.0000e+0"
+
+# === Addition ===
+
+_to_string = to_string
+
+# NaN propagation: NaN + x = x + NaN = NaN.
+add (nan f32) _one_f32
+# = NaN
+add _one_f32  (nan f32)
+# = NaN
+add (nan f32) (nan f32)
+# = NaN
+
+# Infinities.
+add (infinity f32 false) (infinity f32 false)
+# = Infinity
+add (infinity f32 true)  (infinity f32 true)
+# = -Infinity
+add (infinity f32 false) (infinity f32 true)
+# = NaN
+add (infinity f32 true)  (infinity f32 false)
+# = NaN
+add (infinity f32 false) _one_f32
+# = Infinity
+add _one_f32             (infinity f32 false)
+# = Infinity
+add (infinity f32 true)  _one_f32
+# = -Infinity
+
+# Signed zeros: same-sign keeps sign; opposite-sign yields +0.
+add (zero f32 false) (zero f32 false)
+# = 0.000000e+0
+add (zero f32 true)  (zero f32 true)
+# = 0.000000e+0
+add (zero f32 false) (zero f32 true)
+# = 0.000000e+0
+add (zero f32 true)  (zero f32 false)
+# = 0.000000e+0
+
+# Identity: x + 0 = x with x's sign preserved.
+add _one_f32         (zero f32 false)
+# = 1.000000e+0
+add _one_f32         (zero f32 true)
+# = 1.000000e+0
+add (zero f32 false) _neg_one_f32
+# = -1.000000e+0
+add _neg_one_f32     (zero f32 true)
+# = -1.000000e+0
+
+# Same-sign normal addition.
+add _one_f32  _one_f32
+# = 2.000000e+0
+add _one_f32  _two_f32
+# = 3.000000e+0
+add _half_f32 _half_f32
+# = 1.000000e+0
+add _two_f32  _half_f32
+# = 2.500000e+0
+
+# Exact cancellation: x + (-x) = +0.
+add _one_f32             _neg_one_f32
+# = 0.000000e+0
+add _neg_one_f32         _one_f32
+# = 0.000000e+0
+add _max_finite_f32      (negate _max_finite_f32)
+# = 0.000000e+0
+add _min_subnormal_f32   (negate _min_subnormal_f32)
+# = 0.000000e+0
+
+# Opposite-sign subtraction.
+add _two_f32  _neg_one_f32
+# = 1.000000e+0
+add _one_f32  (negate _two_f32)
+# = -1.000000e+0
+add _one_f32  (negate _half_f32)
+# = 5.000000e-1
+
+# Subnormals: spans the subnormal/normal boundary (f16 to keep decimal exponent small).
+add (create f16 false 0 1)    (create f16 false 0 1)
+# = 1.192093e-7
+add (create f16 false 0 1023) (create f16 false 0 1)
+# = 6.103516e-5
+add (create f16 false 1 0)    (negate (create f16 false 0 1))
+# = 6.097555e-5
+
+# Overflow to signed infinity.
+add _max_finite_f32           _max_finite_f32
+# = Infinity
+add (negate _max_finite_f32)  (negate _max_finite_f32)
+# = -Infinity
+
+# Subtraction (defined as a + (-b)).
+sub _two_f32             _one_f32
+# = 1.000000e+0
+sub _one_f32             _one_f32
+# = 0.000000e+0
+sub _one_f32             _two_f32
+# = -1.000000e+0
+sub _one_f32             (zero f32 false)
+# = 1.000000e+0
+sub (zero f32 false)     _one_f32
+# = -1.000000e+0
+sub _one_f32             (nan f32)
+# = NaN
+sub (infinity f32 false) (infinity f32 false)
+# = NaN
+
+# Magnitude sanity via decimal scientific output.
+_to_string = String.to_source
+to_string_scientific 6 (add _one_f32             _one_f32)
+# = "2.000000e+0"
+to_string_scientific 6 (add _half_f32            _half_f32)
+# = "1.000000e+0"
+to_string_scientific 6 (add _two_f32             _half_f32)
+# = "2.500000e+0"
+to_string_scientific 6 (add _max_finite_f32      _max_finite_f32)
+# = "Infinity"
+to_string_scientific 4 (add (create f16 false 0 1)    (create f16 false 0 1))
+# = "1.1921e-7"
+to_string_scientific 4 (add (create f16 false 0 1023) (create f16 false 0 1))
+# = "6.1035e-5"
+
+# Other formats.
+to_string_scientific 4 (add (of_nat f16 1) (of_nat f16 1))
+# = "2.0000e+0"
+to_string_scientific 4 (add (of_nat f16 1) (create f16 false 14 0))
+# = "1.5000e+0"
+to_string_scientific 4 (add (of_nat f64 1) (of_nat f64 1))
+# = "2.0000e+0"
+
+# === Conversion ===
+
+_to_string = to_string
+of_nat f32 0
+# = 0.000000e+0
+of_nat f32 1
+# = 1.000000e+0
+of_nat f32 2
+# = 2.000000e+0
+of_nat f32 12
+# = 1.200000e+1
+of_nat f16 1
+# = 1.000000e+0
+of_nat f64 1
+# = 1.000000e+0
+
+# Scientific rendering of of_nat outputs (sanity check).
+_to_string = String.to_source
+to_string_scientific 4 (of_nat f32 1)
+# = "1.0000e+0"
+to_string_scientific 4 (of_nat f32 2)
+# = "2.0000e+0"
+to_string_scientific 4 (of_nat f32 12)
+# = "1.2000e+1"
+to_string_scientific 6 (of_nat f32 1000000)
+# = "1.000000e+6"
+
+# floor / ceil / round on integers, halves, and out-of-range values.
+_to_string = Nat.to_source
+floor (zero     f32 false)
+# = 0
+floor _one_f32
+# = 1
+floor _two_f32
+# = 2
+floor _half_f32
+# = 0
+floor (of_nat   f32 12)
+# = 12
+floor (add (of_nat f32 12) _half_f32)
+# = 12
+floor _neg_one_f32
+# = 0
+floor (nan      f32)
+# = 0
+floor (infinity f32 false)
+# = 0
+
+ceil (zero f32 false)
+# = 0
+ceil _one_f32
+# = 1
+ceil _half_f32
+# = 1
+ceil (of_nat f32 12)
+# = 12
+ceil (add (of_nat f32 12) _half_f32)
+# = 13
+
+round (zero f32 false)
+# = 0
+round _one_f32
+# = 1
+round _half_f32
+# = 1
+round (add (of_nat f32 12) _half_f32)
+# = 13
+round (sub (of_nat f32 13) _half_f32)
+# = 13
+
+# of_nat round-trips through floor for representable integers.
+floor (of_nat f32 1000000)
+# = 1000000
+floor (of_nat f64 1000000000)
+# = 1000000000
+
+# === Multiplication ===
+
+_to_string = to_string
+
+# NaN and infinity propagation.
+mul (nan f32)             _one_f32
+# = NaN
+mul _one_f32              (nan f32)
+# = NaN
+mul (infinity f32 false)  (zero f32 false)
+# = NaN
+mul (zero f32 false)      (infinity f32 false)
+# = NaN
+mul (infinity f32 false)  (infinity f32 false)
+# = Infinity
+mul (infinity f32 false)  (infinity f32 true)
+# = -Infinity
+mul (infinity f32 false)  _one_f32
+# = Infinity
+mul _neg_one_f32          (infinity f32 false)
+# = -Infinity
+
+# Signed zero.
+mul (zero f32 false) (zero f32 false)
+# = 0.000000e+0
+mul (zero f32 true)  (zero f32 true)
+# = 0.000000e+0
+mul (zero f32 false) (zero f32 true)
+# = 0.000000e+0
+mul _one_f32         (zero f32 false)
+# = 0.000000e+0
+mul _neg_one_f32     (zero f32 false)
+# = 0.000000e+0
+
+# Identity / negation / basic finite cases.
+mul _one_f32     _one_f32
+# = 1.000000e+0
+mul _one_f32     _two_f32
+# = 2.000000e+0
+mul _two_f32     _two_f32
+# = 4.000000e+0
+mul _half_f32    _two_f32
+# = 1.000000e+0
+mul _half_f32    _half_f32
+# = 2.500000e-1
+mul _neg_one_f32 _two_f32
+# = -2.000000e+0
+
+# Magnitude sanity via decimal rendering.
+_to_string = String.to_source
+to_string (mul _two_f32           (of_nat f32 3))     # 6
+# = "6.000000e+0"
+to_string (mul (of_nat f32 12)    _half_f32)          # 6
+# = "6.000000e+0"
+to_string (mul _max_finite_f32    _two_f32)           # overflow -> infinity
+# = "Infinity"
+to_string (mul _min_subnormal_f32 _half_f32)          # underflow -> 0
+# = "0.000000e+0"
+
+# === Division ===
+
+# NaN propagation.
+_to_string = to_string
+div (nan f32) _one_f32
+# = NaN
+div _one_f32  (nan f32)
+# = NaN
+
+# Infinity rules.
+div (infinity f32 false) _two_f32                # +inf
+# = Infinity
+div _one_f32             (infinity f32 false)    # +0
+# = 0.000000e+0
+div (infinity f32 false) (infinity f32 false)    # NaN
+# = NaN
+div _one_f32             (zero f32 false)        # +inf
+# = Infinity
+div _neg_one_f32         (zero f32 false)        # -inf
+# = -Infinity
+div (zero f32 false)     (zero f32 false)        # NaN
+# = NaN
+div (zero f32 false)     _one_f32                # +0
+# = 0.000000e+0
+
+# Finite division.
+div _two_f32         _one_f32
+# = 2.000000e+0
+div (of_nat f32 6)   _two_f32
+# = 3.000000e+0
+div _one_f32         _two_f32
+# = 5.000000e-1
+div _one_f32         (of_nat f32 4)
+# = 2.500000e-1
+div _neg_one_f32     _two_f32
+# = -5.000000e-1
+
+_to_string = String.to_source
+to_string (div (of_nat f32 1)   (of_nat f32 3))   # 1/3
+# = "3.333333e-1"
+to_string (div (of_nat f32 22)  (of_nat f32 7))   # ~pi
+# = "3.142857e+0"
+to_string (div _max_finite_f32  _half_f32)        # overflow -> infinity
+# = "Infinity"
+
+# === Ordering ===
+
+_to_string = Bool.to_source
+
+is_lt _one_f32                  _two_f32
+# = true
+is_lt _two_f32                  _one_f32
+# = false
+is_lt _one_f32                  _one_f32
+# = false
+is_lt _neg_one_f32              _one_f32
+# = true
+is_lt _one_f32                  _neg_one_f32
+# = false
+is_lt (zero f32 false)          (zero f32 true)
+# = false
+is_lt (zero f32 true)           (zero f32 false)
+# = false
+is_lt (negate _max_finite_f32)  _max_finite_f32
+# = true
+is_lt (nan f32)                 _one_f32
+# = false
+is_lt _one_f32                  (nan f32)
+# = false
+is_lt (nan f32)                 (nan f32)
+# = false
+
+is_lte _one_f32  _one_f32
+# = true
+is_lte _one_f32  _two_f32
+# = true
+is_lte _two_f32  _one_f32
+# = false
+is_lte (nan f32) _one_f32
+# = false
+
+is_gt  _two_f32 _one_f32
+# = true
+is_gte _one_f32 _one_f32
+# = true
+
+# gt_zero: only for strictly positive finite values.
+gt_zero _one_f32
+# = true
+gt_zero _neg_one_f32
+# = false
+gt_zero (zero f32 false)
+# = false
+gt_zero (zero f32 true)
+# = false
+gt_zero _min_subnormal_f32
+# = true
+gt_zero (infinity f32 false)
+# = false
+gt_zero (nan f32)
+# = false
+
+# === Integer power ===
+
+_to_string = to_string
+pow_int _two_f32      0
+# = 1.000000e+0
+pow_int _two_f32      1
+# = 2.000000e+0
+pow_int _two_f32      4
+# = 1.600000e+1
+pow_int _half_f32     3
+# = 1.250000e-1
+pow_int _neg_one_f32  2
+# = 1.000000e+0
+pow_int _neg_one_f32  3
+# = -1.000000e+0
+pow_int (zero f32 false) 5
+# = 0.000000e+0
+
+# === Transcendentals ===
+# Finite expected values are JavaScript's at f32 — Math.fround of Math.exp or
+# Math.log, printed with toExponential(4) — so each can be checked in a JS
+# console.
+_to_string = to_string_scientific 4
+
+# exp: identities, integer points, signed zero/inf passthrough.
+exp (zero f32 false)            # 1
+# = 1.0000e+0
+exp (zero f32 true)             # 1
+# = 1.0000e+0
+exp _one_f32                    # ~e
+# = 2.7183e+0
+exp _two_f32                    # ~e^2
+# = 7.3891e+0
+exp _neg_one_f32                # ~1/e
+# = 3.6788e-1
+exp (infinity f32 false)        # +inf
+# = Infinity
+exp (infinity f32 true)         # +0
+# = 0.0000e+0
+exp (nan f32)                   # NaN
+# = NaN
+
+# log: identities, infinity passthrough, negative -> NaN.
+log _one_f32                    # 0
+# = 0.0000e+0
+log _two_f32                    # ~ln(2)
+# = 6.9315e-1
+log _half_f32                   # ~-ln(2)
+# = -6.9315e-1
+log (of_nat f32 10)             # ~ln(10)
+# = 2.3026e+0
+log (zero f32 false)            # -inf
+# = -Infinity
+log (zero f32 true)             # -inf
+# = NaN
+log (infinity f32 false)        # +inf
+# = Infinity
+log _neg_one_f32                # NaN
+# = NaN
+log (nan f32)                   # NaN
+# = NaN
+
+# log . exp round-trips on values where range reduction is straightforward.
+log (exp _one_f32)              # ~1
+# = 1.0000e+0
+log (exp _two_f32)              # ~2
+# = 2.0000e+0
+log (exp _neg_one_f32)          # ~-1
+# = -1.0000e+0
+
