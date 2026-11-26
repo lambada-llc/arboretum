@@ -451,10 +451,12 @@ _atanh_series = \fmt \z
       (Nat.pred k)
   ) state) (Pair.create (Zero fmt false) 7))
 
+# log of either zero is -inf, as IEEE 754 has it: -0 is a zero, not a negative
+# number, so it does not take the NaN that a negative finite value does.
 log = \x
   let (fmt x) $ \fmt0
   x
-    (\_ \s Bool.match (\fmt negate (Inf fmt false)) Nan s fmt0)
+    (\_ \_ negate (Inf fmt0 false))
     (\_ \s Bool.match (\fmt Inf fmt false) Nan s fmt0)
     (\_ Nan fmt0)
     (\_ \s \e_nat \m_nat
@@ -1190,7 +1192,7 @@ log (of_nat f32 10)             # ~ln(10)
 log (zero f32 false)            # -inf
 # = -Infinity
 log (zero f32 true)             # -inf
-# = NaN
+# = -Infinity
 log (infinity f32 false)        # +inf
 # = Infinity
 log _neg_one_f32                # NaN
