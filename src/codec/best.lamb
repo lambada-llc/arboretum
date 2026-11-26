@@ -21,7 +21,7 @@ shrink_best = \t Codec.smaller
 # would be a cycle.
 _to_string = \l List.join " → " $ List.map Nat.to_string l
 [size Lambada.parse_expr; size (shrink_best Lambada.parse_expr)]
-# = 491776 → 5161
+# = 491776 → 4970
 # Below what either encoding costs to carry, the tree comes back as it was.
 [size Bool.not; size (shrink_best Bool.not)]
 # = 8 → 8

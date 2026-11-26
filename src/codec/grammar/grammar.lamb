@@ -28,15 +28,22 @@
 # including those it gets through the contexts used there, and keys whose
 # scopes never nest can be the same key.
 
-decode = (\upd (\e \p (\p \e e p e) p e)
+# Reading code c against the bindings e is [e c e]: the trie is handed itself
+# again, so that what is found there can read on. [triage △ △ e (△ x y)] is
+# e x y, and written so it compiles to 11 nodes, where an [env c env] is an
+# abstraction over both each time: 925 nodes for the decoder, against 1,116.
+_read = \c \e triage △ △ e (△ c e)
+# The insertion a binding needs is what reading the leaf twice gives.
+_inserter = \e triage △ △ e (△ △ △)
+decode = (\upd (\e \p _read p e)
     (△ (△ (△ (△ upd △) (\_ \_ △))
-          (△ (△ △ (\c \env △ (env c env)))
+          (△ (△ △ (\c \env △ (_read c env)))
              (△ (△ △
-                   (△ (△ △ (△ (△ △ △) (\p \body \b \env (\e2 e2 b e2) (env △ △ (△ (△ p △))
-                        (\_ \_ (\x \env2 env2 (△ (△ (△ (△ △ x)) body)) env2)) env))))
-                      (\k \v \b \env env b ((\val env △ △ (△ k) (\l △ (triage △ △ (\_ △ (\_ val)) l)) env) (env v env)))))
+                   (△ (△ △ (△ (△ △ △) (\p \body \b \env _read b (_inserter env (△ (△ p △))
+                        (\_ \_ (\x _read (△ (△ (△ (△ △ x)) body)))) env))))
+                      (\k \v \b \env env b ((\val _inserter env (△ k) (\l △ (triage △ △ (\_ △ (\_ val)) l)) env) (_read v env)))))
                 △)))
-       (\a \b \env △ (env a env) (env b env))))
+       (\a \b \env △ (_read a env) (_read b env))))
   (fix $ \u \key \h (\c △ (△ (c (△ △ △) △) △) c) (triage (\h h) (\k \h (\g triage △ △ (\v \s △ (△ v (g s)))) (u k h)) (\a \b \h (\g \y \f △ y (g f)) (u a (\l △ (triage △ △ (\v △ (u b h v)) l)))) key h))
 
 # ── Encoding ────────────────────────────────────────────────────────────────
@@ -519,7 +526,7 @@ List.all (\t equal (decode (encode t)) t) [△; △ △; △ △ △; △ (△ �
 # once.
 _to_string = Nat.to_source
 size decode
-# = 1116
+# = 925
 _to_string = \l List.join " → " $ List.map Nat.to_string l
 _sizes = \t let (encode t) $ \c Bool.match [] [Codec.size t; Codec.size c; Codec.size (Codec.shrink codec t)] (equal (decode c) t)
 _sizes Bool.not
@@ -527,26 +534,26 @@ _sizes Bool.not
 _sizes List.map
 # = 130 → 153 → 130
 _sizes Nat.to_source
-# = 4502 → 2257 → 3385
+# = 4502 → 2257 → 3194
 _sizes Lambada.prelude
-# = 9813 → 1783 → 2911
+# = 9813 → 1783 → 2720
 _sizes Image.Png.crc_table
-# = 15153 → 5575 → 6703
+# = 15153 → 5575 → 6512
 _sizes Pico.Matrix.Selfie.portrait
-# = 50835 → 17836 → 18964
+# = 50835 → 17836 → 18773
 _sizes Lambada.parse_expr
-# = 491776 → 4033 → 5161
+# = 491776 → 4033 → 4970
 _sizes Lambada.compile
-# = 240506188491 → 151335 → 152463
+# = 240506188491 → 151335 → 152272
 
 # What it costs to decode, on an evaluator that remembers nothing.
 _to_string = id
 Bench.run [decode; encode List.map]
-# =  oh |  0a  0b    1    2 3a 3b 3c |  alc  red
-#   244 | 744 897 1434 1515 46 69 90 | 1641 3154
+# = oh |  0a  0b   1   2 3a 3b  3c |  alc  red
+#    9 | 401 669 748 829 46 69 205 | 1070 1897
 Bench.run [decode; encode Nat.to_source]
 # =   oh |    0a    0b     1     2   3a   3b   3c |   alc   red
-#   4713 | 15488 21935 32087 34267 1305 1399 2280 | 37423 71338
+#   1117 | 10985 18978 23076 25256 1305 1399 3831 | 29963 54867
 Bench.run [decode; encode Lambada.parse_expr]
 # =   oh |    0a    0b     1     2   3a   3b   3c |   alc    red
-#   8711 | 27884 41270 58817 63147 2721 2802 4397 | 69154 131884
+#   2484 | 21076 36814 45187 49517 2721 2802 6763 | 57890 106990
