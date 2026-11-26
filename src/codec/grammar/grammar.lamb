@@ -468,6 +468,31 @@ _weights = \tot \col \n \order let (List.foldl (\m \x _upd (Pair.fst (_get x col
   List.map (\i _get i w) (_ids (_isucc △) n)
 _ncol = \col List.foldl (\n \x Nat.max n (Nat.succ (Pair.snd (_get x col)))) 0
 _table = \keys Pair.snd (List.foldl (\acc \k Pair.let acc $ \c \m △ (_isucc c) (_put c k m)) (△ (_isucc △) △) keys)
+# Keys given out jointly: the colours of both kinds, heaviest first, each take the
+# smallest tree left for it, so that light contexts do not crowd out the
+# prefixes a heavy node's key would start with. No prefix may be what a key
+# starts with: taking one rules trees out of the other list for good, so each
+# list is walked once. △ ok (△ ch ks), ok false if a list ran out.
+_joint = \pcs \kcs \wc \wn \skip
+  let (\ws List.zip_with △ (_ids (_isucc △) (List.length ws)) ws) $ \byid
+  let (\x \l List.any (equal x) l) $ \in
+  # Neither a key nor a prefix, for a list that ran out.
+  let (△ (△ _t2)) $ \spent
+  let (List.sort (\a \b Nat.is_lte (Pair.snd b) (Pair.snd a))
+      (List.concat (List.map (\c △ (△ _t0 (Pair.fst c)) (Pair.snd c)) (byid wc))
+                   (List.map (\c △ (△ _t1 (Pair.fst c)) (Pair.snd c)) (List.drop 1 (byid wn))))) $ \order
+  Pair.let (List.foldl (\st \c Pair.let st $ \ps \r Pair.let r $ \ks \r Pair.let r $ \cg \r Pair.let r $ \vg \m
+      Pair.let (Pair.fst c) $ \d \_ triage
+        (\ps \ks \cg \vg \m let (List.drop_while (\p in p vg) ps) $ \ps let (List.head_or spent ps) $ \p
+          △ (List.drop 1 ps) (△ ks (△ (△ p cg) (△ vg (_put (Pair.fst c) p m)))))
+        (\_ \ps \ks \cg \vg \m let (List.drop_while (\k triage false _ (\a \_ in a cg) k) ks) $ \ks let (List.head_or spent ks) $ \k
+          △ ps (△ (List.drop 1 ks) (△ cg (△ (triage vg _ (\a \_ △ a vg) k) (_put (Pair.fst c) k m)))))
+        _
+        d ps ks cg vg m)
+    (△ (List.drop skip pcs) (△ kcs (△ [] (△ [] △)))) order) $ \_ \r Pair.let r $ \_ \r Pair.let r $ \_ \r Pair.let r $ \_ \m
+  let (List.map (\c _get (△ _t0 (Pair.fst c)) m) (byid wc)) $ \ch
+  let (△ △ (List.map (\c _get (△ _t1 (Pair.fst c)) m) (List.drop 1 (byid wn)))) $ \ks
+  △ (Bool.not (in spent (List.concat ch ks))) (△ ch ks)
 _dot = \w \sz \base List.foldl Nat.add 0 (List.zip_with (\a \k Nat.mul a (Nat.add base (size k))) w sz)
 
 _emit = \key fix $ \self triage
@@ -512,11 +537,16 @@ encode = \t Pair.let (_chains t) $ \top \body
   let (_ncol ncol defs) $ \nn
   let (_weights tot ccol nc ctxs) $ \wc
   let (_weights tot ncol nn defs) $ \wn
-  let (_trees _pre (Nat.add nc 3)) $ \pcs
-  # The prefixes start at one of the first four, whichever makes keys cheapest.
-  let (List.map (\off let (List.take nc (List.drop off pcs)) $ \ch
-      let (_trees (\k Bool.and (_key k) (triage true (\_ true) (\a \_ Bool.not (List.any (equal a) ch)) k)) nn) $ \ks
-      △ (Nat.add (_dot wc ch 2) (_dot wn ks 1)) (△ ch ks)) [0; 1; 2; 3]) $ \cands
+  let (Nat.add 30 (Nat.mul 3 (Nat.add nc nn))) $ \many
+  let (_trees _pre many) $ \pcs
+  let (List.drop 1 (_trees _key many)) $ \kcs
+  let (\ch \ks △ (Nat.add (_dot wc ch 2) (_dot wn ks 1)) (△ ch ks)) $ \cand
+  # The prefixes start at one of the first four, or are given out jointly with
+  # the keys, leaving out the first few: whichever makes keys cheapest.
+  let (List.concat
+      (List.map (\off let (List.take nc (List.drop off pcs)) $ \ch
+        cand ch (_trees (\k Bool.and (_key k) (triage true (\_ true) (\a \_ Bool.not (List.any (equal a) ch)) k)) nn)) [0; 1; 2; 3])
+      (List.filter_map (\skip Pair.let (_joint pcs kcs wc wn skip) $ \ok \r Bool.match △ (△ (Pair.let r cand)) ok) [0; 1; 2; 3; 4])) $ \cands
   Pair.let (Pair.snd (List.foldl (\b \c Bool.match b c (Nat.is_lt (Pair.fst c) (Pair.fst b))) (List.head_or △ cands) cands)) $ \ch \ks
   let (_table ch) $ \ckey
   let (_table ks) $ \nkey
@@ -547,13 +577,13 @@ _sizes Nat.to_source
 _sizes Lambada.prelude
 # = 9813 → 1694 → 2659
 _sizes Image.Png.crc_table
-# = 15153 → 5732 → 6697
+# = 15153 → 5708 → 6673
 _sizes Pico.Matrix.Selfie.portrait
-# = 50835 → 16848 → 17813
+# = 50835 → 16680 → 17645
 _sizes Lambada.parse_expr
-# = 491776 → 3900 → 4865
+# = 491776 → 3895 → 4860
 _sizes Lambada.compile
-# = 240506188491 → 153762 → 154727
+# = 240506188491 → 153134 → 154099
 
 # What it costs to decode, on an evaluator that remembers nothing.
 _to_string = id
@@ -565,4 +595,4 @@ Bench.run [decode; encode Nat.to_source]
 #   1117 | 11471 19168 23856 26036 1533 1768 3955 | 30639 57148
 Bench.run [decode; encode Lambada.parse_expr]
 # =   oh |    0a    0b     1     2   3a   3b   3c |   alc    red
-#   2484 | 21993 37229 46561 50891 2988 3373 6988 | 59222 110801
+#   2474 | 21959 37177 46489 50810 2976 3386 6980 | 59136 110641
