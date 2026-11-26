@@ -65,17 +65,26 @@ meant to be compressed binds what its inner code uses close to it.
 nothing new from the data or the decoder. Two things stop it, and both come of
 `g fix` having to give the *tree* back rather than a tree that acts as it.
 
-A β-redex under a λ that is never applied stays in the tree, and a program is a
-function, so the binders could only chain above its own λs — never near the
-uses they serve, which is what the section above asks a program to do for
-itself. And the compiler chooses by closedness, writing `R Y X` where `Y` is
-closed and `C X Y` where `Y` has variables of its own (the rules above
-`_last`): a bound occurrence has one, so taking it turns an `R` into a `C` and
-the tree is not the tree.
+A redex the η rules cannot reach stays in the tree under a λ that is never
+applied: `\x (\z △ z x) (△ △)` is fifteen nodes where its reduct
+`\x △ (△ △) x` is three. A program is a function, so the binders could
+only chain above its own λs, which is where a redex does reduce — never near
+the uses they serve, which is what the section above asks a program to do for
+itself.
 
-What is left is below the price of a reference. That is four nodes, and the
-repeated parts of a payload like the selfie's are mostly two to eight; bound in
-a chain at the top, they measured 7,448 nodes of data against the 7,318 they
-take written out. Sharing below that price is
-[`Codec.Sharing`](../sharing/sharing.lamb)'s, and it loses on this payload too:
-its encoding of the same program is 13,663 nodes.
+And the compiler chooses by closedness, writing `R Y X` where `Y` is closed and
+`C X Y` where `Y` has variables of its own (the rules above `_last`). A bound
+occurrence has one, so taking it in `Y`'s place turns an `R` into a `C`: the
+same function, another tree, wherever `X` is not closed too. Both
+`\w \x (△ w x) (△ △)` and the same with that constant arriving through a
+binder are thirty-nine nodes, and neither is the other. Where `X` is closed the
+two coincide, so some occurrences can be taken — not many.
+
+And not enough, because what is left is below the price of a reference, which
+is four nodes at best. Of the repetition in
+[the selfie's](../../pico/matrix/selfie/selfie.lamb) payload — 7,318 nodes of
+data over 1,764 distinct subtrees — 83%, summed as (uses − 1) × size, is in
+subtrees of eight nodes or fewer; bound in a chain at the top they measured
+7,448 nodes against that 7,318. Sharing below that price is
+[`Codec.Sharing`](../sharing/sharing.lamb)'s, and handed this payload it comes
+back with more than it was given: 13,663 nodes for `encode`'s 9,336.
