@@ -38,7 +38,7 @@
 # Reading code c against the bindings e is [e c e]: the trie is handed itself
 # again, so that what is found there can read on. [triage △ △ e (△ x y)] is
 # e x y, and written so it compiles to 11 nodes, where an [env c env] is an
-# abstraction over both each time: 925 nodes for the decoder, against 1,116.
+# abstraction over both each time, which made the decoder 191 nodes larger.
 _read = \c \e triage △ △ e (△ c e)
 # The insertion a binding needs is what reading the leaf twice gives.
 _inserter = \e triage △ △ e (△ △ △)
@@ -50,7 +50,7 @@ decode = (\upd (\e \p _read p e)
              (△ (△ △
                    (△ (△ △ (△ (△ △ △) (\p \body \b \env _read b (_inserter env (△ (△ p △))
                         (\_ \_ (\x _read (△ (△ (△ (△ △ x)) body)))) env))))
-                      (\k \v \b \env env b ((\val _inserter env (△ k) (\l △ (triage △ △ (\_ △ (\_ val)) l)) env) (_read v env)))))
+                      (\k \v \b \env env b (_inserter env (△ k) ((\val \l △ (triage △ △ (\_ △ (\_ val)) l)) (_read v env)) env))))
                 △)))
        (\a \b \env △ (_read (_swap a) env) (_read b env))))
   (fix $ \u \key \h (\c △ (△ (c (△ △ △) △) △) c) (triage (\h h) (\k \h (\g triage △ △ (\v \s △ (△ v (g s)))) (u k h)) (\a \b \h (\g \y \f △ y (g f)) (u a (\l △ (triage △ △ (\v △ (u b h v)) l)))) key h))
@@ -565,7 +565,7 @@ List.all (\t equal (decode (encode t)) t) [△; △ △; △ △ △; △ (△ �
 # once.
 _to_string = Nat.to_source
 size decode
-# = 953
+# = 905
 _to_string = \l List.join " → " $ List.map Nat.to_string l
 _sizes = \t let (encode t) $ \c Bool.match [] [Codec.size t; Codec.size c; Codec.size (Codec.shrink codec t)] (equal (decode c) t)
 _sizes Bool.not
@@ -573,26 +573,26 @@ _sizes Bool.not
 _sizes List.map
 # = 130 → 154 → 130
 _sizes Nat.to_source
-# = 4502 → 2248 → 3213
+# = 4502 → 2248 → 3165
 _sizes Lambada.prelude
-# = 9813 → 1694 → 2659
+# = 9813 → 1694 → 2611
 _sizes Image.Png.crc_table
-# = 15153 → 5708 → 6673
+# = 15153 → 5708 → 6625
 _sizes Pico.Matrix.Selfie.portrait
-# = 50835 → 16680 → 17645
+# = 50835 → 16680 → 17597
 _sizes Lambada.parse_expr
-# = 491776 → 3895 → 4860
+# = 491776 → 3895 → 4812
 _sizes Lambada.compile
-# = 240506188491 → 153134 → 154099
+# = 240506188491 → 153134 → 154051
 
 # What it costs to decode, on an evaluator that remembers nothing.
 _to_string = id
 Bench.run [decode; encode List.map]
 # = oh |  0a  0b   1   2 3a  3b  3c |  alc  red
-#    9 | 438 670 806 887 67 106 206 | 1108 2072
+#    9 | 432 664 794 875 67 106 206 | 1096 2048
 Bench.run [decode; encode Nat.to_source]
 # =   oh |    0a    0b     1     2   3a   3b   3c |   alc   red
-#   1117 | 11471 19168 23856 26036 1533 1768 3955 | 30639 57148
+#   1117 | 10991 18688 22896 25076 1533 1768 3955 | 29679 55228
 Bench.run [decode; encode Lambada.parse_expr]
 # =   oh |    0a    0b     1     2   3a   3b   3c |   alc    red
-#   2474 | 21959 37177 46489 50810 2976 3386 6980 | 59136 110641
+#   2474 | 21005 36223 44581 48902 2976 3386 6980 | 57228 106825
