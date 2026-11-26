@@ -14,6 +14,13 @@
 # A context is a tree with one hole, written as its code c, in which the hole
 # is △ △: the tree bound at the leaf, which a use binds to its filling.
 #
+# In a fork's left slot, and only there, △ a b and △ (△ a b) trade places
+# ([_swap]): a fork is written △ (△ a b), and a code △ (△ a b) of the table
+# loses its leading △. Over trees of all kinds, about one left child in eight
+# is a fork written out and one in four a code that loses a node, which pays
+# for the 28 nodes [_swap] adds to the decoder, and costs about 5% more
+# reductions in reading.
+#
 # The bindings are a trie whose nodes are triage forks, △ (△ v s) f, so that
 # applying one to a code is looking the code up, and what is found is applied
 # to the trie in turn. Reading a code is just that: the leaf, the stem, the
@@ -35,6 +42,8 @@
 _read = \c \e triage △ △ e (△ c e)
 # The insertion a binding needs is what reading the leaf twice gives.
 _inserter = \e triage △ △ e (△ △ △)
+# [_swap] is its own inverse: writing a left slot and reading it are one function.
+_swap = triage △ (triage (△ △) (\u △ (△ u)) △) (\x \y △ (△ x y))
 decode = (\upd (\e \p _read p e)
     (△ (△ (△ (△ upd △) (\_ \_ △))
           (△ (△ △ (\c \env △ (_read c env)))
@@ -43,7 +52,7 @@ decode = (\upd (\e \p _read p e)
                         (\_ \_ (\x _read (△ (△ (△ (△ △ x)) body)))) env))))
                       (\k \v \b \env env b ((\val _inserter env (△ k) (\l △ (triage △ △ (\_ △ (\_ val)) l)) env) (_read v env)))))
                 △)))
-       (\a \b \env △ (_read a env) (_read b env))))
+       (\a \b \env △ (_read (_swap a) env) (_read b env))))
   (fix $ \u \key \h (\c △ (△ (c (△ △ △) △) △) c) (triage (\h h) (\k \h (\g triage △ △ (\v \s △ (△ v (g s)))) (u k h)) (\a \b \h (\g \y \f △ y (g f)) (u a (\l △ (triage △ △ (\v △ (u b h v)) l)))) key h))
 
 # ── Encoding ────────────────────────────────────────────────────────────────
@@ -466,7 +475,7 @@ _emit = \key fix $ \self triage
   (\s triage (△ △) (\c △ (△ (self c))) (\y \x △ (△ (key y) (self x))) s)
   (\l \r triage
     (\r △ (key r))
-    (\a \r △ (self a) (self r))
+    (\a \r △ (_swap (self a)) (self r))
     (\y \v \r Bool.match (\v △ (△ (△ (△ (key y) v)) (self r))) (\v △ (△ (△ (△ (△ (key y) v))) (self r))) (_ctx y) (self v))
     l r)
 
@@ -526,34 +535,34 @@ List.all (\t equal (decode (encode t)) t) [△; △ △; △ △ △; △ (△ �
 # once.
 _to_string = Nat.to_source
 size decode
-# = 925
+# = 953
 _to_string = \l List.join " → " $ List.map Nat.to_string l
 _sizes = \t let (encode t) $ \c Bool.match [] [Codec.size t; Codec.size c; Codec.size (Codec.shrink codec t)] (equal (decode c) t)
 _sizes Bool.not
-# = 8 → 9 → 8
+# = 8 → 10 → 8
 _sizes List.map
-# = 130 → 153 → 130
+# = 130 → 154 → 130
 _sizes Nat.to_source
-# = 4502 → 2257 → 3194
+# = 4502 → 2248 → 3213
 _sizes Lambada.prelude
-# = 9813 → 1783 → 2720
+# = 9813 → 1694 → 2659
 _sizes Image.Png.crc_table
-# = 15153 → 5575 → 6512
+# = 15153 → 5732 → 6697
 _sizes Pico.Matrix.Selfie.portrait
-# = 50835 → 17836 → 18773
+# = 50835 → 16848 → 17813
 _sizes Lambada.parse_expr
-# = 491776 → 4033 → 4970
+# = 491776 → 3900 → 4865
 _sizes Lambada.compile
-# = 240506188491 → 151335 → 152272
+# = 240506188491 → 153762 → 154727
 
 # What it costs to decode, on an evaluator that remembers nothing.
 _to_string = id
 Bench.run [decode; encode List.map]
-# = oh |  0a  0b   1   2 3a 3b  3c |  alc  red
-#    9 | 401 669 748 829 46 69 205 | 1070 1897
+# = oh |  0a  0b   1   2 3a  3b  3c |  alc  red
+#    9 | 438 670 806 887 67 106 206 | 1108 2072
 Bench.run [decode; encode Nat.to_source]
 # =   oh |    0a    0b     1     2   3a   3b   3c |   alc   red
-#   1117 | 10985 18978 23076 25256 1305 1399 3831 | 29963 54867
+#   1117 | 11471 19168 23856 26036 1533 1768 3955 | 30639 57148
 Bench.run [decode; encode Lambada.parse_expr]
 # =   oh |    0a    0b     1     2   3a   3b   3c |   alc    red
-#   2484 | 21076 36814 45187 49517 2721 2802 6763 | 57890 106990
+#   2484 | 21993 37229 46561 50891 2988 3373 6988 | 59222 110801
