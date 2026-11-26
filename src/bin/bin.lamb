@@ -1,0 +1,138 @@
+# Fixed-width binary arithmetic.
+# A Bin is a List Bool — LSB-first, fixed length.
+# Same encoding as Nat (which is an LSB-first bit list), just without
+# canonicalization: high-order zero bits are kept so the width is fixed
+# by construction. Arithmetic walks the bits directly and discards the
+# final carry, which is exactly mod-2^width wrapping.
+
+# === Constructors ===
+zero   = \n List.repeat n false
+max    = \n List.repeat n true
+of_nat = \n \k List.take n $ List.concat k $ List.repeat n false
+
+# === Accessors / interop ===
+width     = List.length
+to_nat    = Nat.canonicalize
+# MSB-first bool list (reverse of the LSB-first storage). of_msb is the
+# inverse — caller is responsible for passing a list of the desired width.
+to_msb    = List.reverse
+of_msb    = List.reverse
+# Render bits as "0"/"1" MSB-first. foldl on the LSB-first list,
+# prepending each char, naturally reverses while mapping.
+to_string = List.foldl (\acc \bit △ (Bool.match '0' '1' bit) acc) ""
+
+# === Predicates ===
+is_zero = \b Bool.not (List.foldr Bool.or  false b)
+is_max  = \b List.foldr Bool.and true b
+
+# === Bitwise ===
+not  = List.map Bool.not
+and  = List.zip_with Bool.and
+or   = List.zip_with Bool.or
+xor  = List.zip_with Bool.xor
+
+# === Shifts ===
+# LSB-first: shl prepends low-order zeros and truncates the high end;
+# shr drops low-order bits and pads zeros on the high end. Both take the
+# width back at the end, so a shift past it gives zero at the same width
+# rather than a longer list.
+shl = \k \b List.take (width b) (List.concat (List.repeat k false) b)
+shr = \k \b List.take (width b) (List.concat (List.drop k b) (List.repeat k false))
+
+# === Arithmetic (wrapping) ===
+# Full adder propagating carry along the bit list (LSB → MSB).
+# Both inputs must have the same width; the final carry-out is dropped.
+_xor3   = \a \b \c Bool.xor a (Bool.xor b c)
+_carry3 = Bool.match Bool.and Bool.or
+
+_add_c = fix $ \self \cin \a \b
+  List.match
+    []
+    (\ha \ta List.match
+      []
+      (\hb \tb △ (_xor3 ha hb cin) (self (_carry3 ha hb cin) ta tb))
+      b)
+    a
+
+add  = _add_c false
+sub  = \a \b _add_c true a (not b)
+succ = \b _add_c true  b (zero (width b))
+pred = \b _add_c false b (max  (width b))
+
+# === Tests ===
+_8 = of_nat 8
+
+_to_string = Bool.to_source
+is_zero (zero 8)
+# = true
+is_zero (_8 1)
+# = false
+is_max (max 8)
+# = true
+is_max (zero 8)
+# = false
+
+_to_string = Nat.to_source
+width (zero 8)
+# = 8
+to_nat (zero 8)
+# = 0
+to_nat (max 8)
+# = 255
+to_nat (_8 42)
+# = 42
+to_nat (succ (_8 254))
+# = 255
+to_nat (succ (max 8))
+# = 0
+to_nat (add (_8 100) (_8 200))
+# = 44
+to_nat (sub (_8 10) (_8 3))
+# = 7
+to_nat (sub (_8 3) (_8 10))
+# = 249
+to_nat (shl 2 (_8 1))
+# = 4
+to_nat (shr 2 (_8 4))
+# = 1
+to_nat (shr 1 (max 8))
+# = 127
+to_nat (pred (_8 5))
+# = 4
+to_nat (pred (zero 8))
+# = 255
+to_nat (and (_8 204) (_8 170))
+# = 136
+to_nat (or  (_8 204) (_8 170))
+# = 238
+to_nat (xor (_8 204) (_8 170))
+# = 102
+to_nat (not (_8 204))
+# = 51
+
+_to_string = to_string
+zero 8
+# = 00000000
+max 8
+# = 11111111
+_8 1
+# = 00000001
+_8 42
+# = 00101010
+_8 204
+# = 11001100
+shl 2 (_8 1)
+# = 00000100
+not (_8 204)
+# = 00110011
+succ (_8 254)
+# = 11111111
+succ (succ (_8 254))
+# = 00000000
+add (_8 100) (_8 200)
+# = 00101100
+# A shift past the width keeps the width, either way.
+shr 10 (max 8)
+# = 00000000
+shl 10 (max 8)
+# = 00000000
