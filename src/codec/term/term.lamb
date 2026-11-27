@@ -7,9 +7,9 @@
 #
 # What it finds is the λ-term the compiler made the tree from, which the
 # compiler erased and nothing at run time has. So it is not bounded by how
-# repetitive the tree is, the way [Codec.Sharing] is, and on a program written
-# with it in mind it goes well below what counting distinct subtrees could
-# reach. On a tree it cannot read back it finds nothing and falls back to K t.
+# repetitive the tree is, the way [Codec.Grammar] is, and on a program written
+# with it in mind it goes well below what that codec reaches. On a tree it
+# cannot read back it finds nothing and falls back to K t.
 # See [Codec] for what the two codecs share.
 #
 # g waits for fix because evaluation is eager (below): given an argument it did
@@ -476,4 +476,4 @@ _to_string = \l List.join " " $ List.map Nat.to_string l
 # = 130 132 130 1658 340
 # A larger program, this codec's own encoder:
 [size encode; size (encode encode); size (Codec.shrink codec encode)]
-# = 782488 537468 537546
+# = 794080 546947 547025

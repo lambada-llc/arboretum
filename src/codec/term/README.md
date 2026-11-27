@@ -86,5 +86,6 @@ is four nodes at best. Of the repetition in
 data over 1,764 distinct subtrees — 83%, summed as (uses − 1) × size, is in
 subtrees of eight nodes or fewer; bound in a chain at the top they measured
 7,448 nodes against that 7,318. Sharing below that price is
-[`Codec.Sharing`](../sharing/sharing.lamb)'s, and handed this payload it comes
-back with more than it was given: 13,663 nodes for `encode`'s 9,336.
+[`Codec.Grammar`](../grammar/grammar.lamb)'s, and handed this payload it comes
+back with more than it was given: 11,608 nodes, and its decoder's 905
+besides, for `encode`'s 9,336.

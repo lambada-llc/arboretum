@@ -1,10 +1,11 @@
 # Making a tree smaller, and getting it back.
 #
 # A codec is an [encode] and a [decode] over trees, held as `△ encode decode`,
-# with `decode (encode t) = t` for every tree. [Codec.Sharing] and [Codec.Term]
-# are the two here, and each exports its pair as `codec`. They find different
-# redundancy and neither wins everywhere, so which to reach for is the caller's
-# choice; their own tests carry the sizes.
+# with `decode (encode t) = t` for every tree. [Codec.Grammar], [Codec.Huffman]
+# and [Codec.Term] are the three here, and each exports its pair as `codec`.
+# They find different redundancy, or write it at a different cost, and none
+# wins everywhere, so which to reach for is the caller's choice
+# ([Codec.shrink_best] tries them all); their own tests carry the sizes.
 #
 # There are two strengths of result, and the difference is not stylistic.
 #
@@ -24,6 +25,13 @@ create = Pair.create
 encode = Pair.fst
 decode = Pair.snd
 
+# [size t]: the count [size] gives, from the children's counts rather than by
+# adding along a walk. The evaluator remembers every application, so a subtree
+# is counted once however often it occurs: the cost is the tree's DAG, where
+# [size]'s is the tree, and the trees worth shrinking are the ones whose DAG is
+# far smaller than they are.
+size = fix $ \self triage 1 (\c Nat.succ (self c)) (\l \r Nat.succ (Nat.add (self l) (self r)))
+
 # Whichever of the two is the smaller tree, a's being kept on a tie.
 smaller = \a \b Bool.match a b (Nat.is_lt (size b) (size a))
 
@@ -37,6 +45,12 @@ defer = \d \p \u (\q d q u) p
 # encoding does not pay for itself, which for a small tree it will not, the
 # decoder being most of what it costs.
 shrink = \c \t smaller t (defer (decode c) (encode c t))
+
+# [sizes c t]: what the codec c makes of t, as the sizes of t, of its code,
+# and of what [shrink] keeps; [] if the code does not decode back to t. A
+# codec's tests list it for trees of every size, one test a tree so that the
+# largest is encoded once.
+sizes = \c \t let (encode c t) $ \code Bool.match [] [size t; size code; size (shrink c t)] (equal (decode c code) t)
 
 # The identity codec keeps the laws honest without an encoding in the way: what
 # a codec and a deferral have to do is the same whether or not anything shrinks.
