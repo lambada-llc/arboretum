@@ -5,24 +5,27 @@
 # so nothing downstream has to know which codec made it, where a payload on its
 # own does not say.
 #
-# It costs both encodings, and the term codec's is mostly the check that its
+# It costs every encoding, and the term codec's is mostly the check that its
 # candidate gives the tree back, so this is for a tree whose size is worth
-# paying that once at build time.
+# paying that once at build time. The two grammar codecs share the work of
+# finding the grammar, the evaluator remembering it.
 
-shrink_best = \t Codec.smaller
-  (Codec.shrink Codec.Grammar.codec t)
-  (Codec.shrink Codec.Term.codec t)
+shrink_best = \t List.foldl (\best \c Codec.smaller best (Codec.shrink c t)) t
+  [Codec.Grammar.codec; Codec.Huffman.codec; Codec.Term.codec]
 
-# Which one wins says something about the tree. The grammar codec wins
-# wherever a tree is merely repetitive, and by a wide margin on a large one.
-# The term codec wins where a program was written with it in mind — binding
-# what its inner code uses close to it — and the selfie is the one such program
-# here; its own tests keep that figure, since depending on it from this module
-# would be a cycle.
+# Which one wins says something about the tree. The grammar codecs win
+# wherever a tree is merely repetitive, by a wide margin on a large one: the
+# Huffman one where the grammar is large enough to pay for its larger decoder,
+# Codec.Grammar below that. The term codec wins where a program was written
+# with it in mind — binding what its inner code uses close to it — and the
+# selfie is the one such program here; its own tests keep that figure, since
+# depending on it from this module would be a cycle.
 _to_string = \l List.join " → " $ List.map Nat.to_string l
 [size Lambada.parse_expr; size (shrink_best Lambada.parse_expr)]
 # = 491776 → 4812
-# Below what either encoding costs to carry, the tree comes back as it was.
+[size Lambada.syntax_to_native; size (shrink_best Lambada.syntax_to_native)]
+# = 5007181 → 21075
+# Below what any encoding costs to carry, the tree comes back as it was.
 [size Bool.not; size (shrink_best Bool.not)]
 # = 8 → 8
 
