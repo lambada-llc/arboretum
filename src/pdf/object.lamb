@@ -1,0 +1,151 @@
+# PDF objects (ISO 32000-1 §7.3): the values a PDF file is made of, written
+# as text and read back.
+#
+#   Null              null
+#   Boolean b         true  false
+#   Number i          -42 — an Int; real numbers (0.5) are not supported
+#   Name s            /Type — s is the bytes after the slash
+#   Str s             (Hi) or <4869> — a string of bytes
+#   Array xs          [1 /Two (three)]
+#   Dict kvs          << /Type /Page >> — kvs lists △ name value, in order
+#   Ref n             12 0 R — object 12; a generation is read and dropped
+#   Stream kvs data   a dictionary followed by raw bytes; only a whole file
+#                     (Pdf.document) can say where those bytes end, so
+#                     [object] never reads one
+Object \= Null | Boolean b | Number i | Name s | Str s | Array xs | Dict kvs | Ref n | Stream kvs data
+
+num = \n Number (Int.from_nat n)
+
+# ── Looking inside ───────────────────────────────────────────────────────────
+# Each is some of the payload when the object is of that kind, else none. A
+# stream answers as_dict with its dictionary, which is what /Length and
+# /Filter are looked up in.
+_no = \_ Option.none
+as_number = \o o Option.none _no Option.some _no _no _no _no _no (\_ _no)
+as_name   = \o o Option.none _no _no Option.some _no _no _no _no (\_ _no)
+as_array  = \o o Option.none _no _no _no _no Option.some _no _no (\_ _no)
+as_dict   = \o o Option.none _no _no _no _no _no Option.some _no (\kvs \_ Option.some kvs)
+as_ref    = \o o Option.none _no _no _no _no _no _no Option.some (\_ _no)
+as_data   = \o o Option.none _no _no _no _no _no _no _no (\_ Option.some)
+get = \key \o Option.bind (List.lookup key) (as_dict o)
+
+# ── Writing ──────────────────────────────────────────────────────────────────
+# Bytes are classified as §7.2.2 does: white space, delimiters, and the
+# regular characters a name or keyword is spelled with.
+is_space = \c List.any (equal c) [0; 9; 10; 12; 13; 32]
+_is_delimiter = \c List.any (equal c) "()<>[]{}/%"
+is_regular = \c Bool.not $ Bool.or (is_space c) (_is_delimiter c)
+
+# A name byte that is not plainly printable goes out as #xx, and so does #.
+_name_byte = \c Bool.match (△ '#' $ Nat.byte_to_hex c) [c]
+  (Bool.and (is_regular c) $ Bool.and (Nat.in_range '!' '~' c) $ Bool.not $ equal c '#')
+# In a literal string only the parentheses and the backslash need escaping.
+_str_byte = \c Bool.match [c] ['\'; c] (List.any (equal c) "()\\")
+
+_dict = \write \kvs List.concat_list
+  ["<<"; List.concat_map (Pair.match $ \k \v List.concat_list [" "; write (Name k); " "; write v]) kvs; " >>"]
+
+write = fix $ \self \o o
+  "null"
+  (Bool.match "false" "true")
+  Int.to_string
+  (\s △ '/' $ List.concat_map _name_byte s)
+  (\s List.concat_list ["("; List.concat_map _str_byte s; ")"])
+  (\xs List.concat_list ["["; List.join " " (List.map self xs); "]"])
+  (_dict self)
+  (\n List.concat (Nat.to_string n) " 0 R")
+  (\kvs \data List.concat_list
+    [_dict self (△ (△ "Length" $ num $ List.length data) $ List.filter (\kv Bool.not $ equal "Length" $ Pair.fst kv) kvs);
+     "\nstream\n"; data; "\nendstream"])
+
+# ── Reading ──────────────────────────────────────────────────────────────────
+# Parsers in the sense of the Parser module, over bytes. [token p] is p after
+# any white space and %-comments, which is how every piece of PDF syntax may be
+# separated from the next.
+_skip = Parser.many $ Parser.either (Parser.satisfy is_space) $
+  Parser.seq_snd (Parser.exact '%') (Parser.take_until Char.is_newline)
+token = Parser.seq_snd _skip
+keyword = \s token $ List.foldr (\c Parser.seq_snd (Parser.exact c)) (Parser.return s) s
+natural = token $ Parser.map Nat.from_string $ Parser.nonempty_take_while Char.is_digit
+
+_integer = Parser.either
+  (Parser.seq_snd (token $ Parser.exact '-') $ Parser.map (\n Int.negate $ Int.from_nat n) natural)
+  (Parser.map Int.from_nat natural)
+
+# #xx in a name is the byte xx.
+_unescape = fix $ \self List.match [] $ \c \rest Bool.match
+  (\rest △ c $ self rest)
+  (\rest △ (Nat.from_hex $ List.take 2 rest) $ self $ List.drop 2 rest)
+  (equal c '#') rest
+_name = Parser.seq_snd (token $ Parser.exact '/') $ Parser.map _unescape $ Parser.take_while is_regular
+
+# A literal string ends at the parenthesis that balances its opening one. The
+# handlers take depth, bytes so far (reversed) and the rest of the input as
+# arguments instead of closing over them: reduction is eager, and a recursive
+# call that needs nothing but [depth] unfolds, without end, as soon as [depth]
+# is known.
+_escapes = [△ 'n' 10; △ 'r' 13; △ 't' 9; △ 'b' 8; △ 'f' 12]
+_literal = fix $ \self \depth \acc List.match Parser.fail_result $ \c \rest List.lookup_or
+  (\d \a \r self d (△ c a) r)
+  c
+  [△ '(' (\d \a \r self (Nat.succ d) (△ c a) r);
+   △ ')' (\d \a Bool.match (self (Nat.pred d) $ △ c a) (Parser.return $ List.reverse a) $ Nat.is_zero d);
+   △ '\' (\d \a List.match Parser.fail_result $ \e \r self d (△ (List.lookup_or e e _escapes) a) r)]
+  depth acc rest
+# A hex string is pairs of hex digits, white space ignored, a lone last digit
+# followed by an implied 0.
+_hex = Parser.map
+  (\s List.map (\d Nat.from_hex $ List.take 2 $ List.concat d "0") $ List.chunk 2 $ List.filter (compose Bool.not is_space) s)
+  (Parser.take_until $ equal '>')
+
+object = fix $ \self Parser.any_of
+  [Parser.map Dict $ Parser.seq_snd (keyword "<<") $
+     Parser.seq_fst (Parser.many $ Parser.seq_pair _name self) (keyword ">>");
+   Parser.map Str $ Parser.seq_snd (keyword "<") $ Parser.seq_fst _hex (Parser.exact '>');
+   Parser.map Str $ Parser.seq_snd (keyword "(") (_literal 0 []);
+   Parser.map Array $ Parser.seq_snd (keyword "[") $ Parser.seq_fst (Parser.many self) (keyword "]");
+   Parser.map Name _name;
+   Parser.map Ref $ Parser.seq_fst natural $ Parser.seq_snd natural (keyword "R");
+   Parser.map Number _integer;
+   Parser.map (const $ Boolean true) (keyword "true");
+   Parser.map (const $ Boolean false) (keyword "false");
+   Parser.map (const Null) (keyword "null")]
+
+# The object [s] spells, and nothing else.
+parse = Parser.value_if_consumed $ Parser.seq_fst object _skip
+
+# ── Tests ────────────────────────────────────────────────────────────────────
+_to_string = write
+Dict [△ "Type" (Name "Page"); △ "MediaBox" $ Array $ List.map num [0; 0; 612; 792]]
+# = << /Type /Page /MediaBox [0 0 612 792] >>
+Array [Null; Boolean true; Number (Int.negate $ Int.from_nat 7); Ref 12]
+# = [null true -7 12 0 R]
+Name "Two words#"
+# = /Two#20words#23
+Str "a (nested) \\ string"
+# = (a \(nested\) \\ string)
+Stream [△ "Length" (num 999)] "BT ET"
+# = << /Length 5 >>
+#   stream
+#   BT ET
+#   endstream
+
+_to_string = Option.to_source write
+parse "<</Type/Page/Kids[3 0 R 4 0 R]/Count 2>>"
+# = (some << /Type /Page /Kids [3 0 R 4 0 R] /Count 2 >>)
+parse "[ (Hi) <48 69 2> /A#20B -42 true null ]"
+# = (some [(Hi) (Hi ) /A#20B -42 true null])
+parse "% a comment\n  (one \\(two\\) (three)) "
+# = (some (one \(two\) \(three\)))
+parse "[1 2 R]"
+# = (some [1 0 R])
+parse "(unbalanced"
+# = none
+parse "1 2"
+# = none
+
+# Writing and reading back are inverses on everything [object] reads.
+_to_string = Bool.to_source
+_roundtrip = \s equal (parse s) (Option.map (\o Option.get_or Null $ parse $ write o) $ parse s)
+List.all _roundtrip ["<< /A [1 -2 (x\\)y)] /B#2FC << >> >>"; "<00FF>"; "[]"; "/"]
+# = true

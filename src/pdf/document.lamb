@@ -1,0 +1,168 @@
+# A PDF file (ISO 32000-1 §7.5): a header, the numbered objects, a
+# cross-reference table giving the byte at which each object starts, and a
+# trailer naming the document catalog. [document] writes one; [read] finds the
+# table from the end of a file, and [load] parses an object where it says.
+#
+# What is read is the form [document] writes: one classic table. Files edited
+# incrementally (/Prev), with cross-reference or object streams, or encrypted,
+# are not, and every generation is taken to be 0.
+
+# ── Writing ──────────────────────────────────────────────────────────────────
+_object = \n \o List.concat_list [Nat.to_string n; " 0 obj\n"; Pdf.write o; "\nendobj\n"]
+_entry = \at List.concat (String.pad_left 10 '0' $ Nat.to_string at) " 00000 n \n"
+# Where each chunk starts when the first starts at [at], then where the last ends.
+_starts = fix $ \self \at List.match [at] $ \chunk \rest △ at $ self (Nat.add at $ List.length chunk) rest
+
+# The file of [objects], numbered from 1 in order; object 1 is the catalog.
+document = \objects
+  let "%PDF-1.4\n" $ \header
+  let (List.mapi (\o \i _object (Nat.succ i) o) objects) $ \bodies
+  let (List.length objects) $ \count
+  let (_starts (List.length header) bodies) $ \starts
+  List.concat_list
+    [header; List.concat_list bodies;
+     "xref\n0 "; Nat.to_string (Nat.succ count); "\n0000000000 65535 f \n";
+     List.concat_map _entry (List.take count starts);
+     "trailer\n"; Pdf.write (Pdf.Dict [△ "Size" (Pdf.num $ Nat.succ count); △ "Root" (Pdf.Ref 1)]);
+     "\nstartxref\n"; Nat.to_string (List.head_or 0 $ List.drop count starts); "\n%%EOF\n"]
+
+# ── Reading ──────────────────────────────────────────────────────────────────
+# A file that was read: its bytes, △ number offset for each object in use, and
+# the trailer dictionary.
+Doc \= Doc bytes offsets trailer
+trailer = \doc doc $ \_ \_ \t t
+
+# Where [pattern] occurs in [l] first. The list comes first so that the
+# recursive call waits for it: reduction is eager, and [self (Nat.succ i)]
+# would otherwise unfold for ever.
+_index = \pattern fix $ \self \l \i Bool.match
+  (\l List.match Option.none (\_ \t self t $ Nat.succ i) l)
+  (\_ Option.some i)
+  (List.is_prefix pattern l) l
+# The table's offset follows the last "startxref".
+_startxref = \bytes
+  let (List.reverse "startxref") $ \key
+  Option.bind (\i Parser.value (Parser.seq_snd (Pdf.keyword "startxref") Pdf.natural) $
+                    List.drop (Nat.sub (List.length bytes) $ Nat.add i $ List.length key) bytes) $
+  _index key (List.reverse bytes) 0
+
+# A subsection is its first object number and count, then one 20-byte entry
+# per object — an offset, a generation, and n (in use) or f (free).
+_xref_entry = Parser.seq_pair Pdf.natural $ Parser.seq_snd Pdf.natural $ Parser.either (Pdf.keyword "n") (Pdf.keyword "f")
+_section = Parser.compose_dep (Parser.seq_fst Pdf.natural Pdf.natural) $ \first Parser.map
+  (\entries List.filter_map id $ List.mapi (\e \i Pair.match (\at \kind
+     Bool.match Option.none (Option.some $ △ (Nat.add first i) at) $ equal kind "n") e) entries)
+  (Parser.many _xref_entry)
+_xref = Parser.seq_snd (Pdf.keyword "xref") $ Parser.seq_pair
+  (Parser.map List.concat_list $ Parser.many _section)
+  (Parser.seq_snd (Pdf.keyword "trailer") Pdf.object)
+
+read = \bytes Option.bind (\at Option.map (Pair.match $ Doc bytes) $ Parser.value _xref $ List.drop at bytes) $ _startxref bytes
+
+# "n 0 obj", the object, and if it is a stream's dictionary, the stream's bytes:
+# /Length of them, after the end of the line that says "stream".
+_eol = Parser.seq_snd (Parser.either (Parser.exact 13) (Parser.return 13)) (Parser.exact 10)
+_data = \resolve \o \input
+  let (Option.get_or 0 $ Option.map Int.to_nat $ Option.bind (compose Pdf.as_number resolve) $ Pdf.get "Length" o) $ \n
+  Parser.seq_fst
+    (Parser.return $ Pdf.Stream (Option.get_or [] $ Pdf.as_dict o) $ List.take n input)
+    (Pdf.keyword "endstream")
+    (List.drop n input)
+_indirect = \resolve Parser.seq_snd (Parser.seq_snd Pdf.natural $ Parser.seq_snd Pdf.natural $ Pdf.keyword "obj") $
+  Parser.compose_dep Pdf.object $ \o Parser.seq_fst
+    (Parser.either (Parser.seq_snd (Pdf.keyword "stream") $ Parser.seq_snd _eol $ _data resolve o) (Parser.return o))
+    (Pdf.keyword "endobj")
+
+# Object [n], parsed where the table says it starts. A reference that
+# /Length makes is resolved on the way; the number comes first for the reason
+# [_index]'s list does.
+_load = fix $ \self \n \doc doc $ \bytes \offsets \_
+  let (\o Option.match o (\m Option.get_or Pdf.Null $ self m doc) $ Pdf.as_ref o) $ \resolve
+  Option.bind (\at Parser.value (_indirect resolve) $ List.drop at bytes) $ List.lookup n offsets
+load = \doc \n _load n doc
+
+# What an object stands for: the object a reference names (null if there is
+# none, as §7.3.10 says), else the object itself.
+resolve = \doc \o Option.match o (\n Option.get_or Pdf.Null $ load doc n) $ Pdf.as_ref o
+# The entry [key] of a dictionary, resolved.
+follow = \doc \key \o Option.map (resolve doc) $ Pdf.get key o
+
+# ── Tests ────────────────────────────────────────────────────────────────────
+# A one-page document saying hello: catalog, page tree, page, font, and the
+# content stream that draws the text.
+_hello = [
+  Pdf.Dict [△ "Type" (Pdf.Name "Catalog"); △ "Pages" (Pdf.Ref 2)];
+  Pdf.Dict [△ "Type" (Pdf.Name "Pages"); △ "Kids" (Pdf.Array [Pdf.Ref 3]); △ "Count" (Pdf.num 1)];
+  Pdf.Dict [△ "Type" (Pdf.Name "Page"); △ "Parent" (Pdf.Ref 2);
+            △ "MediaBox" (Pdf.Array $ List.map Pdf.num [0; 0; 320; 100]);
+            △ "Resources" (Pdf.Dict [△ "Font" $ Pdf.Dict [△ "F1" (Pdf.Ref 4)]]);
+            △ "Contents" (Pdf.Ref 5)];
+  Pdf.Dict [△ "Type" (Pdf.Name "Font"); △ "Subtype" (Pdf.Name "Type1"); △ "BaseFont" (Pdf.Name "Helvetica")];
+  Pdf.Stream [] "BT /F1 24 Tf 30 40 Td (Hello, tree calculus!) Tj ET"]
+
+# The file, which any PDF viewer opens:
+file "hello.pdf" "application/pdf" $ document _hello
+# = hello.pdf application/pdf 595 bytes sha256:03aaaad5067f2210a9e2084a125989fced5d9e7b485e4c3a8fbd956911340d49
+
+# and its text, every byte of it:
+_to_string = id
+document _hello
+# = %PDF-1.4
+#   1 0 obj
+#   << /Type /Catalog /Pages 2 0 R >>
+#   endobj
+#   2 0 obj
+#   << /Type /Pages /Kids [3 0 R] /Count 1 >>
+#   endobj
+#   3 0 obj
+#   << /Type /Page /Parent 2 0 R /MediaBox [0 0 320 100] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+#   endobj
+#   4 0 obj
+#   << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+#   endobj
+#   5 0 obj
+#   << /Length 51 >>
+#   stream
+#   BT /F1 24 Tf 30 40 Td (Hello, tree calculus!) Tj ET
+#   endstream
+#   endobj
+#   xref
+#   0 6
+#   0000000000 65535 f 
+#   0000000009 00000 n 
+#   0000000058 00000 n 
+#   0000000115 00000 n 
+#   0000000241 00000 n 
+#   0000000311 00000 n 
+#   trailer
+#   << /Size 6 /Root 1 0 R >>
+#   startxref
+#   412
+#   %%EOF
+
+# Reading it back starts at the end, with the trailer.
+_doc = read $ document _hello
+_to_string = Option.to_source Pdf.write
+Option.map trailer _doc
+# = (some << /Size 6 /Root 1 0 R >>)
+Option.bind (\d load d 3) _doc
+# = (some << /Type /Page /Parent 2 0 R /MediaBox [0 0 320 100] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>)
+# Anything else is not read at all.
+Option.map trailer $ read "%PDF-1.4\nnot really\n%%EOF\n"
+# = none
+
+# From the trailer to the catalog, the page tree, its first page, and what that
+# page draws.
+_contents = \d
+  let (follow d "Root" $ trailer d) $ \catalog
+  let (Option.bind Pdf.as_array $ Option.bind (follow d "Kids") $ Option.bind (follow d "Pages") catalog) $ \kids
+  let (Option.bind (compose (Option.map $ resolve d) List.head) kids) $ \page
+  Option.bind (follow d "Contents") page
+_to_string = Option.to_source id
+Option.bind Pdf.as_data $ Option.bind _contents _doc
+# = (some BT /F1 24 Tf 30 40 Td (Hello, tree calculus!) Tj ET)
+
+# Every object read back and written again makes the same file, byte for byte.
+_to_string = Bool.to_source
+equal (Option.some $ document _hello) $ Option.map (\d document $ List.map (\n Option.get_or Pdf.Null $ load d n) [1; 2; 3; 4; 5]) _doc
+# = true
