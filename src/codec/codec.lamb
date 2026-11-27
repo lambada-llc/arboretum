@@ -45,6 +45,12 @@ defer = \d \p \u (\q d q u) p
 # decoder being most of what it costs.
 shrink = \c \t smaller t (defer (decode c) (encode c t))
 
+# [sizes c t]: what the codec c makes of t, as the sizes of t, of its code,
+# and of what [shrink] keeps; [] if the code does not decode back to t. A
+# codec's tests list it for trees of every size, one test a tree so that the
+# largest is encoded once.
+sizes = \c \t let (encode c t) $ \code Bool.match [] [size t; size code; size (shrink c t)] (equal (decode c code) t)
+
 # The identity codec keeps the laws honest without an encoding in the way: what
 # a codec and a deferral have to do is the same whether or not anything shrinks.
 _id = create id id

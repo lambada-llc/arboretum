@@ -560,14 +560,12 @@ List.all (\t equal (decode (encode t)) t) [△; △ △; △ △ △; △ (△ �
 # What it costs to carry: the decoder, then, for trees from eight nodes to
 # 2.4·10¹¹, programs and data, the tree → its code → what [Codec.shrink] keeps,
 # which is the code and the decoder under [Codec.defer], or the tree itself
-# where that is not smaller. A row is empty if the code does not decode back to
-# the tree; it is one test with the sizes so that the largest tree is encoded
-# once.
+# where that is not smaller ([Codec.sizes]).
 _to_string = Nat.to_source
 size decode
 # = 905
 _to_string = \l List.join " → " $ List.map Nat.to_string l
-_sizes = \t let (encode t) $ \c Bool.match [] [Codec.size t; Codec.size c; Codec.size (Codec.shrink codec t)] (equal (decode c) t)
+_sizes = Codec.sizes codec
 _sizes Bool.not
 # = 8 → 10 → 8
 _sizes List.map
