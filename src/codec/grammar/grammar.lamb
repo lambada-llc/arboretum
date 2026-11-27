@@ -504,22 +504,33 @@ _emit = \key fix $ \self triage
     (\y \v \r Bool.match (\v △ (△ (△ (△ (key y) v)) (self r))) (\v △ (△ (△ (△ (△ (key y) v))) (self r))) (_ctx y) (self v))
     l r)
 
-encode = \t Pair.let (_chains t) $ \top \body
+# [_grammar t ret] is [ret start fx fb isdef order]: t written over the entries
+# kept, what an entry stands for written out as a node (fx) or as a context
+# with its hole (fb), which nodes are bound, and the entries, users first.
+_grammar = \t \ret Pair.let (_chains t) $ \top \body
   let (_choose body top) $ \keep
   let (\k _expand body keep (body k) (△ △ △)) $ \fb
   let (\x _expand body keep (body x) △) $ \fx
   let (_expand body keep top △) $ \start
   Pair.let (_walk (\k Bool.match (fx k) (fb k) (_ctx k)) (_uses start △) (△ △ (△ △ △))) $ \cnt \r Pair.let r $ \_ \order
   let (List.reverse order) $ \up
-  let (List.filter _ctx order) $ \ctxs
-  let (List.filter (\k Bool.not (_ctx k)) order) $ \nodes
   # Binding nodes, callees first: one written m times at cost c is bound when
   # that saves more than the binding and its uses cost.
   Pair.let (List.foldl (\st \x Pair.let st $ \isdef \cost Bool.match (\isdef \cost
       let (_icost isdef cost (fx x)) $ \c let (_get x cnt) $ \m
       Bool.match (\c \isdef \cost △ isdef (_put x c cost)) (\c \isdef \cost △ (_put x true isdef) (_put x 4 cost))
         (Nat.is_lt (Nat.add (Nat.mul 4 m) 8) (Nat.mul (Nat.sub m 1) c)) c isdef cost) (\isdef \cost st) (_ctx x) isdef cost) (△ △ △) up) $ \isdef \_
-  let (List.filter (\x _some (_get x isdef)) nodes) $ \defs
+  ret start fx fb isdef order
+
+# [grammar t] is △ main def, for another serialization of the same grammar:
+# main is t as a skeleton of [_plain], and [def y] the skeleton of what the
+# entry y that main or a skeleton names stands for, a context's with its hole.
+grammar = \t _grammar t $ \start \fx \fb \isdef \_ let (_plain isdef fx) $ \pl
+  △ (pl start) (\y pl (Bool.match (fx y) (fb y) (_ctx y)))
+
+encode = \t _grammar t $ \start \fx \fb \isdef \order
+  let (List.filter _ctx order) $ \ctxs
+  let (List.filter (\x Bool.and (Bool.not (_ctx x)) (_some (_get x isdef))) order) $ \defs
   let (_sites isdef fx) $ \sites
   # Each context's closure: itself and, through its body, what it names.
   let (List.foldl (\m \k _put k (_set (△ k (List.concat_map (\s Bool.match [s] (Pair.snd (Pair.snd (_get s m))) (_ctx s)) (sites (fb k) △)))) m) △ (List.reverse ctxs)) $ \cl
