@@ -1,10 +1,11 @@
 # Making a tree smaller, and getting it back.
 #
 # A codec is an [encode] and a [decode] over trees, held as `△ encode decode`,
-# with `decode (encode t) = t` for every tree. [Codec.Grammar] and [Codec.Term]
-# are the two here, and each exports its pair as `codec`. They find different
-# redundancy and neither wins everywhere, so which to reach for is the caller's
-# choice; their own tests carry the sizes.
+# with `decode (encode t) = t` for every tree. [Codec.Grammar], [Codec.Huffman]
+# and [Codec.Term] are the three here, and each exports its pair as `codec`.
+# They find different redundancy, or write it at a different cost, and none
+# wins everywhere, so which to reach for is the caller's choice
+# ([Codec.shrink_best] tries them all); their own tests carry the sizes.
 #
 # There are two strengths of result, and the difference is not stylistic.
 #

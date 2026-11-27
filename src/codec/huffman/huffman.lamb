@@ -1,0 +1,247 @@
+# The grammar codec's grammar, written as a stream of prefix codes.
+#
+# [Codec.Grammar.grammar] is a tree's grammar: the tree, with the subtrees and
+# one-hole contexts it repeats written once and referred to. [Codec.Grammar]
+# writes that grammar as a code that is read through a trie of keys; this codec
+# writes the same grammar as tokens, coded the way a compressor would:
+#
+# - The tree, and what each binding stands for, in preorder, a token a node: L
+#   the leaf, S a stem, F a fork, H a context's hole, R a bound node, C a use of
+#   a context (followed by what fills it), and a binding of a node or of a
+#   context (followed by its body, and then by the token it was bound for).
+# - Each token is coded in the table of its slot, what it is written as: a
+#   fork's left or right, a stem's child, a binding's body, a context's filling,
+#   or what follows a binding. A table is a ternary Huffman code, sent with the
+#   payload, so its cost is paid once per tree and its codes fit that tree.
+# - A reference names its binding by recency: the rank is how many bindings of
+#   the same kind were made since, its digits (bijective base 3) follow the
+#   token, and the token is R or C with the number of digits, so that small
+#   ranks are cheap where they are common. A binding is made right before its
+#   first use, which is where recency ranks come out smallest.
+# - The trits go into a carrier: a list of trees read in preorder, leaf, stem
+#   and fork being trits 0, 1 and 2, so that a trit is a node and the reader
+#   needs no arithmetic. A tree has one leaf more than it has forks, so zeros
+#   in excess of twos cost a tree each and twos in excess a padding leaf; the
+#   encoder orders each table node's children so that the two nearly balance.
+#
+# A payload is △ (△ chain △) carrier, chain holding the six tables.
+
+# ── Decoding ────────────────────────────────────────────────────────────────
+# The tables are converted once into trees that read themselves: a table node
+# applied to the carrier's current tree t and the rest r takes one trit, and an
+# entry, reached that way, gets t and r where the code ends. Reading is then
+# applying, with no separate bit reader: a leaf moves on to the next tree of r,
+# a stem to its child, and a fork △ u v to u, with v put in front of r.
+_then = \z \v \r z (△ v r)
+# Slots are chains of stems: the six tables and the digit table hang in a trie
+# of the same nodes (_tables makes it from the chain), and a slot is the path
+# to its table, one stem further along for each. g is the digits, l and r a
+# fork's children, v a binding's body, s a stem's child, d what follows a
+# binding, h a context's filling.
+_sg = △ △
+_sl = △ _sg
+_sr = △ _sl
+_sv = △ _sr
+_ss = △ _sv
+_sd = △ _ss
+_sh = △ _sd
+# Handlers do not see the state: a handler gets the continuation k only and
+# returns a request, △ slot k to read a token in slot and hand its value to k,
+# or △ f to have f run with the state d and the carrier c, as f run d c. The
+# state, △ trie (△ nodes contexts), is touched by [_run] and by the two
+# handlers that need it only; passing it to every handler made the decoder
+# about 300 nodes larger and twice as slow.
+_run = fix $ \run \q triage _ (\f f run) (\slot \k \d \c Pair.fst d slot c d k) q
+_entry = \h \t \r \d \k _run (h k) d (△ t r)
+# A value is a function of what fills the hole: the leaf is const △, the hole
+# id, a stem or a fork the composition of its children, so that a use of a
+# context is one application and nothing is ever substituted.
+_leaf = \k k (△ △ △)
+_hole = \k k (△ (△ (△ △)) (△ △))
+_stem = \k △ _ss (\a k (△ (△ (△ △ △)) a))
+_fork = \k △ _sl (\a △ _sr (\b k (△ (△ (△ (△ (△ △ △)) a)) b)))
+_digit = \s \k k s
+# Bindings of each kind are a ternary Braun tree, △ value (△ k0 (△ k1 k2)),
+# a new one going in at the root, so that rank r is at the path of r's digits.
+# The digit table's entries are the selectors of the children.
+_look = fix $ \look \n triage (\k \b k (Pair.fst b)) (\n \k \b △ _sg (\s look n k (s (Pair.snd b)))) _ n
+# A reference: w is the kind, const for a node and const id for a context, whose
+# value is then composed with what fills it, read in slot h.
+_ref = \w \n \k △ (\run \d run (_look n (w (△ (△ △ △) △) (\k \f △ _sh (\x k (△ (△ (△ △ f)) x))) k) (triage △ △ (\_ triage △ △ w) d)) d)
+_push = fix $ \push \b triage (\v △ v △) _ (\x \kids \v △ v (△ (push (Pair.snd (Pair.snd kids)) x) (△ (Pair.fst kids) (Pair.fst (Pair.snd kids))))) b
+# A node is kept as the constant of its tree, so that it is built once; a
+# context as the function it is.
+_inT = \f triage △ △ (\x △ (f x))
+_inC = \f triage △ △ (\x \y △ x (f y))
+_keep = \v △ △ (v △)
+_bind = \in \as \k △ _sv (\v △ (\run \d run (△ _sd k) (triage △ △ (\ct \bb △ ct (in (\b _push b (as v)) bb)) d)))
+# The symbols are the trees the encoder writes in the tables' entries; one
+# no table holds, two stems over a fork, is the entry that starts decoding.
+_handler = \s triage _leaf (\u triage _stem (\u triage _fork (\_ _hole) (\_ \_ △ _sd) u) (\a \b triage (_digit b) (\_ _bind (triage _inT (\_ _inC) _ b) (triage _keep (\_ (△ (△ △ △) △)) _ b)) _ a) u) (\a \n _ref (triage (△ △) (\_ △ △ (△ (△ △ △) △)) _ a) n) s
+# A table node △ c0 (△ c1 c2) becomes a triage on the carrier's tree whose
+# leaf case is a triage on the rest, so that a leaf goes on to c0 with the
+# rest's first tree, and whose fork case is [_then] after c2.
+_tables = fix $ \tables \n triage △ (\s _entry (_handler s)) (\a \bc △ (△ (△ (△ △ △) (tables a)) (tables (Pair.fst bc))) (△ (△ (△ △ _then)) (tables (Pair.snd bc)))) n
+_digit_table = △ (△ (△ (△ △ Pair.fst))) (△ (△ (△ (△ △ (triage △ △ (\_ Pair.fst))))) (△ (△ (△ △ (triage △ △ (\_ Pair.snd))))))
+# The trie is a table too: at the empty path, the entry that reads in slot d,
+# which starts the decoding ([_run] could not without being in the tree
+# twice); below it the digit table, and then the chain.
+decode = triage △ △ (\a \b (\ct ct △ b (△ ct (△ △ △)) (\v △ (\_ \_ \_ v △))) (_tables (△ (△ (△ (△ (△ △ △)))) (△ (△ _digit_table a) △))))
+
+# ── Encoding ────────────────────────────────────────────────────────────────
+# The grammar is Codec.Grammar's, as skeletons ([Codec.Grammar.grammar]); what
+# is done here is linear in the code written, as the grammar's own encoder is,
+# so it never walks the tree the grammar stands for.
+
+_t0 = △
+_t1 = △ △
+_t2 = △ △ △
+_get = Map.pmap_get
+_put = Map.pmap_set
+# The symbols, as the decoder's entries take them. A binding's and a
+# reference's symbol carry their kind, △ for a node and △ △ for a context.
+_L = △
+_S = △ △
+_F = △ _S
+_H = △ _F
+_binder = \kind △ (△ _S kind)
+_reference = \kind \digits △ kind (List.foldr (\_ \c △ c) △ digits)
+# Rank r in bijective base 3, least digit first: the path to it in the
+# decoder's Braun tree.
+_bijective = fix $ \self \r Nat.match [] (\p Pair.let (Nat.divmod p 3) $ \q \m △ (Nat.match _t0 (Nat.match _t1 (\_ _t2)) m) (self q)) r
+
+# [_tokens def main] is the token stream, newest first, a token being
+# △ slot (△ symbol digits). The state is △ tokens (△ bound counts): bound maps
+# an entry to △ its place among those of its kind, counts is △ nodes contexts.
+_write = \slot \sym \dg \st Pair.let st $ \ts \r △ (△ (△ slot (△ sym dg)) ts) r
+_count = \kind triage Pair.fst (\_ Pair.snd) _ kind
+_bump = \kind \n Pair.let n $ \a \b triage (△ (Nat.succ a) b) (\_ △ a (Nat.succ b)) _ kind
+# Every branch takes what it uses as arguments: evaluation is eager, and a
+# branch with a free variable would be worked out whether taken or not — one
+# taking the right of a fork as an entry decoded a tree that is not there.
+_tokens = \def \main Pair.fst ((fix $ \self \x \slot \st
+  # A reference to y: bound first if this is its first use, its binding then
+  # standing in y's slot and the reference, at rank 0, in slot d.
+  let (\kind \y \slot \st Pair.let (Pair.snd st) $ \bound \n triage
+      (\y \slot \st let (self (def y) _sv (_write slot (_binder kind) [] st)) $ \st
+        Pair.let st $ \ts \r Pair.let r $ \bound \n
+        _write _sd (_reference kind []) [] (△ ts (△ (_put y (△ (_count kind n)) bound) (_bump kind n))))
+      (\i \y \slot \st let (_bijective (Nat.sub (Nat.pred (_count kind n)) i)) $ \dg _write slot (_reference kind dg) dg st)
+      _ (_get y bound) y slot st) $ \ref
+  triage
+    (\slot \st _write slot _L [] st)
+    (\u \slot \st triage
+      (\slot \st _write slot _H [] st)
+      (\c \slot \st self c _ss (_write slot _S [] st))
+      (\k \a \slot \st self a _sh (ref _S k slot st))
+      u slot st)
+    (\p \q \slot \st triage
+      (\q \slot \st ref _L q slot st)
+      (\a \q \slot \st self q _sr (self a _sl (_write slot _F [] st)))
+      _ p q slot st)
+    x slot st) main _sd (△ [] (△ △ (△ 0 0))))
+
+# A code tree is △ weight t, t △ where unused, △ symbol for an entry, and
+# △ c0 (△ c1 c2) for a node: the table's own layout, with weights.
+_huffman = fix $ \self \ws List.match (△ 0 △)
+  (\a \r List.match a (\b \r List.match b (\c \r self (△ (△ (Nat.add (Pair.fst a) (Nat.add (Pair.fst b) (Pair.fst c))) (△ a (△ b c))) r)) r) r)
+  (List.sort (\a \b Nat.is_lte (Pair.fst a) (Pair.fst b)) ws)
+# Merging three at a time ends on one tree only from an odd count.
+_leaves = \ws Bool.match ws (△ (△ 0 △) ws) (List.foldl (\e \_ Bool.not e) true ws)
+_unweigh = fix $ \self \w triage △ (\s △ s) (\a \bc △ (self a) (△ (self (Pair.fst bc)) (self (Pair.snd bc)))) (Pair.snd w)
+
+# Balancing: each node's children are put in the order that brings the
+# stream's count of zeros and of twos closest, heaviest nodes first, the
+# others counted as they are. A node is △ path (△ w0 (△ w1 w2)), path its
+# place, and a choice is one of the orders, as a function of the children.
+_nodes = fix $ \self \w \path \acc triage acc (\_ acc) (\a \bc Pair.let bc $ \b \c
+    △ (△ path (△ (Pair.fst a) (△ (Pair.fst b) (Pair.fst c)))) (self a (△ _t0 path) (self b (△ _t1 path) (self c (△ _t2 path) acc)))) (Pair.snd w)
+_orders = [\a \b \c △ a (△ b c); \a \b \c △ a (△ c b); \a \b \c △ b (△ a c); \a \b \c △ b (△ c a); \a \b \c △ c (△ a b); \a \b \c △ c (△ b a)]
+_dist = \a \b Bool.match (Nat.sub b a) (Nat.sub a b) (Nat.is_lte b a)
+_weight = \u Pair.let u $ \u0 \r Nat.add u0 (Nat.add (Pair.fst r) (Pair.snd r))
+_sum = \f List.foldl (\n \nd Nat.add n (f (Pair.snd nd)))
+_balance = \zeros \twos \nodes Pair.snd (Pair.snd (List.foldl (\st \nd Pair.let st $ \a \r Pair.let r $ \b \choice Pair.let nd $ \path \u Pair.let u $ \u0 \r Pair.let r $ \u1 \u2
+    let (Nat.sub a u0) $ \a let (Nat.sub b u2) $ \b
+    let (\f Pair.let (f u0 u1 u2) $ \x \r _dist (Nat.add a x) (Nat.add b (Pair.snd r))) $ \cost
+    let (List.foldl (\f \g Bool.match f g (Nat.is_lt (cost g) (cost f))) (List.head_or △ _orders) _orders) $ \f
+    Pair.let (f u0 u1 u2) $ \x \r △ (Nat.add a x) (△ (Nat.add b (Pair.snd r)) (_put path f choice)))
+  (△ (_sum Pair.fst zeros nodes) (△ (_sum (\u Pair.snd (Pair.snd u)) twos nodes) △))
+  (List.sort (\x \y Nat.is_lte (_weight (Pair.snd y)) (_weight (Pair.snd x))) nodes)))
+_reorder = \choice fix $ \self \w \path Pair.let w $ \n \t triage w (\_ w) (\a \bc Pair.let bc $ \b \c
+    △ n (_get path choice (self a (△ _t0 path)) (self b (△ _t1 path)) (self c (△ _t2 path)))) t
+# Codes, by △ slot symbol: the path to the symbol's entry, root first.
+_codes = \slot fix $ \self \w \path \m triage m (\sym _put (△ slot sym) (List.reverse path) m)
+    (\a \bc self a (△ _t0 path) (self (Pair.fst bc) (△ _t1 path) (self (Pair.snd bc) (△ _t2 path) m))) (Pair.snd w)
+
+# The carrier: trees read off the trits in preorder, the last one padded with
+# leaves. The decoder moves on to the next tree after every leaf, so a stream
+# that fills its last tree exactly needs one more: the zero the stream is
+# given at its end makes it, and is padding otherwise.
+_tree = fix $ \self \ts List.match (△ △ []) (\d \rest triage (\rest △ △ rest)
+    (\_ \rest Pair.let (self rest) $ \c \r △ (△ c) r)
+    (\_ \_ \rest Pair.let (self rest) $ \a \r Pair.let (self r) $ \b \r △ (△ a b) r) d rest) ts
+_carrier = fix $ \self List.match △ (\h \t Pair.let (_tree (△ h t)) $ \t \r △ t (self r))
+_ntrit = \d List.foldl (\n \e Bool.match n (Nat.succ n) (equal e d)) 0
+
+encode = \t Pair.let (Codec.Grammar.grammar t) $ \main \def
+  let (_tokens def main) $ \toks
+  # How often each symbol is written in each slot: m by △ slot symbol, keys
+  # the ones written.
+  Pair.let (List.foldl (\acc \tok Pair.let acc $ \m \keys Pair.let tok $ \slot \r let (△ slot (Pair.fst r)) $ \key
+      triage (\m \keys △ (_put key (△ 1) m) (△ key keys)) (\n \m \keys △ (_put key (△ (Nat.succ n)) m) keys) _ (_get key m) m keys) (△ △ []) toks) $ \m \keys
+  let (List.map (\s △ s (_huffman (_leaves (List.filter_map (\key Pair.let key $ \sl \sym
+      Bool.match △ (△ (△ (triage △ (\n n) _ (_get key m)) (△ sym))) (equal sl s)) keys)))) [_sl; _sr; _sv; _ss; _sd; _sh]) $ \tables
+  let (List.foldr (\p \acc Pair.let p $ \s \w _nodes w (△ s △) acc) [] tables) $ \nodes
+  let (List.concat_map (\tok Pair.snd (Pair.snd tok)) toks) $ \digits
+  let (_balance (_ntrit _t0 digits) (_ntrit _t2 digits) nodes) $ \choice
+  let (List.map (\p Pair.let p $ \s \w △ s (_reorder choice w (△ s △))) tables) $ \tables
+  let (List.foldl (\m \p Pair.let p $ \s \w _codes s w [] m) △ tables) $ \codes
+  let (List.foldl (\acc \tok Pair.let tok $ \slot \r Pair.let r $ \sym \dg List.concat (_get (△ slot sym) codes) (List.concat dg acc)) [_t0] toks) $ \stream
+  △ (△ (List.foldr (\p \ch △ (_unweigh (Pair.snd p)) (△ ch △)) △ tables) △) (_carrier stream)
+codec = Codec.create encode decode
+
+_to_string = Bool.to_source
+List.all (\t equal (decode (encode t)) t) [△; △ △; △ △ △; △ (△ △) (△ △); true; false; fix; Nat.add; Codec.size; "hello hello hello hello"]
+# = true
+
+# What it costs to carry: the decoder, then, for trees from eight nodes to
+# 2.4·10¹¹, programs and data, the tree → its code → what [Codec.shrink] keeps
+# ([Codec.sizes]). Against [Codec.Grammar], whose grammar this is, the code is
+# 4% to 48% smaller wherever that one's is over two thousand nodes (16% on
+# Lambada.compile), and can be larger below, where the tables are much of it;
+# the decoder is 1,253 nodes larger, so that Codec.Grammar keeps the smaller
+# result up to a code of roughly ten thousand nodes. [Codec.shrink_best] tries
+# both.
+_to_string = Nat.to_source
+size decode
+# = 2158
+_to_string = \l List.join " → " $ List.map Nat.to_string l
+_sizes = Codec.sizes codec
+_sizes Bool.not
+# = 8 → 62 → 8
+_sizes List.map
+# = 130 → 227 → 130
+_sizes Nat.to_source
+# = 4502 → 2161 → 4331
+_sizes Lambada.prelude
+# = 9813 → 1417 → 3587
+_sizes Image.Png.crc_table
+# = 15153 → 4768 → 6938
+_sizes Pico.Matrix.Selfie.portrait
+# = 50835 → 13065 → 15235
+_sizes Lambada.parse_expr
+# = 491776 → 3410 → 5580
+_sizes Lambada.compile
+# = 240506188491 → 128530 → 130700
+
+# What it costs to decode, on an evaluator that remembers nothing.
+_to_string = id
+Bench.run [decode; encode List.map]
+# =  oh |   0a   0b    1     2  3a  3b  3c |   alc   red
+#   355 | 4379 6532 9952 10196 194 461 664 | 10911 21467
+Bench.run [decode; encode Nat.to_source]
+# =   oh |    0a    0b      1      2   3a   3b   3c |    alc    red
+#   4941 | 48476 72843 112797 113701 2171 4856 8884 | 121319 242409
+Bench.run [decode; encode Lambada.parse_expr]
+# =   oh |    0a     0b      1      2   3a   3b    3c |    alc    red
+#   9349 | 81069 121951 190076 190245 3463 7120 16068 | 203020 406972
